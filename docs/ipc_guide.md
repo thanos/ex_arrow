@@ -52,7 +52,7 @@ Open an IPC file (from path or in-memory binary) for random access:
 Then read schema, batch count, and any batch by index:
 
 ```elixir
-schema = ExArrow.IPC.File.schema(file)
+{:ok, schema} = ExArrow.IPC.File.schema(file)
 fields = ExArrow.Schema.fields(schema)
 
 n = ExArrow.IPC.File.batch_count(file)
@@ -61,6 +61,8 @@ n = ExArrow.IPC.File.batch_count(file)
 {:ok, batch} = ExArrow.IPC.File.get_batch(file, 0)
 rows = ExArrow.RecordBatch.num_rows(batch)
 ```
+
+`schema/1` returns `{:error, message}` if the file handle is invalid (e.g. poisoned lock).
 
 File format uses an Arrow footer; stream format does not. Use file format when you need random access or to know the batch count without reading all batches.
 

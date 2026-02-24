@@ -37,11 +37,14 @@ defmodule ExArrow.IPC.File do
 
   @doc """
   Returns the schema of the IPC file as an `ExArrow.Schema` handle.
+  Returns `{:error, message}` if the file handle is invalid (e.g. poisoned lock).
   """
-  @spec schema(t()) :: Schema.t()
+  @spec schema(t()) :: {:ok, Schema.t()} | {:error, String.t()}
   def schema(%__MODULE__{resource: ref}) do
-    schema_ref = Native.ipc_file_schema(ref)
-    %Schema{resource: schema_ref}
+    case Native.ipc_file_schema(ref) do
+      {:error, _} = err -> err
+      schema_ref -> {:ok, %Schema{resource: schema_ref}}
+    end
   end
 
   @doc """

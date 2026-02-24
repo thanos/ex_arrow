@@ -105,8 +105,7 @@ defmodule ExArrowTest do
       assert is_binary(binary) and byte_size(binary) > 0
 
       assert {:ok, file} = ExArrow.IPC.File.from_binary(binary)
-      schema = ExArrow.IPC.File.schema(file)
-      assert %ExArrow.Schema{} = schema
+      assert {:ok, schema} = ExArrow.IPC.File.schema(file)
       fields = ExArrow.Schema.fields(schema)
       assert length(fields) == 2
       assert Enum.any?(fields, fn f -> f.name == "id" and f.type == :int64 end)
@@ -140,7 +139,7 @@ defmodule ExArrowTest do
         assert ExArrow.IPC.File.batch_count(file) == 1
         assert {:ok, read_batch} = ExArrow.IPC.File.get_batch(file, 0)
         assert ExArrow.RecordBatch.num_rows(read_batch) == 2
-        read_schema = ExArrow.IPC.File.schema(file)
+        assert {:ok, read_schema} = ExArrow.IPC.File.schema(file)
         assert length(ExArrow.Schema.fields(read_schema)) == 2
       after
         if File.exists?(path), do: File.rm(path)
