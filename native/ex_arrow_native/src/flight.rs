@@ -37,12 +37,16 @@ rustler::atoms! {
 /// Encode a `&[u8]` slice as an Elixir **binary** (not a charlist).
 ///
 /// Rustler encodes `Vec<u8>` as a list of integers, which the BEAM may display
-/// as a charlist when all bytes are printable ASCII. Using `OwnedBinary` forces
+/// as a charlist when all bytes are printable ASCII.  Using `OwnedBinary` forces
 /// the result to be a proper binary regardless of content.
-fn encode_binary<'a>(env: Env<'a>, data: &[u8]) -> Term<'a> {
-    let mut owned = rustler::OwnedBinary::new(data.len()).unwrap();
+///
+/// Returns `None` if the BEAM allocator cannot fulfil the allocation.  Callers
+/// must propagate the failure rather than panicking; on OOM the BEAM is already
+/// in a bad state and returning `{:error, ...}` is the least harmful option.
+fn try_encode_binary<'a>(env: Env<'a>, data: &[u8]) -> Option<Term<'a>> {
+    let mut owned = rustler::OwnedBinary::new(data.len())?;
     owned.as_mut_slice().copy_from_slice(data);
-    owned.release(env).encode(env)
+    Some(owned.release(env).encode(env))
 }
 
 const ECHO_TICKET: &[u8] = b"echo";
@@ -99,28 +103,50 @@ fn decode_descriptor<'a>(term: Term<'a>) -> Result<FlightDescriptor, String> {
     }
 }
 
-/// Encode a `FlightDescriptor` as an Elixir term (`{:cmd, binary()}` or
-/// `{:path, [string]}`, or `:nil` when absent).
-fn encode_descriptor<'a>(env: Env<'a>, desc: Option<&FlightDescriptor>) -> Term<'a> {
-    match desc {
-        None => rustler::types::atom::Atom::from_str(env, "nil")
+/// Encode a `FlightDescriptor` as an Elixir term.
+///
+/// | Wire type | Elixir result             |
+/// |-----------|---------------------------|
+/// | CMD  (2)  | `{:cmd, binary()}`        |
+/// | PATH (1)  | `{:path, [String.t()]}`   |
+/// | None      | `:nil`                    |
+/// | unknown   | `:nil` (not silently mis-encoded as PATH) |
+///
+/// Returns `None` if binary allocation fails for a CMD payload.
+fn encode_descriptor<'a>(env: Env<'a>, desc: Option<&FlightDescriptor>) -> Option<Term<'a>> {
+    let nil_term = || {
+        rustler::types::atom::Atom::from_str(env, "nil")
             .unwrap()
-            .encode(env),
+            .encode(env)
+    };
+    match desc {
+        None => Some(nil_term()),
         Some(d) if d.r#type == DESCRIPTOR_CMD => {
-            rustler::types::tuple::make_tuple(
+            let cmd_term = try_encode_binary(env, &d.cmd)?;
+            Some(rustler::types::tuple::make_tuple(
                 env,
-                &[cmd().encode(env), encode_binary(env, &d.cmd)],
-            )
+                &[cmd().encode(env), cmd_term],
+            ))
         }
-        Some(d) => (path(), d.path.clone()).encode(env),
+        Some(d) if d.r#type == DESCRIPTOR_PATH => {
+            Some((path(), d.path.clone()).encode(env))
+        }
+        Some(_) => {
+            // Unknown/unsupported descriptor type returned by a non-echo server.
+            // Emit :nil rather than silently mis-encoding the value as a PATH.
+            Some(nil_term())
+        }
     }
 }
 
 /// Encode a `FlightInfo` as the 5-tuple expected by `ExArrow.Flight.FlightInfo.from_native/1`.
-fn encode_flight_info<'a>(env: Env<'a>, info: &FlightInfo) -> Term<'a> {
-    let schema_bytes = encode_binary(env, &info.schema);
-    let descriptor = encode_descriptor(env, info.flight_descriptor.as_ref());
-    let endpoints: Vec<Term<'a>> = info
+///
+/// Returns `None` if any BEAM binary allocation fails.  Callers must surface
+/// the failure as `{:error, ...}` rather than propagating a partial term.
+fn encode_flight_info<'a>(env: Env<'a>, info: &FlightInfo) -> Option<Term<'a>> {
+    let schema_bytes = try_encode_binary(env, &info.schema)?;
+    let descriptor = encode_descriptor(env, info.flight_descriptor.as_ref())?;
+    let endpoints: Option<Vec<Term<'a>>> = info
         .endpoint
         .iter()
         .map(|ep| {
@@ -129,15 +155,16 @@ fn encode_flight_info<'a>(env: Env<'a>, info: &FlightInfo) -> Term<'a> {
                 .as_ref()
                 .map(|t| t.ticket.as_ref())
                 .unwrap_or_default();
-            let ticket_term = encode_binary(env, ticket_bytes);
+            let ticket_term = try_encode_binary(env, ticket_bytes)?;
             let locations: Vec<String> = ep.location.iter().map(|l| l.uri.clone()).collect();
-            rustler::types::tuple::make_tuple(
+            Some(rustler::types::tuple::make_tuple(
                 env,
                 &[ticket_term, locations.encode(env)],
-            )
+            ))
         })
         .collect();
-    rustler::types::tuple::make_tuple(
+    let endpoints = endpoints?;
+    Some(rustler::types::tuple::make_tuple(
         env,
         &[
             schema_bytes,
@@ -146,7 +173,7 @@ fn encode_flight_info<'a>(env: Env<'a>, info: &FlightInfo) -> Term<'a> {
             info.total_records.encode(env),
             info.total_bytes.encode(env),
         ],
-    )
+    ))
 }
 
 // ── Echo server state and service ────────────────────────────────────────────
@@ -751,11 +778,14 @@ pub fn flight_client_list_flights<'a>(
             }
         }
     };
-    let terms: Vec<Term<'a>> = flights
+    let terms: Option<Vec<Term<'a>>> = flights
         .iter()
         .map(|f| encode_flight_info(env, f))
         .collect();
-    ok_encode(env, terms)
+    match terms {
+        Some(t) => ok_encode(env, t),
+        None => err_encode(env, "binary allocation failed while encoding FlightInfo"),
+    }
 }
 
 /// get_flight_info: metadata for a specific flight descriptor.
@@ -793,7 +823,10 @@ pub fn flight_client_get_flight_info<'a>(
             }
         }
     };
-    ok_encode(env, encode_flight_info(env, &info))
+    match encode_flight_info(env, &info) {
+        Some(t) => ok_encode(env, t),
+        None => err_encode(env, "binary allocation failed while encoding FlightInfo"),
+    }
 }
 
 /// get_schema: Arrow schema for the flight identified by `descriptor`.
@@ -927,8 +960,11 @@ pub fn flight_client_do_action<'a>(
             }
         }
     };
-    let body_terms: Vec<Term<'a>> = results.iter().map(|r| encode_binary(env, r)).collect();
-    ok_encode(env, body_terms)
+    let body_terms: Option<Vec<Term<'a>>> = results.iter().map(|r| try_encode_binary(env, r)).collect();
+    match body_terms {
+        Some(t) => ok_encode(env, t),
+        None => err_encode(env, "binary allocation failed while encoding action results"),
+    }
 }
 
 // ── Resource type registration ────────────────────────────────────────────────
