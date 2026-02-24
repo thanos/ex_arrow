@@ -16,7 +16,7 @@ defmodule ExArrow.Flight.Client do
   ## TLS
 
   Only plaintext HTTP/2 connections are supported. Passing `tls: true` returns
-  `{:error, "tls not supported"}`. TLS support is planned for a future milestone.
+  `{:error, :tls_not_supported}`. TLS support is planned for a future milestone.
 
   ## Timeouts and cancellation
 
