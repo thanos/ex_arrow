@@ -45,7 +45,12 @@ defmodule ExArrow.MixProject do
       main: "overview",
       formatters: ["html"],
       source_url: "https://github.com/your-org/ex_arrow",
-      extras: ["docs/overview.md", "docs/memory_model.md", "docs/ipc_guide.md"]
+      extras: [
+        "docs/overview.md",
+        "docs/memory_model.md",
+        "docs/ipc_guide.md",
+        "docs/flight_guide.md"
+      ]
     ]
   end
 end

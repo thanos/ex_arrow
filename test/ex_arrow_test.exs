@@ -148,12 +148,15 @@ defmodule ExArrowTest do
   end
 
   describe "stubs (Flight, ADBC)" do
-    test "Flight.Client.connect returns not_implemented" do
-      assert ExArrow.Flight.Client.connect("localhost", 9999) == {:error, :not_implemented}
+    test "Flight.Client.connect to non-existent server returns error" do
+      assert {:error, _} = ExArrow.Flight.Client.connect("localhost", 39_283, [])
     end
 
-    test "Flight.Server.start_link returns not_implemented" do
-      assert ExArrow.Flight.Server.start_link(9090) == {:error, :not_implemented}
+    test "Flight.Server.start_link(0) returns server or error" do
+      case ExArrow.Flight.Server.start_link(0, []) do
+        {:ok, server} -> ExArrow.Flight.Server.stop(server)
+        {:error, _} -> :ok
+      end
     end
 
     test "ADBC.Database.open returns not_implemented" do
