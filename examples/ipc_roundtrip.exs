@@ -22,15 +22,16 @@ case Reader.from_binary(binary) do
     fields = Schema.fields(schema)
     IO.puts("Schema fields: #{inspect(Enum.map(fields, & &1.name))}")
 
-    collect = fn collect, stream, acc ->
-      case Stream.next(stream) do
-        nil -> Enum.reverse(acc)
-        {:error, _} -> Enum.reverse(acc)
-        batch -> collect.(collect, stream, [batch | acc])
-      end
-    end
-
-    batches = collect.(collect, stream, [])
+    batches =
+      stream
+      |> Elixir.Stream.unfold(fn s ->
+        case ExArrow.Stream.next(s) do
+          nil -> nil
+          {:error, _} -> nil
+          batch -> {batch, s}
+        end
+      end)
+      |> Enum.to_list()
     total_rows = Enum.reduce(batches, 0, fn b, acc -> acc + RecordBatch.num_rows(b) end)
     IO.puts("Batches: #{length(batches)}, total rows: #{total_rows}")
 

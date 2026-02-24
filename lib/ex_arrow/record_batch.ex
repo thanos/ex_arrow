@@ -25,6 +25,6 @@ defmodule ExArrow.RecordBatch do
   """
   @spec num_rows(t()) :: non_neg_integer()
   def num_rows(%__MODULE__{resource: ref}) do
-    Native.record_batch_num_rows(ref) |> max(0)
+    Native.record_batch_num_rows(ref)
   end
 end

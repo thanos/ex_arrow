@@ -71,7 +71,7 @@ defmodule ExArrowTest do
     test "stream iterator yields batches until done" do
       {:ok, binary} = ExArrow.Native.ipc_test_fixture_binary()
       {:ok, stream} = ExArrow.IPC.Reader.from_binary(binary)
-      batches = collect_batches(stream, [])
+      assert {:ok, batches} = collect_batches(stream, [])
       assert length(batches) == 1
       assert ExArrow.RecordBatch.num_rows(hd(batches)) == 2
     end
@@ -109,8 +109,8 @@ defmodule ExArrowTest do
 
   defp collect_batches(stream, acc) do
     case ExArrow.Stream.next(stream) do
-      nil -> Enum.reverse(acc)
-      {:error, _} -> Enum.reverse(acc)
+      nil -> {:ok, Enum.reverse(acc)}
+      {:error, msg} -> {:error, msg}
       batch -> collect_batches(stream, [batch | acc])
     end
   end
