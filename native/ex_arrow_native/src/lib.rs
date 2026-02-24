@@ -3,6 +3,7 @@
 mod flight;
 mod ipc;
 mod resources;
+mod util;
 
 use rustler::resource::{open_struct_resource_type, ResourceType, ResourceTypeProvider, NIF_RESOURCE_FLAGS};
 use rustler::Env;

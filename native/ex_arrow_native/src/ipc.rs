@@ -13,16 +13,7 @@ use rustler::resource::ResourceArc;
 use rustler::{Encoder, Env, Term};
 
 use crate::resources::{ExArrowIpcFile, ExArrowIpcStream, ExArrowRecordBatch, ExArrowSchema, IpcFileBacking, IpcStreamBacking};
-
-pub(crate) fn ok_encode<'a, T: Encoder>(env: Env<'a>, t: T) -> Term<'a> {
-    let ok = rustler::types::atom::Atom::from_str(env, "ok").unwrap();
-    (ok, t).encode(env)
-}
-
-pub(crate) fn err_encode<'a>(env: Env<'a>, msg: &str) -> Term<'a> {
-    let err = rustler::types::atom::Atom::from_str(env, "error").unwrap();
-    (err, msg.to_string()).encode(env)
-}
+use crate::util::{err_encode, ok_encode};
 
 /// Builds a small IPC stream fixture (schema: id int64, name utf8; 2 rows) for tests.
 #[rustler::nif]
