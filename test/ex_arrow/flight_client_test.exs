@@ -11,8 +11,9 @@ defmodule ExArrow.Flight.ClientTest do
       assert {:error, _msg} = ExArrow.Flight.Client.connect("localhost", 39_281, [])
     end
 
-    test "connect/3 with opts to non-existent server returns error" do
-      assert {:error, _msg} = ExArrow.Flight.Client.connect("host", 39_282, tls: true)
+    test "connect/3 with tls: true returns :tls_not_supported" do
+      assert {:error, :tls_not_supported} =
+               ExArrow.Flight.Client.connect("host", 39_282, tls: true)
     end
   end
 

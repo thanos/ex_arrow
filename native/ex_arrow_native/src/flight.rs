@@ -112,10 +112,14 @@ impl FlightService for EchoFlightService {
             .try_collect()
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
+        // Flight do_put must carry at least one batch; an empty stream has no schema
+        // and nothing useful to store, so we reject it here at the protocol boundary.
         let schema = batches
             .first()
             .map(|b| b.schema())
-            .ok_or_else(|| Status::invalid_argument("do_put: no batches"))?;
+            .ok_or_else(|| Status::invalid_argument(
+                "do_put rejected: stream contained no record batches (schema cannot be inferred)",
+            ))?;
         {
             let mut guard = self.state.lock().map_err(|_| Status::internal("lock"))?;
             guard.data = Some((schema, batches));
@@ -202,7 +206,26 @@ pub fn flight_server_start<'a>(env: Env<'a>, port: u16) -> Term<'a> {
                 .serve_with_incoming(incoming);
             let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
             tokio::spawn(server_fut);
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            // Probe the bound port until the server is actually accepting connections
+            // rather than sleeping for a fixed interval (which is fragile on slow systems
+            // and wasteful on fast ones). We poll up to 80 times with 25 ms back-off,
+            // giving a maximum wait of 2 s before reporting a timeout.
+            let probe_addr = format!("127.0.0.1:{}", actual);
+            let mut ready = false;
+            for _ in 0..80 {
+                if tokio::net::TcpStream::connect(&probe_addr).await.is_ok() {
+                    ready = true;
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            if !ready {
+                let _ = tx.send(Err(format!(
+                    "server on port {} did not become ready within 2s",
+                    actual
+                )));
+                return;
+            }
             let _ = tx.send(Ok((actual, shutdown_tx)));
             let _ = shutdown_rx.await;
         })
@@ -329,9 +352,11 @@ pub fn flight_client_do_get<'a>(
             Err(e) => return err_encode(env, &e.to_string()),
         }
     };
+    // do_put rejects empty streams, so receiving zero batches here is an internal
+    // invariant violation rather than a normal client error.
     let schema = match batches.first() {
         Some(b) => b.schema(),
-        None => return err_encode(env, "do_get: no batches"),
+        None => return err_encode(env, "do_get: server returned empty batch stream (internal invariant violated: do_put should have rejected this)"),
     };
     let mut buf = Vec::new();
     let mut writer = match StreamWriter::try_new(&mut buf, schema.as_ref()) {
