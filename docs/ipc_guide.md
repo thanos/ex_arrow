@@ -22,8 +22,12 @@ Open a stream from binary or path:
 Get the schema (without consuming the stream) and read batches:
 
 ```elixir
-schema = ExArrow.Stream.schema(stream)
-fields = ExArrow.Schema.fields(schema)
+case ExArrow.Stream.schema(stream) do
+  {:ok, schema} ->
+    fields = ExArrow.Schema.fields(schema)
+    # ...
+  {:error, msg} -> # stream invalid (e.g. poisoned lock)
+end
 
 # Consume batches
 case ExArrow.Stream.next(stream) do

@@ -18,9 +18,12 @@ IO.puts("Fixture size: #{byte_size(binary)} bytes")
 # Read stream
 case Reader.from_binary(binary) do
   {:ok, stream} ->
-    schema = Stream.schema(stream)
-    fields = Schema.fields(schema)
-    IO.puts("Schema fields: #{inspect(Enum.map(fields, & &1.name))}")
+    case ExArrow.Stream.schema(stream) do
+      {:error, msg} ->
+        IO.puts("Schema error: #{msg}")
+      {:ok, schema} ->
+        fields = Schema.fields(schema)
+        IO.puts("Schema fields: #{inspect(Enum.map(fields, & &1.name))}")
 
     batches =
       stream
@@ -42,8 +45,12 @@ case Reader.from_binary(binary) do
 
         case Reader.from_binary(binary2) do
           {:ok, stream2} ->
-            schema2 = Stream.schema(stream2)
-            IO.puts("Roundtrip read OK, schema fields: #{length(Schema.fields(schema2))}")
+            case ExArrow.Stream.schema(stream2) do
+              {:ok, schema2} ->
+                IO.puts("Roundtrip read OK, schema fields: #{length(Schema.fields(schema2))}")
+              {:error, msg} ->
+                IO.puts("Roundtrip schema error: #{msg}")
+            end
 
           {:error, msg} ->
             IO.puts("Roundtrip read error: #{msg}")
@@ -51,6 +58,7 @@ case Reader.from_binary(binary) do
 
       {:error, msg} ->
         IO.puts("Roundtrip write error: #{msg}")
+    end
     end
 
   {:error, msg} ->

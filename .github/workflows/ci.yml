@@ -19,8 +19,19 @@ jobs:
     steps:
       - name: Wait for GitHub API
         run: |
-          until curl -sf --connect-timeout 5 https://api.github.com > /dev/null; do
-            echo "Waiting for network connectivity to api.github.com..."
+          max_attempts=12
+          attempt=1
+          while [ "$attempt" -le "$max_attempts" ]; do
+            if curl -sf --connect-timeout 5 https://api.github.com > /dev/null; then
+              echo "Connected to api.github.com on attempt $attempt"
+              break
+            fi
+            echo "Attempt $attempt/$max_attempts: waiting for network connectivity to api.github.com..."
+            attempt=$((attempt + 1))
+            if [ "$attempt" -gt "$max_attempts" ]; then
+              echo "::error::Could not reach api.github.com after $max_attempts attempts. Check network/connectivity."
+              exit 1
+            fi
             sleep 5
           done
 
@@ -50,8 +61,19 @@ jobs:
     steps:
       - name: Wait for GitHub API
         run: |
-          until curl -sf --connect-timeout 5 https://api.github.com > /dev/null; do
-            echo "Waiting for network connectivity to api.github.com..."
+          max_attempts=12
+          attempt=1
+          while [ "$attempt" -le "$max_attempts" ]; do
+            if curl -sf --connect-timeout 5 https://api.github.com > /dev/null; then
+              echo "Connected to api.github.com on attempt $attempt"
+              break
+            fi
+            echo "Attempt $attempt/$max_attempts: waiting for network connectivity to api.github.com..."
+            attempt=$((attempt + 1))
+            if [ "$attempt" -gt "$max_attempts" ]; then
+              echo "::error::Could not reach api.github.com after $max_attempts attempts. Check network/connectivity."
+              exit 1
+            fi
             sleep 5
           done
 

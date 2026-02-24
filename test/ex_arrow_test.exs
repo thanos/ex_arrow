@@ -34,7 +34,7 @@ defmodule ExArrowTest do
 
       # Read stream
       assert {:ok, stream} = ExArrow.IPC.Reader.from_binary(binary)
-      schema = ExArrow.Stream.schema(stream)
+      assert {:ok, schema} = ExArrow.Stream.schema(stream)
       fields = ExArrow.Schema.fields(schema)
       assert length(fields) == 2
       assert Enum.any?(fields, fn f -> f.name == "id" and f.type == :int64 end)
@@ -54,7 +54,7 @@ defmodule ExArrowTest do
       # Roundtrip: write then read again
       assert {:ok, binary2} = ExArrow.IPC.Writer.to_binary(schema, [batch1])
       assert {:ok, stream2} = ExArrow.IPC.Reader.from_binary(binary2)
-      schema2 = ExArrow.Stream.schema(stream2)
+      assert {:ok, schema2} = ExArrow.Stream.schema(stream2)
       assert length(ExArrow.Schema.fields(schema2)) == 2
       batch2 = ExArrow.Stream.next(stream2)
       assert %ExArrow.RecordBatch{} = batch2
@@ -82,7 +82,7 @@ defmodule ExArrowTest do
     test "Schema.fields returns field list from stream schema" do
       {:ok, binary} = ExArrow.Native.ipc_test_fixture_binary()
       {:ok, stream} = ExArrow.IPC.Reader.from_binary(binary)
-      schema = ExArrow.Stream.schema(stream)
+      assert {:ok, schema} = ExArrow.Stream.schema(stream)
       assert length(ExArrow.Schema.fields(schema)) == 2
     end
 

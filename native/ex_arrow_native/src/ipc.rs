@@ -12,7 +12,7 @@ use arrow_ipc::writer::StreamWriter;
 use rustler::resource::ResourceArc;
 use rustler::{Encoder, Env, Term};
 
-use crate::resources::{ExArrowIpcStream, ExArrowRecordBatch, ExArrowSchema};
+use crate::resources::{ExArrowIpcStream, ExArrowRecordBatch, ExArrowSchema, IpcStreamBacking};
 
 fn ok_encode<'a, T: Encoder>(env: Env<'a>, t: T) -> Term<'a> {
     let ok = rustler::types::atom::Atom::from_str(env, "ok").unwrap();
@@ -26,14 +26,17 @@ fn err_encode<'a>(env: Env<'a>, msg: &str) -> Term<'a> {
 
 /// Builds a small IPC stream fixture (schema: id int64, name utf8; 2 rows) for tests.
 #[rustler::nif]
-fn ipc_test_fixture_binary<'a>(env: Env<'a>) -> Term<'a> {
+pub fn ipc_test_fixture_binary<'a>(env: Env<'a>) -> Term<'a> {
     let schema = Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int64, false),
         Field::new("name", DataType::Utf8, false),
     ]));
     let id_array = Arc::new(Int64Array::from(vec![1_i64, 2]));
     let name_array = Arc::new(StringArray::from(vec!["a", "b"]));
-    let batch = RecordBatch::try_new(schema.clone(), vec![id_array, name_array]).unwrap();
+    let batch = match RecordBatch::try_new(schema.clone(), vec![id_array, name_array]) {
+        Ok(b) => b,
+        Err(e) => return err_encode(env, &e.to_string()),
+    };
     let mut buf = Vec::new();
     let mut writer = match StreamWriter::try_new(&mut buf, schema.as_ref()) {
         Ok(w) => w,
@@ -56,13 +59,13 @@ fn ipc_test_fixture_binary<'a>(env: Env<'a>) -> Term<'a> {
 
 /// Read IPC stream from binary. Returns {:ok, stream_ref} or {:error, msg}.
 #[rustler::nif]
-fn ipc_reader_from_binary<'a>(env: Env<'a>, data: rustler::Binary) -> Term<'a> {
+pub fn ipc_reader_from_binary<'a>(env: Env<'a>, data: rustler::Binary) -> Term<'a> {
     let bytes = data.as_slice().to_vec();
     let cursor = Cursor::new(bytes);
     match StreamReader::try_new(cursor, None) {
         Ok(reader) => {
             let stream = ExArrowIpcStream {
-                reader: std::sync::Mutex::new(reader),
+                reader: IpcStreamBacking::Binary(std::sync::Mutex::new(reader)),
             };
             ok_encode(env, ResourceArc::new(stream))
         }
@@ -70,27 +73,27 @@ fn ipc_reader_from_binary<'a>(env: Env<'a>, data: rustler::Binary) -> Term<'a> {
     }
 }
 
-/// Read IPC stream from file path. Returns {:ok, stream_ref} or {:error, msg}.
+/// Read IPC stream from file path (streaming: does not load entire file into memory).
+/// Returns {:ok, stream_ref} or {:error, msg}.
 #[rustler::nif]
-fn ipc_reader_from_file<'a>(env: Env<'a>, path: String) -> Term<'a> {
-    let bytes = match std::fs::read(&path) {
-        Ok(b) => b,
+pub fn ipc_reader_from_file<'a>(env: Env<'a>, path: String) -> Term<'a> {
+    let file = match std::fs::File::open(&path) {
+        Ok(f) => f,
         Err(e) => return err_encode(env, &e.to_string()),
     };
-    let cursor = Cursor::new(bytes);
-    let reader = match StreamReader::try_new(cursor, None) {
+    let reader = match StreamReader::try_new_buffered(file, None) {
         Ok(r) => r,
         Err(e) => return err_encode(env, &e.to_string()),
     };
     let stream = ExArrowIpcStream {
-        reader: std::sync::Mutex::new(reader),
+        reader: IpcStreamBacking::File(std::sync::Mutex::new(reader)),
     };
     ok_encode(env, ResourceArc::new(stream))
 }
 
 /// Return list of fields for a schema: [{name, type_atom}, ...]. type_atom is :int64, :float64, :utf8, :binary, :boolean, :null, etc.
 #[rustler::nif]
-fn schema_fields<'a>(env: Env<'a>, schema: ResourceArc<ExArrowSchema>) -> Term<'a> {
+pub fn schema_fields<'a>(env: Env<'a>, schema: ResourceArc<ExArrowSchema>) -> Term<'a> {
     let fields: Vec<Term> = schema
         .schema
         .fields()
@@ -123,7 +126,7 @@ fn data_type_to_atom(env: Env, dt: &arrow_schema::DataType) -> rustler::types::a
 
 /// Return the schema ref of a record batch.
 #[rustler::nif]
-fn record_batch_schema(batch: ResourceArc<ExArrowRecordBatch>) -> rustler::resource::ResourceArc<ExArrowSchema> {
+pub fn record_batch_schema(batch: ResourceArc<ExArrowRecordBatch>) -> rustler::resource::ResourceArc<ExArrowSchema> {
     let schema_handle = ExArrowSchema {
         schema: batch.batch.schema().clone(),
     };
@@ -131,19 +134,31 @@ fn record_batch_schema(batch: ResourceArc<ExArrowRecordBatch>) -> rustler::resou
 }
 
 /// Return the number of rows in a record batch.
+/// Returns as u64 so the value is always non-negative and never overflows i64.
 #[rustler::nif]
-fn record_batch_num_rows(batch: ResourceArc<ExArrowRecordBatch>) -> i64 {
-    batch.batch.num_rows() as i64
+pub fn record_batch_num_rows(batch: ResourceArc<ExArrowRecordBatch>) -> u64 {
+    batch.batch.num_rows() as u64
 }
 
 /// Return the schema of an IPC stream (without consuming it).
 #[rustler::nif]
-fn ipc_stream_schema<'a>(env: Env<'a>, stream: ResourceArc<ExArrowIpcStream>) -> Term<'a> {
-    let guard = match stream.reader.lock() {
-        Ok(g) => g,
-        Err(_) => return err_encode(env, "stream lock"),
+pub fn ipc_stream_schema<'a>(env: Env<'a>, stream: ResourceArc<ExArrowIpcStream>) -> Term<'a> {
+    let schema_ref = match &stream.reader {
+        IpcStreamBacking::Binary(m) => {
+            let guard = match m.lock() {
+                Ok(g) => g,
+                Err(_) => return err_encode(env, "stream lock"),
+            };
+            guard.schema()
+        }
+        IpcStreamBacking::File(m) => {
+            let guard = match m.lock() {
+                Ok(g) => g,
+                Err(_) => return err_encode(env, "stream lock"),
+            };
+            guard.schema()
+        }
     };
-    let schema_ref = guard.schema();
     let schema_handle = ExArrowSchema {
         schema: schema_ref,
     };
@@ -152,12 +167,24 @@ fn ipc_stream_schema<'a>(env: Env<'a>, stream: ResourceArc<ExArrowIpcStream>) ->
 
 /// Read the next record batch from the stream. Returns {:ok, batch_ref} or :done or {:error, msg}.
 #[rustler::nif]
-fn ipc_stream_next<'a>(env: Env<'a>, stream: ResourceArc<ExArrowIpcStream>) -> Term<'a> {
-    let mut guard = match stream.reader.lock() {
-        Ok(g) => g,
-        Err(_) => return err_encode(env, "stream lock"),
+pub fn ipc_stream_next<'a>(env: Env<'a>, stream: ResourceArc<ExArrowIpcStream>) -> Term<'a> {
+    let next_result = match &stream.reader {
+        IpcStreamBacking::Binary(m) => {
+            let mut guard = match m.lock() {
+                Ok(g) => g,
+                Err(_) => return err_encode(env, "stream lock"),
+            };
+            guard.next()
+        }
+        IpcStreamBacking::File(m) => {
+            let mut guard = match m.lock() {
+                Ok(g) => g,
+                Err(_) => return err_encode(env, "stream lock"),
+            };
+            guard.next()
+        }
     };
-    match guard.next() {
+    match next_result {
         None => rustler::types::atom::Atom::from_str(env, "done").unwrap().encode(env),
         Some(Err(e)) => err_encode(env, &e.to_string()),
         Some(Ok(batch)) => {
@@ -169,7 +196,7 @@ fn ipc_stream_next<'a>(env: Env<'a>, stream: ResourceArc<ExArrowIpcStream>) -> T
 
 /// Write schema and record batches to binary. Returns {:ok, binary} or {:error, msg}.
 #[rustler::nif]
-fn ipc_writer_to_binary<'a>(
+pub fn ipc_writer_to_binary<'a>(
     env: Env<'a>,
     schema: ResourceArc<ExArrowSchema>,
     batches: Vec<ResourceArc<ExArrowRecordBatch>>,
@@ -198,7 +225,7 @@ fn ipc_writer_to_binary<'a>(
 
 /// Write schema and record batches to file. Returns :ok or {:error, msg}.
 #[rustler::nif]
-fn ipc_writer_to_file<'a>(
+pub fn ipc_writer_to_file<'a>(
     env: Env<'a>,
     path: String,
     schema: ResourceArc<ExArrowSchema>,

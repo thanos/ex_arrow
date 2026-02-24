@@ -2,7 +2,8 @@
 
 use arrow::record_batch::RecordBatch;
 use arrow_schema::Schema;
-use std::io::Cursor;
+use std::fs::File;
+use std::io::{BufReader, Cursor};
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -18,7 +19,13 @@ pub struct ExArrowRecordBatch {
     pub batch: RecordBatch,
 }
 
+/// Backing for IPC stream: either in-memory bytes or a buffered file (streaming, no full slurp).
+pub enum IpcStreamBacking {
+    Binary(Mutex<StreamReader<Cursor<Vec<u8>>>>),
+    File(Mutex<StreamReader<BufReader<File>>>),
+}
+
 /// IPC stream reader: holds the StreamReader so we can call next() from Elixir.
 pub struct ExArrowIpcStream {
-    pub reader: Mutex<StreamReader<Cursor<Vec<u8>>>>,
+    pub reader: IpcStreamBacking,
 }

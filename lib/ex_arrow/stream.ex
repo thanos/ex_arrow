@@ -14,11 +14,14 @@ defmodule ExArrow.Stream do
 
   @doc """
   Returns the schema of this stream (without consuming it).
+  Returns `{:error, message}` if the stream is invalid (e.g. poisoned lock).
   """
-  @spec schema(t()) :: Schema.t()
+  @spec schema(t()) :: {:ok, Schema.t()} | {:error, String.t()}
   def schema(%__MODULE__{resource: ref}) do
-    schema_ref = Native.ipc_stream_schema(ref)
-    %Schema{resource: schema_ref}
+    case Native.ipc_stream_schema(ref) do
+      {:error, msg} -> {:error, msg}
+      schema_ref -> {:ok, %Schema{resource: schema_ref}}
+    end
   end
 
   @doc """
