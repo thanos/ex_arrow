@@ -7,16 +7,17 @@ defmodule ExArrow.Schema do
   Elixir-friendly accessors for small metadata.
   """
   alias ExArrow.Field
+  alias ExArrow.Native
 
   @opaque t :: %__MODULE__{resource: reference()}
   defstruct [:resource]
 
   @doc """
   Returns the list of fields in the schema (Elixir structs).
-  Stub: returns empty list until NIF is implemented.
   """
   @spec fields(t()) :: [Field.t()]
-  def fields(_schema) do
-    []
+  def fields(%__MODULE__{resource: ref}) do
+    Native.schema_fields(ref)
+    |> Enum.map(fn {name, type} -> %Field{name: name, type: type} end)
   end
 end

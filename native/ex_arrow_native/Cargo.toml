@@ -12,6 +12,10 @@ crate-type = ["cdylib"]
 
 [dependencies]
 rustler = "0.32"
+arrow = { version = "56", default-features = false, features = ["ipc"] }
+arrow-ipc = "56"
+arrow-schema = { version = "56", default-features = false }
+arrow-array = { version = "56", default-features = false }
 
 [profile.release]
 lto = true

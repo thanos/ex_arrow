@@ -17,6 +17,24 @@ jobs:
         otp: ["27"]
 
     steps:
+      - name: Wait for GitHub API
+        run: |
+          max_attempts=12
+          attempt=1
+          while [ "$attempt" -le "$max_attempts" ]; do
+            if curl -sf --connect-timeout 5 https://api.github.com > /dev/null; then
+              echo "Connected to api.github.com on attempt $attempt"
+              break
+            fi
+            echo "Attempt $attempt/$max_attempts: waiting for network connectivity to api.github.com..."
+            attempt=$((attempt + 1))
+            if [ "$attempt" -gt "$max_attempts" ]; then
+              echo "::error::Could not reach api.github.com after $max_attempts attempts. Check network/connectivity."
+              exit 1
+            fi
+            sleep 5
+          done
+
       - uses: actions/checkout@v4
 
       - name: Set up Elixir
@@ -41,6 +59,24 @@ jobs:
     name: Rust build
     runs-on: ubuntu-latest
     steps:
+      - name: Wait for GitHub API
+        run: |
+          max_attempts=12
+          attempt=1
+          while [ "$attempt" -le "$max_attempts" ]; do
+            if curl -sf --connect-timeout 5 https://api.github.com > /dev/null; then
+              echo "Connected to api.github.com on attempt $attempt"
+              break
+            fi
+            echo "Attempt $attempt/$max_attempts: waiting for network connectivity to api.github.com..."
+            attempt=$((attempt + 1))
+            if [ "$attempt" -gt "$max_attempts" ]; then
+              echo "::error::Could not reach api.github.com after $max_attempts attempts. Check network/connectivity."
+              exit 1
+            fi
+            sleep 5
+          done
+
       - uses: actions/checkout@v4
 
       - name: Set up Elixir
@@ -50,7 +86,9 @@ jobs:
           otp-version: "27"
 
       - name: Install Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
 
       - name: Restore dependencies
         run: mix deps.get
