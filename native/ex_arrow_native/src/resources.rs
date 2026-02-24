@@ -1,4 +1,4 @@
-//! Resource types for ExArrow: Schema, RecordBatch, IPC stream.
+//! Resource types for ExArrow: Schema, RecordBatch, IPC stream, IPC file.
 
 use arrow::record_batch::RecordBatch;
 use arrow_schema::Schema;
@@ -7,7 +7,7 @@ use std::io::{BufReader, Cursor};
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use arrow_ipc::reader::StreamReader;
+use arrow_ipc::reader::{FileReader, StreamReader};
 
 /// Opaque handle for an Arrow schema (held in native memory).
 pub struct ExArrowSchema {
@@ -28,4 +28,15 @@ pub enum IpcStreamBacking {
 /// IPC stream reader: holds the StreamReader so we can call next() from Elixir.
 pub struct ExArrowIpcStream {
     pub reader: IpcStreamBacking,
+}
+
+/// Backing for IPC file reader: file path or in-memory bytes (for tests / from_binary).
+pub enum IpcFileBacking {
+    File(Mutex<FileReader<BufReader<File>>>),
+    Binary(Mutex<FileReader<Cursor<Vec<u8>>>>),
+}
+
+/// IPC file format reader: random access (schema, batch count, get batch by index).
+pub struct ExArrowIpcFile {
+    pub backing: IpcFileBacking,
 }
