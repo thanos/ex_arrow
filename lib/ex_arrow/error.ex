@@ -13,6 +13,7 @@ defmodule ExArrow.Error do
           details: term() | nil
         }
 
+  @spec exception(list() | String.t()) :: t()
   @doc false
   def exception(args) when is_list(args) do
     struct(__MODULE__, args)
@@ -22,6 +23,7 @@ defmodule ExArrow.Error do
     %__MODULE__{code: :unknown, message: message, details: nil}
   end
 
+  @spec message(t()) :: String.t()
   @doc false
   def message(%__MODULE__{code: code, message: msg, details: nil}) do
     "[#{code}] #{msg}"

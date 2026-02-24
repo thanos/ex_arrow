@@ -7,12 +7,12 @@ use arrow::array::{Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use arrow_schema::{DataType, Field, Schema};
 
-use arrow_ipc::reader::StreamReader;
-use arrow_ipc::writer::StreamWriter;
+use arrow_ipc::reader::{FileReader, StreamReader};
+use arrow_ipc::writer::{FileWriter, StreamWriter};
 use rustler::resource::ResourceArc;
 use rustler::{Encoder, Env, Term};
 
-use crate::resources::{ExArrowIpcStream, ExArrowRecordBatch, ExArrowSchema, IpcStreamBacking};
+use crate::resources::{ExArrowIpcFile, ExArrowIpcStream, ExArrowRecordBatch, ExArrowSchema, IpcFileBacking, IpcStreamBacking};
 
 fn ok_encode<'a, T: Encoder>(env: Env<'a>, t: T) -> Term<'a> {
     let ok = rustler::types::atom::Atom::from_str(env, "ok").unwrap();
@@ -48,6 +48,42 @@ pub fn ipc_test_fixture_binary<'a>(env: Env<'a>) -> Term<'a> {
     if let Err(e) = writer.finish() {
         return err_encode(env, &e.to_string());
     }
+    let mut owned = match rustler::OwnedBinary::new(buf.len()) {
+        Some(b) => b,
+        None => return err_encode(env, "binary alloc"),
+    };
+    owned.as_mut_slice().copy_from_slice(&buf);
+    let binary = rustler::Binary::from_owned(owned, env);
+    ok_encode(env, binary)
+}
+
+/// Builds a small IPC file-format fixture (same schema as stream fixture) for tests.
+#[rustler::nif]
+pub fn ipc_test_fixture_file_binary<'a>(env: Env<'a>) -> Term<'a> {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new("name", DataType::Utf8, false),
+    ]));
+    let id_array = Arc::new(Int64Array::from(vec![1_i64, 2]));
+    let name_array = Arc::new(StringArray::from(vec!["a", "b"]));
+    let batch = match RecordBatch::try_new(schema.clone(), vec![id_array, name_array]) {
+        Ok(b) => b,
+        Err(e) => return err_encode(env, &e.to_string()),
+    };
+    let buf = Vec::new();
+    let cursor = Cursor::new(buf);
+    let mut writer = match FileWriter::try_new(cursor, schema.as_ref()) {
+        Ok(w) => w,
+        Err(e) => return err_encode(env, &e.to_string()),
+    };
+    if let Err(e) = writer.write(&batch) {
+        return err_encode(env, &e.to_string());
+    }
+    let cursor = match writer.into_inner() {
+        Ok(c) => c,
+        Err(e) => return err_encode(env, &e.to_string()),
+    };
+    let buf = cursor.into_inner();
     let mut owned = match rustler::OwnedBinary::new(buf.len()) {
         Some(b) => b,
         None => return err_encode(env, "binary alloc"),
@@ -119,6 +155,13 @@ fn data_type_to_atom(env: Env, dt: &arrow_schema::DataType) -> rustler::types::a
         arrow_schema::DataType::LargeUtf8 => "large_utf8",
         arrow_schema::DataType::Binary => "binary",
         arrow_schema::DataType::LargeBinary => "large_binary",
+        arrow_schema::DataType::List(_) => "list",
+        arrow_schema::DataType::LargeList(_) => "large_list",
+        arrow_schema::DataType::Struct(_) => "struct",
+        arrow_schema::DataType::Timestamp(_, _) => "timestamp",
+        arrow_schema::DataType::Decimal128(_, _) => "decimal128",
+        arrow_schema::DataType::Decimal256(_, _) => "decimal256",
+        arrow_schema::DataType::Dictionary(_, _) => "dictionary",
         _ => "unknown",
     };
     rustler::types::atom::Atom::from_str(env, s).unwrap()
@@ -223,7 +266,113 @@ pub fn ipc_writer_to_binary<'a>(
     ok_encode(env, binary)
 }
 
-/// Write schema and record batches to file. Returns :ok or {:error, msg}.
+/// Open IPC file format (random access) from path. Returns {:ok, file_ref} or {:error, msg}.
+#[rustler::nif]
+pub fn ipc_file_open<'a>(env: Env<'a>, path: String) -> Term<'a> {
+    let file = match std::fs::File::open(&path) {
+        Ok(f) => f,
+        Err(e) => return err_encode(env, &e.to_string()),
+    };
+    let reader = match FileReader::try_new_buffered(file, None) {
+        Ok(r) => r,
+        Err(e) => return err_encode(env, &e.to_string()),
+    };
+    let ipc_file = ExArrowIpcFile {
+        backing: IpcFileBacking::File(std::sync::Mutex::new(reader)),
+    };
+    ok_encode(env, ResourceArc::new(ipc_file))
+}
+
+/// Open IPC file format from in-memory binary (random access). Returns {:ok, file_ref} or {:error, msg}.
+#[rustler::nif]
+pub fn ipc_file_open_from_binary<'a>(env: Env<'a>, binary: rustler::Binary) -> Term<'a> {
+    let bytes = binary.as_slice().to_vec();
+    let cursor = Cursor::new(bytes);
+    let reader = match FileReader::try_new(cursor, None) {
+        Ok(r) => r,
+        Err(e) => return err_encode(env, &e.to_string()),
+    };
+    let ipc_file = ExArrowIpcFile {
+        backing: IpcFileBacking::Binary(std::sync::Mutex::new(reader)),
+    };
+    ok_encode(env, ResourceArc::new(ipc_file))
+}
+
+/// Return the schema of an IPC file.
+#[rustler::nif]
+pub fn ipc_file_schema<'a>(env: Env<'a>, file: ResourceArc<ExArrowIpcFile>) -> Term<'a> {
+    let schema_ref = match &file.backing {
+        IpcFileBacking::File(m) => match m.lock() {
+            Ok(g) => g.schema(),
+            Err(_) => return err_encode(env, "file lock"),
+        },
+        IpcFileBacking::Binary(m) => match m.lock() {
+            Ok(g) => g.schema(),
+            Err(_) => return err_encode(env, "file lock"),
+        },
+    };
+    let schema_handle = ExArrowSchema {
+        schema: schema_ref,
+    };
+    ResourceArc::new(schema_handle).encode(env)
+}
+
+/// Return the number of record batches in an IPC file.
+#[rustler::nif]
+pub fn ipc_file_num_batches(file: ResourceArc<ExArrowIpcFile>) -> u64 {
+    match &file.backing {
+        IpcFileBacking::File(m) => match m.lock() {
+            Ok(g) => g.num_batches() as u64,
+            Err(_) => 0,
+        },
+        IpcFileBacking::Binary(m) => match m.lock() {
+            Ok(g) => g.num_batches() as u64,
+            Err(_) => 0,
+        },
+    }
+}
+
+/// Get the record batch at the given index (0-based). Returns {:ok, batch_ref} or {:error, msg}.
+#[rustler::nif]
+pub fn ipc_file_get_batch<'a>(
+    env: Env<'a>,
+    file: ResourceArc<ExArrowIpcFile>,
+    index: u64,
+) -> Term<'a> {
+    let index = index as usize;
+    let batch_result = match &file.backing {
+        IpcFileBacking::File(m) => {
+            let mut guard = match m.lock() {
+                Ok(g) => g,
+                Err(_) => return err_encode(env, "file lock"),
+            };
+            if let Err(e) = guard.set_index(index) {
+                return err_encode(env, &e.to_string());
+            }
+            guard.next()
+        }
+        IpcFileBacking::Binary(m) => {
+            let mut guard = match m.lock() {
+                Ok(g) => g,
+                Err(_) => return err_encode(env, "file lock"),
+            };
+            if let Err(e) = guard.set_index(index) {
+                return err_encode(env, &e.to_string());
+            }
+            guard.next()
+        }
+    };
+    match batch_result {
+        None => err_encode(env, "batch index out of range"),
+        Some(Err(e)) => err_encode(env, &e.to_string()),
+        Some(Ok(batch)) => {
+            let handle = ExArrowRecordBatch { batch };
+            ok_encode(env, ResourceArc::new(handle))
+        }
+    }
+}
+
+/// Write schema and record batches to file (stream format). Returns :ok or {:error, msg}.
 #[rustler::nif]
 pub fn ipc_writer_to_file<'a>(
     env: Env<'a>,
@@ -236,6 +385,33 @@ pub fn ipc_writer_to_file<'a>(
         Err(e) => return err_encode(env, &e.to_string()),
     };
     let mut writer = match StreamWriter::try_new(file, schema.schema.as_ref()) {
+        Ok(w) => w,
+        Err(e) => return err_encode(env, &e.to_string()),
+    };
+    for batch_ref in &batches {
+        if let Err(e) = writer.write(&batch_ref.batch) {
+            return err_encode(env, &e.to_string());
+        }
+    }
+    if let Err(e) = writer.finish() {
+        return err_encode(env, &e.to_string());
+    }
+    rustler::types::atom::Atom::from_str(env, "ok").unwrap().encode(env)
+}
+
+/// Write schema and record batches in IPC file format (random-access footer). Returns :ok or {:error, msg}.
+#[rustler::nif]
+pub fn ipc_file_writer_to_file<'a>(
+    env: Env<'a>,
+    path: String,
+    schema: ResourceArc<ExArrowSchema>,
+    batches: Vec<ResourceArc<ExArrowRecordBatch>>,
+) -> Term<'a> {
+    let file = match std::fs::File::create(&path) {
+        Ok(f) => f,
+        Err(e) => return err_encode(env, &e.to_string()),
+    };
+    let mut writer = match FileWriter::try_new_buffered(file, schema.schema.as_ref()) {
         Ok(w) => w,
         Err(e) => return err_encode(env, &e.to_string()),
     };

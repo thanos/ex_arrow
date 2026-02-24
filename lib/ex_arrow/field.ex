@@ -9,4 +9,8 @@ defmodule ExArrow.Field do
           type: term()
         }
   defstruct [:name, :type]
+
+  @doc false
+  @spec new(String.t(), term()) :: t()
+  def new(name, type), do: %__MODULE__{name: name, type: type}
 end

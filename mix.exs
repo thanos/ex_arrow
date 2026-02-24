@@ -8,8 +8,19 @@ defmodule ExArrow.MixProject do
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      docs: docs()
+      docs: docs(),
+      aliases: aliases(),
+      test_coverage: [tool: ExCoveralls],
+      preferred_cli_env: [
+        coveralls: :test,
+        "coveralls.html": :test,
+        "coveralls.github": :test
+      ]
     ]
+  end
+
+  defp aliases do
+    [ci: "ci"]
   end
 
   def application do
@@ -22,6 +33,9 @@ defmodule ExArrow.MixProject do
     [
       {:rustler, "~> 0.32"},
       {:ex_doc, "~> 0.34", only: :dev},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:excoveralls, "~> 0.18", only: :test},
+      {:mox, "~> 1.0", only: :test},
       {:stream_data, "~> 0.6", only: :test}
     ]
   end
