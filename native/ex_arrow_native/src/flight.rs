@@ -1,4 +1,4 @@
-//! Arrow Flight NIFs: minimal echo server and client (do_put / do_get).
+//! Arrow Flight NIFs: echo server (full Flight API) and client (do_put / do_get / Milestone 4 RPCs).
 
 use std::io::Cursor;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -8,9 +8,13 @@ use arrow_schema::SchemaRef;
 use arrow_flight::decode::FlightRecordBatchStream;
 use arrow_flight::encode::FlightDataEncoderBuilder;
 use arrow_flight::flight_service_server::{FlightService, FlightServiceServer};
-use arrow_flight::{Empty, FlightData, PutResult, Ticket};
+use arrow_flight::{
+    Action, ActionType as ArrowActionType, Criteria, Empty, FlightData, FlightDescriptor,
+    FlightEndpoint, FlightInfo, PutResult, SchemaResult, Ticket,
+};
+use arrow_flight::{IpcMessage, SchemaAsIpc};
 use arrow_ipc::reader::StreamReader;
-use arrow_ipc::writer::StreamWriter;
+use arrow_ipc::writer::{IpcWriteOptions, StreamWriter};
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use futures::StreamExt;
@@ -24,14 +28,135 @@ use tokio_stream::wrappers::TcpListenerStream;
 use crate::util::{err_encode, ok_encode};
 use crate::resources::{ExArrowIpcStream, ExArrowRecordBatch, ExArrowSchema, IpcStreamBacking};
 
-const ECHO_TICKET: &[u8] = b"echo";
+// Pre-registered atoms used when encoding/decoding descriptor tuples.
+rustler::atoms! {
+    cmd,
+    path,
+}
 
-/// Shared state for echo server: last do_put (schema + batches).
+/// Encode a `&[u8]` slice as an Elixir **binary** (not a charlist).
+///
+/// Rustler encodes `Vec<u8>` as a list of integers, which the BEAM may display
+/// as a charlist when all bytes are printable ASCII. Using `OwnedBinary` forces
+/// the result to be a proper binary regardless of content.
+fn encode_binary<'a>(env: Env<'a>, data: &[u8]) -> Term<'a> {
+    let mut owned = rustler::OwnedBinary::new(data.len()).unwrap();
+    owned.as_mut_slice().copy_from_slice(data);
+    owned.release(env).encode(env)
+}
+
+const ECHO_TICKET: &[u8] = b"echo";
+const DESCRIPTOR_CMD: i32 = 2;
+const DESCRIPTOR_PATH: i32 = 1;
+
+// ── IPC schema encoding helper ───────────────────────────────────────────────
+
+/// Serialise `schema` to the IPC FlatBuffer schema message format used in
+/// `FlightInfo.schema` and `SchemaResult.schema`.
+fn schema_ipc_bytes(schema: &SchemaRef) -> Result<Bytes, Status> {
+    let msg: IpcMessage = SchemaAsIpc::new(schema, &IpcWriteOptions::default())
+        .try_into()
+        .map_err(|e| Status::internal(format!("schema IPC encode: {e}")))?;
+    Ok(Bytes::from(msg.0))
+}
+
+// ── Descriptor codec helpers ─────────────────────────────────────────────────
+
+/// Decode an Elixir descriptor term (`{:cmd, binary()}` or `{:path, [String.t()]}`)
+/// into a `FlightDescriptor`.
+fn decode_descriptor<'a>(term: Term<'a>) -> Result<FlightDescriptor, String> {
+    let tuple = rustler::types::tuple::get_tuple(term)
+        .map_err(|_| "descriptor must be a 2-tuple {:cmd, binary()} or {:path, [string]}".to_string())?;
+
+    if tuple.len() != 2 {
+        return Err("descriptor tuple must have exactly 2 elements".to_string());
+    }
+
+    let tag: rustler::Atom = tuple[0]
+        .decode()
+        .map_err(|_| "descriptor first element must be an atom".to_string())?;
+
+    if tag == cmd() {
+        let bin: rustler::Binary = tuple[1]
+            .decode()
+            .map_err(|_| "cmd descriptor: second element must be a binary".to_string())?;
+        Ok(FlightDescriptor {
+            r#type: DESCRIPTOR_CMD,
+            cmd: Bytes::from(bin.as_slice().to_vec()),
+            ..Default::default()
+        })
+    } else if tag == path() {
+        let segments: Vec<String> = tuple[1]
+            .decode()
+            .map_err(|_| "path descriptor: second element must be a list of strings".to_string())?;
+        Ok(FlightDescriptor {
+            r#type: DESCRIPTOR_PATH,
+            path: segments,
+            ..Default::default()
+        })
+    } else {
+        Err("descriptor tag must be :cmd or :path".to_string())
+    }
+}
+
+/// Encode a `FlightDescriptor` as an Elixir term (`{:cmd, binary()}` or
+/// `{:path, [string]}`, or `:nil` when absent).
+fn encode_descriptor<'a>(env: Env<'a>, desc: Option<&FlightDescriptor>) -> Term<'a> {
+    match desc {
+        None => rustler::types::atom::Atom::from_str(env, "nil")
+            .unwrap()
+            .encode(env),
+        Some(d) if d.r#type == DESCRIPTOR_CMD => {
+            rustler::types::tuple::make_tuple(
+                env,
+                &[cmd().encode(env), encode_binary(env, &d.cmd)],
+            )
+        }
+        Some(d) => (path(), d.path.clone()).encode(env),
+    }
+}
+
+/// Encode a `FlightInfo` as the 5-tuple expected by `ExArrow.Flight.FlightInfo.from_native/1`.
+fn encode_flight_info<'a>(env: Env<'a>, info: &FlightInfo) -> Term<'a> {
+    let schema_bytes = encode_binary(env, &info.schema);
+    let descriptor = encode_descriptor(env, info.flight_descriptor.as_ref());
+    let endpoints: Vec<Term<'a>> = info
+        .endpoint
+        .iter()
+        .map(|ep| {
+            let ticket_bytes: &[u8] = ep
+                .ticket
+                .as_ref()
+                .map(|t| t.ticket.as_ref())
+                .unwrap_or_default();
+            let ticket_term = encode_binary(env, ticket_bytes);
+            let locations: Vec<String> = ep.location.iter().map(|l| l.uri.clone()).collect();
+            rustler::types::tuple::make_tuple(
+                env,
+                &[ticket_term, locations.encode(env)],
+            )
+        })
+        .collect();
+    rustler::types::tuple::make_tuple(
+        env,
+        &[
+            schema_bytes,
+            descriptor,
+            endpoints.encode(env),
+            info.total_records.encode(env),
+            info.total_bytes.encode(env),
+        ],
+    )
+}
+
+// ── Echo server state and service ────────────────────────────────────────────
+
+/// Shared state for the echo server: the last `do_put` (schema + batches).
 struct EchoState {
     data: Option<(SchemaRef, Vec<RecordBatch>)>,
 }
 
-/// Echo Flight service: do_put stores under "echo", do_get returns it.
+/// Echo Flight service: `do_put` stores data, `do_get` retrieves it.
 #[derive(Clone)]
 struct EchoFlightService {
     state: Arc<Mutex<EchoState>>,
@@ -40,11 +165,11 @@ struct EchoFlightService {
 #[tonic::async_trait]
 impl FlightService for EchoFlightService {
     type HandshakeStream = BoxStream<'static, Result<arrow_flight::HandshakeResponse, Status>>;
-    type ListFlightsStream = BoxStream<'static, Result<arrow_flight::FlightInfo, Status>>;
+    type ListFlightsStream = BoxStream<'static, Result<FlightInfo, Status>>;
     type DoGetStream = BoxStream<'static, Result<FlightData, Status>>;
     type DoPutStream = BoxStream<'static, Result<PutResult, Status>>;
     type DoActionStream = BoxStream<'static, Result<arrow_flight::Result, Status>>;
-    type ListActionsStream = BoxStream<'static, Result<arrow_flight::ActionType, Status>>;
+    type ListActionsStream = BoxStream<'static, Result<ArrowActionType, Status>>;
     type DoExchangeStream = BoxStream<'static, Result<FlightData, Status>>;
 
     async fn handshake(
@@ -56,23 +181,91 @@ impl FlightService for EchoFlightService {
 
     async fn list_flights(
         &self,
-        _request: Request<arrow_flight::Criteria>,
+        _request: Request<Criteria>,
     ) -> Result<Response<Self::ListFlightsStream>, Status> {
-        Err(Status::unimplemented("list_flights"))
+        let guard = self.state.lock().map_err(|_| Status::internal("lock"))?;
+        let info = match &guard.data {
+            None => {
+                let empty: Vec<Result<FlightInfo, Status>> = vec![];
+                return Ok(Response::new(Box::pin(futures::stream::iter(empty))));
+            }
+            Some((schema, batches)) => {
+                let schema_bytes = schema_ipc_bytes(schema)?;
+                let total_rows: i64 = batches.iter().map(|b| b.num_rows() as i64).sum();
+                FlightInfo {
+                    schema: schema_bytes,
+                    flight_descriptor: Some(FlightDescriptor {
+                        r#type: DESCRIPTOR_CMD,
+                        cmd: Bytes::from(ECHO_TICKET),
+                        ..Default::default()
+                    }),
+                    endpoint: vec![FlightEndpoint {
+                        ticket: Some(Ticket {
+                            ticket: Bytes::from(ECHO_TICKET),
+                        }),
+                        ..Default::default()
+                    }],
+                    total_records: total_rows,
+                    total_bytes: -1,
+                    ordered: false,
+                    app_metadata: Bytes::new(),
+                }
+            }
+        };
+        Ok(Response::new(Box::pin(futures::stream::iter([Ok(info)]))))
     }
 
     async fn get_flight_info(
         &self,
-        _request: Request<arrow_flight::FlightDescriptor>,
-    ) -> Result<Response<arrow_flight::FlightInfo>, Status> {
-        Err(Status::unimplemented("get_flight_info"))
+        request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        let desc = request.into_inner();
+        if desc.r#type != DESCRIPTOR_CMD || desc.cmd.as_ref() != ECHO_TICKET {
+            return Err(Status::not_found("unknown descriptor"));
+        }
+        let guard = self.state.lock().map_err(|_| Status::internal("lock"))?;
+        match &guard.data {
+            None => Err(Status::not_found("no data: do_put first")),
+            Some((schema, batches)) => {
+                let schema_bytes = schema_ipc_bytes(schema)?;
+                let total_rows: i64 = batches.iter().map(|b| b.num_rows() as i64).sum();
+                Ok(Response::new(FlightInfo {
+                    schema: schema_bytes,
+                    flight_descriptor: Some(FlightDescriptor {
+                        r#type: DESCRIPTOR_CMD,
+                        cmd: Bytes::from(ECHO_TICKET),
+                        ..Default::default()
+                    }),
+                    endpoint: vec![FlightEndpoint {
+                        ticket: Some(Ticket {
+                            ticket: Bytes::from(ECHO_TICKET),
+                        }),
+                        ..Default::default()
+                    }],
+                    total_records: total_rows,
+                    total_bytes: -1,
+                    ordered: false,
+                    app_metadata: Bytes::new(),
+                }))
+            }
+        }
     }
 
     async fn get_schema(
         &self,
-        _request: Request<arrow_flight::FlightDescriptor>,
-    ) -> Result<Response<arrow_flight::SchemaResult>, Status> {
-        Err(Status::unimplemented("get_schema"))
+        request: Request<FlightDescriptor>,
+    ) -> Result<Response<SchemaResult>, Status> {
+        let desc = request.into_inner();
+        if desc.r#type != DESCRIPTOR_CMD || desc.cmd.as_ref() != ECHO_TICKET {
+            return Err(Status::not_found("unknown descriptor"));
+        }
+        let guard = self.state.lock().map_err(|_| Status::internal("lock"))?;
+        match &guard.data {
+            None => Err(Status::not_found("no data: do_put first")),
+            Some((schema, _)) => Ok(Response::new(SchemaResult {
+                schema: schema_ipc_bytes(schema)?,
+            })),
+        }
     }
 
     async fn do_get(&self, request: Request<Ticket>) -> Result<Response<Self::DoGetStream>, Status> {
@@ -116,9 +309,11 @@ impl FlightService for EchoFlightService {
         let schema = batches
             .first()
             .map(|b| b.schema())
-            .ok_or_else(|| Status::invalid_argument(
-                "do_put rejected: stream contained no record batches (schema cannot be inferred)",
-            ))?;
+            .ok_or_else(|| {
+                Status::invalid_argument(
+                    "do_put rejected: stream contained no record batches (schema cannot be inferred)",
+                )
+            })?;
         {
             let mut guard = self.state.lock().map_err(|_| Status::internal("lock"))?;
             guard.data = Some((schema, batches));
@@ -129,21 +324,47 @@ impl FlightService for EchoFlightService {
 
     async fn do_action(
         &self,
-        _request: Request<arrow_flight::Action>,
+        request: Request<Action>,
     ) -> Result<Response<Self::DoActionStream>, Status> {
-        Err(Status::unimplemented("do_action"))
+        let action = request.into_inner();
+        match action.r#type.as_str() {
+            "ping" => {
+                let result = arrow_flight::Result {
+                    body: Bytes::from("pong"),
+                };
+                Ok(Response::new(Box::pin(futures::stream::iter([Ok(result)]))))
+            }
+            "clear" => {
+                let mut guard = self.state.lock().map_err(|_| Status::internal("lock"))?;
+                guard.data = None;
+                let empty: Vec<Result<arrow_flight::Result, Status>> = vec![];
+                Ok(Response::new(Box::pin(futures::stream::iter(empty))))
+            }
+            other => Err(Status::not_found(format!("unknown action: {other}"))),
+        }
     }
 
     async fn list_actions(
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<Self::ListActionsStream>, Status> {
-        Err(Status::unimplemented("list_actions"))
+        let actions = vec![
+            Ok(ArrowActionType {
+                r#type: "clear".to_string(),
+                description: "Clear the stored echo data.".to_string(),
+            }),
+            Ok(ArrowActionType {
+                r#type: "ping".to_string(),
+                description: "Responds with 'pong'. Used to verify the server is alive."
+                    .to_string(),
+            }),
+        ];
+        Ok(Response::new(Box::pin(futures::stream::iter(actions))))
     }
 
     async fn poll_flight_info(
         &self,
-        _request: Request<arrow_flight::FlightDescriptor>,
+        _request: Request<FlightDescriptor>,
     ) -> Result<Response<arrow_flight::PollInfo>, Status> {
         Err(Status::unimplemented("poll_flight_info"))
     }
@@ -155,6 +376,8 @@ impl FlightService for EchoFlightService {
         Err(Status::unimplemented("do_exchange"))
     }
 }
+
+// ── Server NIF handles ────────────────────────────────────────────────────────
 
 /// Handle for the running server (join handle + port + shutdown sender).
 pub struct FlightServerHandle {
@@ -218,9 +441,7 @@ pub fn flight_server_start<'a>(env: Env<'a>, host: String, port: u16) -> Term<'a
             // Wire the shutdown signal into tonic's accept loop so that when
             // flight_server_stop fires shutdown_tx, the server stops accepting
             // new connections and waits for all in-flight RPCs to complete
-            // before the future resolves.  Using a plain serve_with_incoming +
-            // tokio::spawn would orphan the server task and cause abrupt
-            // cancellation when the OS thread exits.
+            // before the future resolves.
             let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
             let server_fut = Server::builder()
                 .add_service(svc)
@@ -232,11 +453,6 @@ pub fn flight_server_start<'a>(env: Env<'a>, host: String, port: u16) -> Term<'a
             // rather than sleeping for a fixed interval (which is fragile on slow systems
             // and wasteful on fast ones). We poll up to 80 times with 25 ms back-off,
             // giving a maximum wait of 2 s before reporting a timeout.
-            //
-            // Always probe via 127.0.0.1 regardless of the bind address: a server
-            // bound to 0.0.0.0 also listens on loopback, and we can't connect to
-            // 0.0.0.0 directly.  For specific non-loopback IPs the caller is
-            // responsible for ensuring the address is reachable from this host.
             let probe_ip = if actual_host == "0.0.0.0" || actual_host == "::" {
                 "127.0.0.1".to_string()
             } else {
@@ -259,9 +475,6 @@ pub fn flight_server_start<'a>(env: Env<'a>, host: String, port: u16) -> Term<'a
                 return;
             }
             let _ = tx.send(Ok((actual_host, actual_port, shutdown_tx)));
-            // Wait for the server task to finish (i.e. until shutdown_tx fires
-            // and all in-flight requests drain).  This keeps the OS thread —
-            // and therefore the Tokio runtime — alive for the server's lifetime.
             let _ = server_handle.await;
         })
     });
@@ -292,7 +505,7 @@ pub fn flight_server_host(handle: ResourceArc<FlightServerHandle>) -> String {
     handle.host.clone()
 }
 
-/// Stop the Flight server (signals shutdown, then joins the server thread). Returns :ok or {:error, msg}.
+/// Stop the Flight server (signals shutdown, then joins the server thread).
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn flight_server_stop<'a>(env: Env<'a>, handle: ResourceArc<FlightServerHandle>) -> Term<'a> {
     if let Ok(mut shutdown_guard) = handle.shutdown.lock() {
@@ -308,6 +521,8 @@ pub fn flight_server_stop<'a>(env: Env<'a>, handle: ResourceArc<FlightServerHand
     rustler::types::atom::Atom::from_str(env, "ok").unwrap().encode(env)
 }
 
+// ── Shared client Tokio runtime ───────────────────────────────────────────────
+
 /// A single multi-threaded Tokio runtime shared by **all** Flight client handles.
 ///
 /// # Why shared?
@@ -317,15 +532,11 @@ pub fn flight_server_stop<'a>(env: Env<'a>, handle: ResourceArc<FlightServerHand
 /// number of live clients, which can exhaust system resources when many clients
 /// are created (e.g. in a connection pool or test suite).
 ///
-/// A single shared runtime avoids that: all `do_put` / `do_get` calls across
-/// every client handle are scheduled onto the same fixed-size thread pool.
+/// A single shared runtime avoids that: all client calls across every client
+/// handle are scheduled onto the same fixed-size thread pool.
 /// The runtime lives for the process lifetime — it is never shut down — which
 /// is intentional: dropping a `Runtime` while tasks are still running would
 /// block until they complete, which is undesirable for a background executor.
-///
-/// Server handles are **not** eligible for runtime sharing because each server
-/// runs an infinite `serve_with_incoming` loop that must be independently
-/// cancellable; clients only need short-lived `block_on` calls.
 static CLIENT_RUNTIME: OnceLock<Arc<tokio::runtime::Runtime>> = OnceLock::new();
 
 fn client_runtime() -> Arc<tokio::runtime::Runtime> {
@@ -343,39 +554,44 @@ fn client_runtime() -> Arc<tokio::runtime::Runtime> {
 }
 
 /// Client handle wrapping Arrow Flight client and the runtime that owns the connection.
-/// The runtime must stay alive for the channel to remain connected.
 pub struct FlightClientHandle {
     rt: Arc<tokio::runtime::Runtime>,
     client: Mutex<arrow_flight::client::FlightClient>,
 }
 
+// ── Client NIFs ───────────────────────────────────────────────────────────────
+
 /// Connect to a Flight server. Returns `{:ok, client_ref}` or `{:error, msg}`.
 ///
-/// # Runtime
+/// # Timeout
 ///
-/// All client handles share a single global Tokio runtime (see `CLIENT_RUNTIME`).
-/// No new thread-pool is created per connection.
+/// `connect_timeout_ms` sets the TCP connection timeout (0 = no limit).
 ///
 /// # Security
 ///
-/// Connections are **always plaintext HTTP/2** (no TLS). All Arrow schemas and
-/// record batches travel unencrypted over the wire. Only use this for
+/// Connections are **always plaintext HTTP/2** (no TLS). Only use this for
 /// loopback / localhost endpoints or on a trusted private network.
-/// TLS support is deferred to a later milestone; the Elixir wrapper already
-/// rejects `tls: true` with `{:error, :tls_not_supported}` to prevent callers
-/// from inadvertently believing the connection is encrypted.
 #[rustler::nif(schedule = "DirtyIo")]
-pub fn flight_client_connect<'a>(env: Env<'a>, host: String, port: u16) -> Term<'a> {
+pub fn flight_client_connect<'a>(
+    env: Env<'a>,
+    host: String,
+    port: u16,
+    connect_timeout_ms: u64,
+) -> Term<'a> {
     // PLAINTEXT_ONLY: change this scheme to "https" and add TLS config when
     // TLS is implemented (requires tonic TLS feature + certificate handling).
-    const SCHEME: &str = "http";
-    let endpoint = format!("{}://{}:{}", SCHEME, host, port);
-    let channel = match Channel::from_shared(endpoint) {
+    let endpoint_uri = format!("http://{}:{}", host, port);
+    let endpoint = match Channel::from_shared(endpoint_uri) {
         Ok(c) => c,
         Err(e) => return err_encode(env, &e.to_string()),
     };
+    let endpoint = if connect_timeout_ms > 0 {
+        endpoint.connect_timeout(std::time::Duration::from_millis(connect_timeout_ms))
+    } else {
+        endpoint
+    };
     let rt = client_runtime();
-    let channel = match rt.block_on(channel.connect()) {
+    let channel = match rt.block_on(endpoint.connect()) {
         Ok(ch) => ch,
         Err(e) => return err_encode(env, &e.to_string()),
     };
@@ -387,7 +603,7 @@ pub fn flight_client_connect<'a>(env: Env<'a>, host: String, port: u16) -> Term<
     ok_encode(env, ResourceArc::new(handle))
 }
 
-/// do_put: upload schema and batches. Returns :ok or {:error, msg}.
+/// do_put: upload schema and batches. Returns `:ok` or `{:error, msg}`.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn flight_client_do_put<'a>(
     env: Env<'a>,
@@ -411,8 +627,7 @@ pub fn flight_client_do_put<'a>(
     match client.rt.block_on(guard.do_put(flight_data)) {
         Ok(mut result_stream) => {
             while client.rt.block_on(result_stream.next()).is_some() {}
-            let ok_atom = rustler::types::atom::Atom::from_str(env, "ok").unwrap();
-            ok_atom.encode(env)
+            rustler::types::atom::Atom::from_str(env, "ok").unwrap().encode(env)
         }
         Err(e) => err_encode(env, &e.to_string()),
     }
@@ -427,10 +642,6 @@ pub fn flight_client_do_put<'a>(
 /// one batch and the growing IPC bytes need to be live simultaneously.
 /// Peak memory is therefore `O(largest_batch + total_ipc_bytes)` rather than
 /// `O(total_decoded_bytes + total_ipc_bytes)` as with a full `try_collect`.
-///
-/// The IPC buffer still accumulates the entire result before the returned stream
-/// handle is readable.  True incremental streaming (returning a handle that pulls
-/// from the network on demand, without buffering) is deferred to a later milestone.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn flight_client_do_get<'a>(
     env: Env<'a>,
@@ -453,15 +664,16 @@ pub fn flight_client_do_get<'a>(
             Err(e) => return err_encode(env, &e.to_string()),
         }
     };
-    // Pull the first batch to obtain the schema for the IPC writer.
-    // do_put rejects empty streams, so an empty response is an internal
-    // invariant violation rather than a normal client error.
     let first_batch = match client.rt.block_on(flight_stream.next()) {
         Some(Ok(b)) => b,
         Some(Err(e)) => return err_encode(env, &e.to_string()),
-        None => return err_encode(env, "do_get: server returned empty batch stream \
-                                        (internal invariant violated: do_put should \
-                                        have rejected this)"),
+        None => {
+            return err_encode(
+                env,
+                "do_get: server returned empty batch stream \
+                 (internal invariant violated: do_put should have rejected this)",
+            )
+        }
     };
     let schema = first_batch.schema();
     let mut buf = Vec::new();
@@ -472,17 +684,13 @@ pub fn flight_client_do_get<'a>(
     if let Err(e) = writer.write(&first_batch) {
         return err_encode(env, &e.to_string());
     }
-    // Drop the first batch before pulling the next — only the IPC bytes persist.
     drop(first_batch);
-    // Stream remaining batches one at a time: each RecordBatch is written then
-    // dropped before the next is fetched, keeping peak memory low.
     loop {
         match client.rt.block_on(flight_stream.next()) {
             Some(Ok(batch)) => {
                 if let Err(e) = writer.write(&batch) {
                     return err_encode(env, &e.to_string());
                 }
-                // batch dropped here; only its IPC encoding remains in buf
             }
             Some(Err(e)) => return err_encode(env, &e.to_string()),
             None => break,
@@ -502,35 +710,269 @@ pub fn flight_client_do_get<'a>(
     ok_encode(env, ResourceArc::new(ipc_stream))
 }
 
-// Resource type registration for Rustler (initialized in lib.rs on_load).
+/// list_flights: enumerate available flights (filtered by `criteria_bytes`).
+/// Returns `{:ok, [flight_info_tuple, ...]}` or `{:error, msg}`.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_client_list_flights<'a>(
+    env: Env<'a>,
+    client: ResourceArc<FlightClientHandle>,
+    criteria_binary: rustler::Binary,
+    timeout_ms: u64,
+) -> Term<'a> {
+    let criteria_bytes = criteria_binary.as_slice().to_vec();
+    let flights = {
+        let mut guard = match client.client.lock() {
+            Ok(g) => g,
+            Err(_) => return err_encode(env, "client lock poisoned"),
+        };
+        let collect_fut = async {
+            let stream = guard
+                .list_flights(criteria_bytes)
+                .await
+                .map_err(|e: arrow_flight::error::FlightError| e.to_string())?;
+            stream
+                .try_collect::<Vec<_>>()
+                .await
+                .map_err(|e: arrow_flight::error::FlightError| e.to_string())
+        };
+        if timeout_ms > 0 {
+            match client.rt.block_on(tokio::time::timeout(
+                std::time::Duration::from_millis(timeout_ms),
+                collect_fut,
+            )) {
+                Ok(Ok(v)) => v,
+                Ok(Err(e)) => return err_encode(env, &e),
+                Err(_) => return err_encode(env, "list_flights: request timed out"),
+            }
+        } else {
+            match client.rt.block_on(collect_fut) {
+                Ok(v) => v,
+                Err(e) => return err_encode(env, &e),
+            }
+        }
+    };
+    let terms: Vec<Term<'a>> = flights
+        .iter()
+        .map(|f| encode_flight_info(env, f))
+        .collect();
+    ok_encode(env, terms)
+}
+
+/// get_flight_info: metadata for a specific flight descriptor.
+/// Returns `{:ok, flight_info_tuple}` or `{:error, msg}`.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_client_get_flight_info<'a>(
+    env: Env<'a>,
+    client: ResourceArc<FlightClientHandle>,
+    descriptor: Term<'a>,
+    timeout_ms: u64,
+) -> Term<'a> {
+    let flight_desc = match decode_descriptor(descriptor) {
+        Ok(d) => d,
+        Err(msg) => return err_encode(env, &msg),
+    };
+    let info = {
+        let mut guard = match client.client.lock() {
+            Ok(g) => g,
+            Err(_) => return err_encode(env, "client lock poisoned"),
+        };
+        let fut = guard.get_flight_info(flight_desc);
+        if timeout_ms > 0 {
+            match client.rt.block_on(tokio::time::timeout(
+                std::time::Duration::from_millis(timeout_ms),
+                fut,
+            )) {
+                Ok(Ok(v)) => v,
+                Ok(Err(e)) => return err_encode(env, &e.to_string()),
+                Err(_) => return err_encode(env, "get_flight_info: request timed out"),
+            }
+        } else {
+            match client.rt.block_on(fut) {
+                Ok(v) => v,
+                Err(e) => return err_encode(env, &e.to_string()),
+            }
+        }
+    };
+    ok_encode(env, encode_flight_info(env, &info))
+}
+
+/// get_schema: Arrow schema for the flight identified by `descriptor`.
+/// Returns `{:ok, schema_ref}` or `{:error, msg}`.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_client_get_schema<'a>(
+    env: Env<'a>,
+    client: ResourceArc<FlightClientHandle>,
+    descriptor: Term<'a>,
+    timeout_ms: u64,
+) -> Term<'a> {
+    let flight_desc = match decode_descriptor(descriptor) {
+        Ok(d) => d,
+        Err(msg) => return err_encode(env, &msg),
+    };
+    let schema_ref = {
+        let mut guard = match client.client.lock() {
+            Ok(g) => g,
+            Err(_) => return err_encode(env, "client lock poisoned"),
+        };
+        let fut = guard.get_schema(flight_desc);
+        if timeout_ms > 0 {
+            match client.rt.block_on(tokio::time::timeout(
+                std::time::Duration::from_millis(timeout_ms),
+                fut,
+            )) {
+                Ok(Ok(v)) => v,
+                Ok(Err(e)) => return err_encode(env, &e.to_string()),
+                Err(_) => return err_encode(env, "get_schema: request timed out"),
+            }
+        } else {
+            match client.rt.block_on(fut) {
+                Ok(v) => v,
+                Err(e) => return err_encode(env, &e.to_string()),
+            }
+        }
+    };
+    ok_encode(env, ResourceArc::new(ExArrowSchema { schema: schema_ref.into() }))
+}
+
+/// list_actions: enumerate the action types supported by the server.
+/// Returns `{:ok, [{type_string, description_string}, ...]}` or `{:error, msg}`.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_client_list_actions<'a>(
+    env: Env<'a>,
+    client: ResourceArc<FlightClientHandle>,
+    timeout_ms: u64,
+) -> Term<'a> {
+    let action_types = {
+        let mut guard = match client.client.lock() {
+            Ok(g) => g,
+            Err(_) => return err_encode(env, "client lock poisoned"),
+        };
+        let collect_fut = async {
+            let stream = guard
+                .list_actions()
+                .await
+                .map_err(|e: arrow_flight::error::FlightError| e.to_string())?;
+            stream
+                .try_collect::<Vec<_>>()
+                .await
+                .map_err(|e: arrow_flight::error::FlightError| e.to_string())
+        };
+        if timeout_ms > 0 {
+            match client.rt.block_on(tokio::time::timeout(
+                std::time::Duration::from_millis(timeout_ms),
+                collect_fut,
+            )) {
+                Ok(Ok(v)) => v,
+                Ok(Err(e)) => return err_encode(env, &e),
+                Err(_) => return err_encode(env, "list_actions: request timed out"),
+            }
+        } else {
+            match client.rt.block_on(collect_fut) {
+                Ok(v) => v,
+                Err(e) => return err_encode(env, &e),
+            }
+        }
+    };
+    let terms: Vec<Term<'a>> = action_types
+        .iter()
+        .map(|at| (at.r#type.clone(), at.description.clone()).encode(env))
+        .collect();
+    ok_encode(env, terms)
+}
+
+/// do_action: execute a named action on the server with optional body.
+/// Returns `{:ok, [result_binary, ...]}` or `{:error, msg}`.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_client_do_action<'a>(
+    env: Env<'a>,
+    client: ResourceArc<FlightClientHandle>,
+    action_type: String,
+    action_body: rustler::Binary,
+    timeout_ms: u64,
+) -> Term<'a> {
+    let body_bytes = action_body.as_slice().to_vec();
+    let action = Action {
+        r#type: action_type,
+        body: Bytes::from(body_bytes),
+    };
+    let results = {
+        let mut guard = match client.client.lock() {
+            Ok(g) => g,
+            Err(_) => return err_encode(env, "client lock poisoned"),
+        };
+        // FlightDoActionStream yields Bytes (the body of each Result) directly.
+        let collect_fut = async {
+            let stream = guard
+                .do_action(action)
+                .await
+                .map_err(|e: arrow_flight::error::FlightError| e.to_string())?;
+            stream
+                .try_collect::<Vec<Bytes>>()
+                .await
+                .map_err(|e: arrow_flight::error::FlightError| e.to_string())
+        };
+        if timeout_ms > 0 {
+            match client.rt.block_on(tokio::time::timeout(
+                std::time::Duration::from_millis(timeout_ms),
+                collect_fut,
+            )) {
+                Ok(Ok(v)) => v,
+                Ok(Err(e)) => return err_encode(env, &e),
+                Err(_) => return err_encode(env, "do_action: request timed out"),
+            }
+        } else {
+            match client.rt.block_on(collect_fut) {
+                Ok(v) => v,
+                Err(e) => return err_encode(env, &e),
+            }
+        }
+    };
+    let body_terms: Vec<Term<'a>> = results.iter().map(|r| encode_binary(env, r)).collect();
+    ok_encode(env, body_terms)
+}
+
+// ── Resource type registration ────────────────────────────────────────────────
+
 use std::sync::OnceLock as ResourceOnceLock;
 use rustler::resource::{open_struct_resource_type, ResourceType, ResourceTypeProvider, NIF_RESOURCE_FLAGS};
 use crate::util::SyncResourceType;
 
-static FLIGHT_SERVER_HANDLE_TYPE: ResourceOnceLock<SyncResourceType<FlightServerHandle>> = ResourceOnceLock::new();
-static FLIGHT_CLIENT_HANDLE_TYPE: ResourceOnceLock<SyncResourceType<FlightClientHandle>> = ResourceOnceLock::new();
+static FLIGHT_SERVER_HANDLE_TYPE: ResourceOnceLock<SyncResourceType<FlightServerHandle>> =
+    ResourceOnceLock::new();
+static FLIGHT_CLIENT_HANDLE_TYPE: ResourceOnceLock<SyncResourceType<FlightClientHandle>> =
+    ResourceOnceLock::new();
 
 impl ResourceTypeProvider for FlightServerHandle {
     fn get_type() -> &'static ResourceType<Self> {
-        &FLIGHT_SERVER_HANDLE_TYPE.get().expect("FlightServerHandle not initialized").0
+        &FLIGHT_SERVER_HANDLE_TYPE
+            .get()
+            .expect("FlightServerHandle not initialized")
+            .0
     }
 }
 
 impl ResourceTypeProvider for FlightClientHandle {
     fn get_type() -> &'static ResourceType<Self> {
-        &FLIGHT_CLIENT_HANDLE_TYPE.get().expect("FlightClientHandle not initialized").0
+        &FLIGHT_CLIENT_HANDLE_TYPE
+            .get()
+            .expect("FlightClientHandle not initialized")
+            .0
     }
 }
 
 pub fn flight_register_resources(env: rustler::Env) -> bool {
     let flags = NIF_RESOURCE_FLAGS::ERL_NIF_RT_CREATE;
 
-    let Some(t) = open_struct_resource_type::<FlightServerHandle>(env, "ExArrowFlightServerHandle\0", flags) else {
+    let Some(t) =
+        open_struct_resource_type::<FlightServerHandle>(env, "ExArrowFlightServerHandle\0", flags)
+    else {
         return false;
     };
     let _ = FLIGHT_SERVER_HANDLE_TYPE.set(SyncResourceType(t));
 
-    let Some(t) = open_struct_resource_type::<FlightClientHandle>(env, "ExArrowFlightClientHandle\0", flags) else {
+    let Some(t) =
+        open_struct_resource_type::<FlightClientHandle>(env, "ExArrowFlightClientHandle\0", flags)
+    else {
         return false;
     };
     let _ = FLIGHT_CLIENT_HANDLE_TYPE.set(SyncResourceType(t));
