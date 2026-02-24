@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Run CI steps locally (no push). Same as .github/workflows/ci.yml Elixir job.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+echo "== mix deps.get"
+mix deps.get
+echo "== mix compile --warnings-as-errors"
+mix compile --warnings-as-errors
+echo "== mix test"
+mix test
+echo "== mix docs"
+mix docs
+echo "== CI (local) passed"

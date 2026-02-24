@@ -159,8 +159,8 @@ defmodule ExArrowTest do
   end
 
   @tag :ipc
-  property "IPC stream roundtrip preserves schema field count and total row count" do
-    check all(n <- integer(0..3)) do
+  test "IPC stream roundtrip preserves schema field count and total row count (property)" do
+    check all n <- integer(0..3) do
       {:ok, binary} = ExArrow.Native.ipc_test_fixture_binary()
       {field_count, row_count} = roundtrip_n(binary, n)
       assert field_count == 2, "after #{n} roundtrips schema should have 2 fields"
