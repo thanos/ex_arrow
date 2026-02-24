@@ -20,7 +20,7 @@ defmodule ExArrow.Stream do
   def schema(%__MODULE__{resource: ref}) do
     case Native.ipc_stream_schema(ref) do
       {:error, msg} -> {:error, msg}
-      schema_ref -> {:ok, %Schema{resource: schema_ref}}
+      schema_ref -> {:ok, Schema.from_ref(schema_ref)}
     end
   end
 
@@ -32,7 +32,7 @@ defmodule ExArrow.Stream do
   def next(%__MODULE__{resource: ref}) do
     case Native.ipc_stream_next(ref) do
       :done -> nil
-      {:ok, batch_ref} -> %RecordBatch{resource: batch_ref}
+      {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
       {:error, msg} -> {:error, msg}
     end
   end

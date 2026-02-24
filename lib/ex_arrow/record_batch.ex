@@ -11,13 +11,16 @@ defmodule ExArrow.RecordBatch do
   @opaque t :: %__MODULE__{resource: reference()}
   defstruct [:resource]
 
+  @doc false
+  @spec from_ref(reference()) :: t()
+  def from_ref(ref), do: %__MODULE__{resource: ref}
+
   @doc """
   Returns the schema of this record batch.
   """
   @spec schema(t()) :: Schema.t()
   def schema(%__MODULE__{resource: ref}) do
-    schema_ref = Native.record_batch_schema(ref)
-    %Schema{resource: schema_ref}
+    ref |> Native.record_batch_schema() |> Schema.from_ref()
   end
 
   @doc """

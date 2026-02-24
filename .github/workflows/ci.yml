@@ -58,6 +58,20 @@ jobs:
       - name: Credo
         run: mix credo --strict
 
+      - name: Sobelow
+        run: mix sobelow --exit --skip
+
+      - name: Restore Dialyzer PLT cache
+        uses: actions/cache@v4
+        with:
+          path: priv/plts
+          key: plt-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            plt-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      - name: Dialyzer
+        run: mix dialyzer
+
       - name: Run tests
         run: mix test
 

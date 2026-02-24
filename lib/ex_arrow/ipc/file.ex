@@ -43,7 +43,7 @@ defmodule ExArrow.IPC.File do
   def schema(%__MODULE__{resource: ref}) do
     case Native.ipc_file_schema(ref) do
       {:error, _} = err -> err
-      schema_ref -> {:ok, %Schema{resource: schema_ref}}
+      schema_ref -> {:ok, Schema.from_ref(schema_ref)}
     end
   end
 
@@ -61,7 +61,7 @@ defmodule ExArrow.IPC.File do
   @spec get_batch(t(), non_neg_integer()) :: {:ok, RecordBatch.t()} | {:error, String.t()}
   def get_batch(%__MODULE__{resource: ref}, index) when is_integer(index) and index >= 0 do
     case Native.ipc_file_get_batch(ref, index) do
-      {:ok, batch_ref} -> {:ok, %RecordBatch{resource: batch_ref}}
+      {:ok, batch_ref} -> {:ok, RecordBatch.from_ref(batch_ref)}
       {:error, _} = err -> err
     end
   end

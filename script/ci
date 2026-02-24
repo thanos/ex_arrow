@@ -10,6 +10,10 @@ echo "== mix format --check-formatted"
 mix format --check-formatted
 echo "== mix credo --strict"
 mix credo --strict
+echo "== mix sobelow"
+mix sobelow --exit --skip
+echo "== mix dialyzer"
+mix dialyzer
 echo "== mix test"
 mix test
 echo "== mix coveralls.html"

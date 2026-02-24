@@ -11,6 +11,10 @@ defmodule ExArrow.MixProject do
       docs: docs(),
       aliases: aliases(),
       test_coverage: [tool: ExCoveralls],
+      dialyzer: [
+        plt_file: {:no_warn, "priv/plts/project.plt"},
+        plt_add_apps: [:mix]
+      ],
       preferred_cli_env: [
         coveralls: :test,
         "coveralls.html": :test,
@@ -34,6 +38,8 @@ defmodule ExArrow.MixProject do
       {:rustler, "~> 0.32"},
       {:ex_doc, "~> 0.34", only: :dev},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:excoveralls, "~> 0.18", only: :test},
       {:mox, "~> 1.0", only: :test},
       {:stream_data, "~> 0.6", only: :test}

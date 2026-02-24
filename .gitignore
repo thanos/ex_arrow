@@ -25,4 +25,7 @@ ex_arrow-*.tar
 # NIF artifacts (built from native/ex_arrow_native).
 /priv/native/
 
+# Dialyzer PLT files (large build artefacts; cached in CI).
+/priv/plts/
+
 /native/ex_arrow_native/target

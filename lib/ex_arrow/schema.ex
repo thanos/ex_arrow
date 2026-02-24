@@ -12,6 +12,10 @@ defmodule ExArrow.Schema do
   @opaque t :: %__MODULE__{resource: reference()}
   defstruct [:resource]
 
+  @doc false
+  @spec from_ref(reference()) :: t()
+  def from_ref(ref), do: %__MODULE__{resource: ref}
+
   @doc """
   Returns the list of fields in the schema (Elixir structs).
   """
