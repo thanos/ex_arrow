@@ -5,7 +5,7 @@ ExArrow supports the Arrow IPC format: streaming (sequential) and file format (r
 ## Stream vs file
 
 - **Stream**: Sequential read/write. Use `Reader.from_binary/1` or `Reader.from_file/1` to get an `ExArrow.Stream` that yields record batches via `ExArrow.Stream.next/1`. Use `Writer.to_binary/2` or `Writer.to_file/3` to write batches. No random access.
-- **File format**: Random access by batch index. Use `ExArrow.IPC.File.from_file/1` or `ExArrow.IPC.File.from_binary/1` to open; then `schema/1`, `batch_count/1`, and `get_batch/2` to read without consuming. Write file format with `ExArrow.Native.ipc_file_writer_to_file/3` (low-level; a higher-level API may be added later).
+- **File format**: Random access by batch index. Use `ExArrow.IPC.File.from_file/1` or `ExArrow.IPC.File.from_binary/1` to open; then `schema/1`, `batch_count/1`, and `get_batch/2` to read without consuming. Write file format with the low-level NIF `ipc_file_writer_to_file/3` (a higher-level API may be added later).
 
 ## Reading (stream)
 
@@ -92,7 +92,7 @@ Any type not explicitly mapped is returned as `:unknown`. Reading and writing da
 
 ## Limitations
 
-- **Stream vs file**: Writer `to_file/3` produces stream format; for file format (footer, random access) use `ExArrow.Native.ipc_file_writer_to_file/3`.
+- **Stream vs file**: Writer `to_file/3` produces stream format; for file format (footer, random access) use the low-level NIF `ipc_file_writer_to_file/3`.
 - **Type reflection**: Only the atoms above are returned for field types; nested/child types (e.g. element type of a list) are not yet exposed.
 - **No column/array access**: Record batches are opaque; copying data out to Elixir (e.g. column arrays) is planned for a later milestone.
 

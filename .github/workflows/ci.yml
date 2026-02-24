@@ -52,6 +52,9 @@ jobs:
       - name: Format check
         run: mix format --check-formatted
 
+      - name: Build docs
+        run: mix docs --warnings-as-errors
+
       - name: Credo
         run: mix credo --strict
 
@@ -67,8 +70,7 @@ jobs:
           name: coverage-report
           path: cover/
 
-      - name: Build docs
-        run: mix docs
+
 
   rust:
     name: Rust build
