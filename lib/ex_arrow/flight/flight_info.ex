@@ -19,11 +19,11 @@ defmodule ExArrow.Flight.FlightInfo do
   @type endpoint :: %{ticket: binary(), locations: [String.t()]}
 
   @type t :: %__MODULE__{
-          schema_bytes: binary(),
+          schema_bytes: binary() | nil,
           descriptor: descriptor(),
-          endpoints: [endpoint()],
-          total_records: integer(),
-          total_bytes: integer()
+          endpoints: [endpoint()] | nil,
+          total_records: integer() | nil,
+          total_bytes: integer() | nil
         }
 
   defstruct [:schema_bytes, :descriptor, :endpoints, :total_records, :total_bytes]
