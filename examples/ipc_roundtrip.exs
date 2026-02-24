@@ -29,6 +29,7 @@ case Reader.from_binary(binary) do
         batch -> collect.(collect, stream, [batch | acc])
       end
     end
+
     batches = collect.(collect, stream, [])
     total_rows = Enum.reduce(batches, 0, fn b, acc -> acc + RecordBatch.num_rows(b) end)
     IO.puts("Batches: #{length(batches)}, total rows: #{total_rows}")
@@ -37,13 +38,18 @@ case Reader.from_binary(binary) do
     case Writer.to_binary(schema, batches) do
       {:ok, binary2} ->
         IO.puts("Roundtrip write: #{byte_size(binary2)} bytes")
+
         case Reader.from_binary(binary2) do
           {:ok, stream2} ->
             schema2 = Stream.schema(stream2)
             IO.puts("Roundtrip read OK, schema fields: #{length(Schema.fields(schema2))}")
-          {:error, msg} -> IO.puts("Roundtrip read error: #{msg}")
+
+          {:error, msg} ->
+            IO.puts("Roundtrip read error: #{msg}")
         end
-      {:error, msg} -> IO.puts("Roundtrip write error: #{msg}")
+
+      {:error, msg} ->
+        IO.puts("Roundtrip write error: #{msg}")
     end
 
   {:error, msg} ->

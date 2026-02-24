@@ -14,6 +14,7 @@ defmodule ExArrow.IPC.Writer do
           {:ok, binary()} | {:error, String.t()}
   def to_binary(%Schema{resource: schema_ref}, batches) do
     batch_refs = batches |> Enum.to_list() |> Enum.map(& &1.resource)
+
     case Native.ipc_writer_to_binary(schema_ref, batch_refs) do
       {:ok, binary} -> {:ok, binary}
       {:error, msg} -> {:error, msg}
@@ -27,6 +28,7 @@ defmodule ExArrow.IPC.Writer do
           :ok | {:error, String.t()}
   def to_file(path, %Schema{resource: schema_ref}, batches) when is_binary(path) do
     batch_refs = batches |> Enum.to_list() |> Enum.map(& &1.resource)
+
     case Native.ipc_writer_to_file(path, schema_ref, batch_refs) do
       :ok -> :ok
       {:error, msg} -> {:error, msg}

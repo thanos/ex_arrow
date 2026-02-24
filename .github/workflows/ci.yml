@@ -17,6 +17,13 @@ jobs:
         otp: ["27"]
 
     steps:
+      - name: Wait for GitHub API
+        run: |
+          until curl -sf --connect-timeout 5 https://api.github.com > /dev/null; do
+            echo "Waiting for network connectivity to api.github.com..."
+            sleep 5
+          done
+
       - uses: actions/checkout@v4
 
       - name: Set up Elixir
@@ -41,6 +48,13 @@ jobs:
     name: Rust build
     runs-on: ubuntu-latest
     steps:
+      - name: Wait for GitHub API
+        run: |
+          until curl -sf --connect-timeout 5 https://api.github.com > /dev/null; do
+            echo "Waiting for network connectivity to api.github.com..."
+            sleep 5
+          done
+
       - uses: actions/checkout@v4
 
       - name: Set up Elixir
