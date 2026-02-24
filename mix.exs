@@ -35,6 +35,7 @@ defmodule ExArrow.MixProject do
       {:ex_doc, "~> 0.34", only: :dev},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:excoveralls, "~> 0.18", only: :test},
+      {:mox, "~> 1.0", only: :test},
       {:stream_data, "~> 0.6", only: :test}
     ]
   end

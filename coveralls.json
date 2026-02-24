@@ -1,0 +1,8 @@
+{
+  "skip_files": [
+    "lib/ex_arrow/flight/client_behaviour.ex",
+    "lib/ex_arrow/adbc/database_behaviour.ex",
+    "lib/ex_arrow/adbc/connection_behaviour.ex",
+    "lib/ex_arrow/adbc/statement_behaviour.ex"
+  ]
+}

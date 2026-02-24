@@ -6,6 +6,17 @@ defmodule ExArrow.Native do
     path: "native/ex_arrow_native",
     mode: if(Mix.env() == :prod, do: :release, else: :debug)
 
+  @doc false
+  @spec nif_loaded?() :: boolean()
+  def nif_loaded? do
+    try do
+      _ = nif_version()
+      true
+    catch
+      :error, :nif_not_loaded -> false
+    end
+  end
+
   def nif_version, do: :erlang.nif_error(:nif_not_loaded)
   def ipc_test_fixture_binary, do: :erlang.nif_error(:nif_not_loaded)
   def ipc_test_fixture_file_binary, do: :erlang.nif_error(:nif_not_loaded)

@@ -1,6 +1,7 @@
 defmodule ExArrow.ADBC.Statement do
   @moduledoc """
   ADBC Statement: set_sql, execute, returns Arrow stream (record batches).
+  Delegates to the configured implementation (see `:adbc_statement_impl` in application config).
   """
   alias ExArrow.ADBC.Connection
   alias ExArrow.Stream
@@ -8,13 +9,17 @@ defmodule ExArrow.ADBC.Statement do
   @opaque t :: %__MODULE__{resource: reference()}
   defstruct [:resource]
 
+  defp impl do
+    Application.get_env(:ex_arrow, :adbc_statement_impl, ExArrow.ADBC.StatementImpl)
+  end
+
   @doc """
   Creates a new statement from a connection.
   Stub: returns error until NIF is implemented.
   """
   @spec new(Connection.t()) :: {:ok, t()} | {:error, term()}
-  def new(_conn) do
-    {:error, :not_implemented}
+  def new(conn) do
+    impl().new(conn)
   end
 
   @doc """
@@ -22,8 +27,8 @@ defmodule ExArrow.ADBC.Statement do
   Stub: returns error until NIF is implemented.
   """
   @spec set_sql(t(), String.t()) :: :ok | {:error, term()}
-  def set_sql(_stmt, _sql) do
-    {:error, :not_implemented}
+  def set_sql(stmt, sql) do
+    impl().set_sql(stmt, sql)
   end
 
   @doc """
@@ -31,7 +36,7 @@ defmodule ExArrow.ADBC.Statement do
   Stub: returns error until NIF is implemented.
   """
   @spec execute(t()) :: {:ok, Stream.t()} | {:error, term()}
-  def execute(_stmt) do
-    {:error, :not_implemented}
+  def execute(stmt) do
+    impl().execute(stmt)
   end
 end

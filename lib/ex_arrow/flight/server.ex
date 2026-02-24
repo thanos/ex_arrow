@@ -13,6 +13,8 @@ defmodule ExArrow.Flight.Server do
   """
   @spec start_link(non_neg_integer(), keyword()) :: {:ok, t()} | {:error, term()}
   def start_link(_port, _opts \\ []) do
-    {:error, :not_implemented}
+    stub_result()
   end
+
+  defp stub_result, do: {:error, :not_implemented}
 end

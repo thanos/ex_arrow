@@ -4,12 +4,18 @@ defmodule Mix.Tasks.Ci do
   Runs the same steps as the CI workflow: deps.get, compile --warnings-as-errors, test, docs.
 
   Delegates to `script/ci` so you can also run `./script/ci` from the project root.
+  In test you can override the script via `:ci_script_path` in application config.
   """
   use Mix.Task
 
+  defp script_path do
+    Application.get_env(:ex_arrow, :ci_script_path) ||
+      Path.join(File.cwd!(), "script/ci")
+  end
+
   @impl true
   def run(_args) do
-    script = Path.join(File.cwd!(), "script/ci")
+    script = script_path()
 
     unless File.exists?(script) do
       Mix.raise("CI script not found: #{script}")

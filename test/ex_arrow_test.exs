@@ -152,6 +152,10 @@ defmodule ExArrowTest do
       assert ExArrow.Flight.Client.connect("localhost", 9999) == {:error, :not_implemented}
     end
 
+    test "Flight.Server.start_link returns not_implemented" do
+      assert ExArrow.Flight.Server.start_link(9090) == {:error, :not_implemented}
+    end
+
     test "ADBC.Database.open returns not_implemented" do
       assert ExArrow.ADBC.Database.open("/path/to/driver") == {:error, :not_implemented}
     end

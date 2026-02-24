@@ -7,4 +7,8 @@ defmodule ExArrow.Array do
   """
   @opaque t :: %__MODULE__{resource: reference()}
   defstruct [:resource]
+
+  @doc false
+  @spec new(reference()) :: t()
+  def new(resource), do: %__MODULE__{resource: resource}
 end
