@@ -2,26 +2,34 @@ defmodule ExArrow.IPC.Writer do
   @moduledoc """
   IPC stream/file writer: write Arrow record batches to binary or file.
   """
+  alias ExArrow.Native
   alias ExArrow.RecordBatch
   alias ExArrow.Schema
 
   @doc """
   Writes record batches (as a stream or list) to a binary.
-  Stub: returns error until NIF is implemented.
+  Batches must share the same schema.
   """
   @spec to_binary(Schema.t(), [RecordBatch.t()] | Enumerable.t()) ::
-          {:ok, binary()} | {:error, term()}
-  def to_binary(_schema, _batches) do
-    {:error, :not_implemented}
+          {:ok, binary()} | {:error, String.t()}
+  def to_binary(%Schema{resource: schema_ref}, batches) do
+    batch_refs = batches |> Enum.to_list() |> Enum.map(& &1.resource)
+    case Native.ipc_writer_to_binary(schema_ref, batch_refs) do
+      {:ok, binary} -> {:ok, binary}
+      {:error, msg} -> {:error, msg}
+    end
   end
 
   @doc """
   Writes record batches to a file at the given path.
-  Stub: returns error until NIF is implemented.
   """
   @spec to_file(Path.t(), Schema.t(), [RecordBatch.t()] | Enumerable.t()) ::
-          :ok | {:error, term()}
-  def to_file(_path, _schema, _batches) do
-    {:error, :not_implemented}
+          :ok | {:error, String.t()}
+  def to_file(path, %Schema{resource: schema_ref}, batches) when is_binary(path) do
+    batch_refs = batches |> Enum.to_list() |> Enum.map(& &1.resource)
+    case Native.ipc_writer_to_file(path, schema_ref, batch_refs) do
+      :ok -> :ok
+      {:error, msg} -> {:error, msg}
+    end
   end
 end

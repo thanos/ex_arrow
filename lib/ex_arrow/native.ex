@@ -6,8 +6,15 @@ defmodule ExArrow.Native do
     path: "native/ex_arrow_native",
     mode: if(Mix.env() == :prod, do: :release, else: :debug)
 
-  @doc """
-  Returns the native crate version. Used to verify the NIF loads.
-  """
   def nif_version, do: :erlang.nif_error(:nif_not_loaded)
+  def ipc_test_fixture_binary, do: :erlang.nif_error(:nif_not_loaded)
+  def schema_fields(_schema_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def record_batch_schema(_batch_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def record_batch_num_rows(_batch_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def ipc_reader_from_binary(_data), do: :erlang.nif_error(:nif_not_loaded)
+  def ipc_reader_from_file(_path), do: :erlang.nif_error(:nif_not_loaded)
+  def ipc_stream_schema(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def ipc_stream_next(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def ipc_writer_to_binary(_schema_ref, _batches), do: :erlang.nif_error(:nif_not_loaded)
+  def ipc_writer_to_file(_path, _schema_ref, _batches), do: :erlang.nif_error(:nif_not_loaded)
 end
