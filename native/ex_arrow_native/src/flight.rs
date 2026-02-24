@@ -1,8 +1,7 @@
 //! Arrow Flight NIFs: minimal echo server and client (do_put / do_get).
 
 use std::io::Cursor;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use arrow::record_batch::RecordBatch;
 use arrow_schema::SchemaRef;
@@ -160,16 +159,33 @@ impl FlightService for EchoFlightService {
 /// Handle for the running server (join handle + port + shutdown sender).
 pub struct FlightServerHandle {
     join: Mutex<Option<std::thread::JoinHandle<()>>>,
+    host: String,
     port: u16,
     shutdown: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 
 /// Start Flight echo server on the given port (0 = any). Returns handle and actual port.
+///
+/// # Threading model
+///
+/// Each call to this function spawns **one dedicated OS thread** that owns a
+/// single-server Tokio runtime for the lifetime of the returned handle. This
+/// keeps the BEAM scheduler unblocked (the NIF is `DirtyIo`) and gives each
+/// server complete isolation — a panic or slow handler in one server cannot
+/// stall another.
+///
+/// The trade-off is that N concurrent servers consume N OS threads and N Tokio
+/// thread-pools (each pool defaults to one worker thread per logical CPU). For
+/// typical use — one server per node — this is negligible. If you need to run
+/// many servers in the same OS process, consider sharing a single
+/// `Arc<tokio::runtime::Runtime>` across handles (a future milestone). Until
+/// then, keep the number of simultaneously live `FlightServerHandle` instances
+/// small (single digits) to avoid thread exhaustion.
 #[rustler::nif(schedule = "DirtyIo")]
-pub fn flight_server_start<'a>(env: Env<'a>, port: u16) -> Term<'a> {
+pub fn flight_server_start<'a>(env: Env<'a>, host: String, port: u16) -> Term<'a> {
     let state = Arc::new(Mutex::new(EchoState { data: None }));
     let service = EchoFlightService { state };
-    let (tx, rx) = std::sync::mpsc::channel::<Result<(u16, tokio::sync::oneshot::Sender<()>), String>>();
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(String, u16, tokio::sync::oneshot::Sender<()>), String>>();
     let join = std::thread::spawn(move || {
         let rt = match tokio::runtime::Runtime::new() {
             Ok(r) => r,
@@ -179,11 +195,7 @@ pub fn flight_server_start<'a>(env: Env<'a>, port: u16) -> Term<'a> {
             }
         };
         rt.block_on(async move {
-            let addr_str = if port == 0 {
-                "127.0.0.1:0".to_string()
-            } else {
-                format!("127.0.0.1:{}", port)
-            };
+            let addr_str = format!("{}:{}", host, port);
             let addr: std::net::SocketAddr = match addr_str.parse() {
                 Ok(a) => a,
                 Err(e) => {
@@ -198,19 +210,39 @@ pub fn flight_server_start<'a>(env: Env<'a>, port: u16) -> Term<'a> {
                     return;
                 }
             };
-            let actual = listener.local_addr().map(|a| a.port()).unwrap_or(0);
+            let local = listener.local_addr().unwrap_or_else(|_| addr);
+            let actual_port = local.port();
+            let actual_host = local.ip().to_string();
             let incoming = TcpListenerStream::new(listener);
             let svc = FlightServiceServer::new(service);
+            // Wire the shutdown signal into tonic's accept loop so that when
+            // flight_server_stop fires shutdown_tx, the server stops accepting
+            // new connections and waits for all in-flight RPCs to complete
+            // before the future resolves.  Using a plain serve_with_incoming +
+            // tokio::spawn would orphan the server task and cause abrupt
+            // cancellation when the OS thread exits.
+            let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
             let server_fut = Server::builder()
                 .add_service(svc)
-                .serve_with_incoming(incoming);
-            let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-            tokio::spawn(server_fut);
+                .serve_with_incoming_shutdown(incoming, async {
+                    let _ = shutdown_rx.await;
+                });
+            let server_handle = tokio::spawn(server_fut);
             // Probe the bound port until the server is actually accepting connections
             // rather than sleeping for a fixed interval (which is fragile on slow systems
             // and wasteful on fast ones). We poll up to 80 times with 25 ms back-off,
             // giving a maximum wait of 2 s before reporting a timeout.
-            let probe_addr = format!("127.0.0.1:{}", actual);
+            //
+            // Always probe via 127.0.0.1 regardless of the bind address: a server
+            // bound to 0.0.0.0 also listens on loopback, and we can't connect to
+            // 0.0.0.0 directly.  For specific non-loopback IPs the caller is
+            // responsible for ensuring the address is reachable from this host.
+            let probe_ip = if actual_host == "0.0.0.0" || actual_host == "::" {
+                "127.0.0.1".to_string()
+            } else {
+                actual_host.clone()
+            };
+            let probe_addr = format!("{}:{}", probe_ip, actual_port);
             let mut ready = false;
             for _ in 0..80 {
                 if tokio::net::TcpStream::connect(&probe_addr).await.is_ok() {
@@ -221,20 +253,24 @@ pub fn flight_server_start<'a>(env: Env<'a>, port: u16) -> Term<'a> {
             }
             if !ready {
                 let _ = tx.send(Err(format!(
-                    "server on port {} did not become ready within 2s",
-                    actual
+                    "server on {}:{} did not become ready within 2s",
+                    actual_host, actual_port
                 )));
                 return;
             }
-            let _ = tx.send(Ok((actual, shutdown_tx)));
-            let _ = shutdown_rx.await;
+            let _ = tx.send(Ok((actual_host, actual_port, shutdown_tx)));
+            // Wait for the server task to finish (i.e. until shutdown_tx fires
+            // and all in-flight requests drain).  This keeps the OS thread —
+            // and therefore the Tokio runtime — alive for the server's lifetime.
+            let _ = server_handle.await;
         })
     });
     match rx.recv() {
-        Ok(Ok((actual, shutdown_tx))) => {
+        Ok(Ok((actual_host, actual_port, shutdown_tx))) => {
             let handle = FlightServerHandle {
                 join: Mutex::new(Some(join)),
-                port: actual,
+                host: actual_host,
+                port: actual_port,
                 shutdown: Mutex::new(Some(shutdown_tx)),
             };
             ok_encode(env, ResourceArc::new(handle))
@@ -248,6 +284,12 @@ pub fn flight_server_start<'a>(env: Env<'a>, port: u16) -> Term<'a> {
 #[rustler::nif]
 pub fn flight_server_port(handle: ResourceArc<FlightServerHandle>) -> u16 {
     handle.port
+}
+
+/// Return the host address the server is bound to (e.g. `"127.0.0.1"` or `"0.0.0.0"`).
+#[rustler::nif]
+pub fn flight_server_host(handle: ResourceArc<FlightServerHandle>) -> String {
+    handle.host.clone()
 }
 
 /// Stop the Flight server (signals shutdown, then joins the server thread). Returns :ok or {:error, msg}.
@@ -266,6 +308,40 @@ pub fn flight_server_stop<'a>(env: Env<'a>, handle: ResourceArc<FlightServerHand
     rustler::types::atom::Atom::from_str(env, "ok").unwrap().encode(env)
 }
 
+/// A single multi-threaded Tokio runtime shared by **all** Flight client handles.
+///
+/// # Why shared?
+///
+/// `tokio::runtime::Runtime::new()` spawns one worker thread per logical CPU.
+/// Creating a runtime per client would therefore multiply OS-thread usage by the
+/// number of live clients, which can exhaust system resources when many clients
+/// are created (e.g. in a connection pool or test suite).
+///
+/// A single shared runtime avoids that: all `do_put` / `do_get` calls across
+/// every client handle are scheduled onto the same fixed-size thread pool.
+/// The runtime lives for the process lifetime — it is never shut down — which
+/// is intentional: dropping a `Runtime` while tasks are still running would
+/// block until they complete, which is undesirable for a background executor.
+///
+/// Server handles are **not** eligible for runtime sharing because each server
+/// runs an infinite `serve_with_incoming` loop that must be independently
+/// cancellable; clients only need short-lived `block_on` calls.
+static CLIENT_RUNTIME: OnceLock<Arc<tokio::runtime::Runtime>> = OnceLock::new();
+
+fn client_runtime() -> Arc<tokio::runtime::Runtime> {
+    CLIENT_RUNTIME
+        .get_or_init(|| {
+            Arc::new(
+                tokio::runtime::Builder::new_multi_thread()
+                    .thread_name("ex-arrow-flight-client")
+                    .enable_all()
+                    .build()
+                    .expect("failed to build Flight client Tokio runtime"),
+            )
+        })
+        .clone()
+}
+
 /// Client handle wrapping Arrow Flight client and the runtime that owns the connection.
 /// The runtime must stay alive for the channel to remain connected.
 pub struct FlightClientHandle {
@@ -274,6 +350,11 @@ pub struct FlightClientHandle {
 }
 
 /// Connect to a Flight server. Returns `{:ok, client_ref}` or `{:error, msg}`.
+///
+/// # Runtime
+///
+/// All client handles share a single global Tokio runtime (see `CLIENT_RUNTIME`).
+/// No new thread-pool is created per connection.
 ///
 /// # Security
 ///
@@ -293,17 +374,14 @@ pub fn flight_client_connect<'a>(env: Env<'a>, host: String, port: u16) -> Term<
         Ok(c) => c,
         Err(e) => return err_encode(env, &e.to_string()),
     };
-    let rt = match tokio::runtime::Runtime::new() {
-        Ok(r) => r,
-        Err(e) => return err_encode(env, &e.to_string()),
-    };
+    let rt = client_runtime();
     let channel = match rt.block_on(channel.connect()) {
         Ok(ch) => ch,
         Err(e) => return err_encode(env, &e.to_string()),
     };
     let client = arrow_flight::client::FlightClient::new(channel);
     let handle = FlightClientHandle {
-        rt: Arc::new(rt),
+        rt,
         client: Mutex::new(client),
     };
     ok_encode(env, ResourceArc::new(handle))
@@ -425,39 +503,37 @@ pub fn flight_client_do_get<'a>(
 }
 
 // Resource type registration for Rustler (initialized in lib.rs on_load).
-use rustler::resource::ResourceTypeProvider;
-use rustler::resource::ResourceType;
+use std::sync::OnceLock as ResourceOnceLock;
+use rustler::resource::{open_struct_resource_type, ResourceType, ResourceTypeProvider, NIF_RESOURCE_FLAGS};
+use crate::util::SyncResourceType;
 
-static mut FLIGHT_SERVER_HANDLE_TYPE: Option<ResourceType<FlightServerHandle>> = None;
-static mut FLIGHT_CLIENT_HANDLE_TYPE: Option<ResourceType<FlightClientHandle>> = None;
+static FLIGHT_SERVER_HANDLE_TYPE: ResourceOnceLock<SyncResourceType<FlightServerHandle>> = ResourceOnceLock::new();
+static FLIGHT_CLIENT_HANDLE_TYPE: ResourceOnceLock<SyncResourceType<FlightClientHandle>> = ResourceOnceLock::new();
 
 impl ResourceTypeProvider for FlightServerHandle {
     fn get_type() -> &'static ResourceType<Self> {
-        #[allow(static_mut_refs)]
-        unsafe { FLIGHT_SERVER_HANDLE_TYPE.as_ref() }.expect("FlightServerHandle not initialized")
+        &FLIGHT_SERVER_HANDLE_TYPE.get().expect("FlightServerHandle not initialized").0
     }
 }
 
 impl ResourceTypeProvider for FlightClientHandle {
     fn get_type() -> &'static ResourceType<Self> {
-        #[allow(static_mut_refs)]
-        unsafe { FLIGHT_CLIENT_HANDLE_TYPE.as_ref() }.expect("FlightClientHandle not initialized")
+        &FLIGHT_CLIENT_HANDLE_TYPE.get().expect("FlightClientHandle not initialized").0
     }
 }
 
 pub fn flight_register_resources(env: rustler::Env) -> bool {
-    let flags = rustler::resource::NIF_RESOURCE_FLAGS::ERL_NIF_RT_CREATE;
-    if let Some(t) = open_struct_resource_type::<FlightServerHandle>(env, "ExArrowFlightServerHandle\0", flags) {
-        unsafe { FLIGHT_SERVER_HANDLE_TYPE = Some(t); }
-    } else {
+    let flags = NIF_RESOURCE_FLAGS::ERL_NIF_RT_CREATE;
+
+    let Some(t) = open_struct_resource_type::<FlightServerHandle>(env, "ExArrowFlightServerHandle\0", flags) else {
         return false;
-    }
-    if let Some(t) = open_struct_resource_type::<FlightClientHandle>(env, "ExArrowFlightClientHandle\0", flags) {
-        unsafe { FLIGHT_CLIENT_HANDLE_TYPE = Some(t); }
-    } else {
+    };
+    let _ = FLIGHT_SERVER_HANDLE_TYPE.set(SyncResourceType(t));
+
+    let Some(t) = open_struct_resource_type::<FlightClientHandle>(env, "ExArrowFlightClientHandle\0", flags) else {
         return false;
-    }
+    };
+    let _ = FLIGHT_CLIENT_HANDLE_TYPE.set(SyncResourceType(t));
+
     true
 }
-
-use rustler::resource::open_struct_resource_type;
