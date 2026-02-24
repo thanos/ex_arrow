@@ -15,6 +15,10 @@ defmodule ExArrow.RecordBatch do
   @spec from_ref(reference()) :: t()
   def from_ref(ref), do: %__MODULE__{resource: ref}
 
+  @doc false
+  @spec resource_ref(t()) :: reference()
+  def resource_ref(%__MODULE__{resource: ref}), do: ref
+
   @doc """
   Returns the schema of this record batch.
   """
