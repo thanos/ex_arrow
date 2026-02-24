@@ -1,7 +1,9 @@
-//! ExArrow NIFs: IPC stream read/write, Schema and RecordBatch handles.
+//! ExArrow NIFs: IPC stream read/write, Schema and RecordBatch handles, Flight client/server.
 
+mod flight;
 mod ipc;
 mod resources;
+mod util;
 
 use rustler::resource::{open_struct_resource_type, ResourceType, ResourceTypeProvider, NIF_RESOURCE_FLAGS};
 use rustler::Env;
@@ -67,6 +69,9 @@ fn on_load(env: Env, _: rustler::Term) -> bool {
     } else {
         return false;
     }
+    if !flight::flight_register_resources(env) {
+        return false;
+    }
     true
 }
 
@@ -91,6 +96,12 @@ rustler::init!(
         ipc::ipc_writer_to_binary,
         ipc::ipc_writer_to_file,
         ipc::ipc_file_writer_to_file,
+        flight::flight_server_start,
+        flight::flight_server_port,
+        flight::flight_server_stop,
+        flight::flight_client_connect,
+        flight::flight_client_do_put,
+        flight::flight_client_do_get,
     ],
     load = on_load
 );

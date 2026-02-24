@@ -15,5 +15,5 @@ mix test
 echo "== mix coveralls.html"
 mix coveralls.html
 echo "== mix docs"
-mix docs
+mix docs --warninsg-as-errors
 echo "== CI (local) passed"

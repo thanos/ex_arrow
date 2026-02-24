@@ -16,6 +16,12 @@ arrow = { version = "56", default-features = false, features = ["ipc"] }
 arrow-ipc = "56"
 arrow-schema = { version = "56", default-features = false }
 arrow-array = { version = "56", default-features = false }
+arrow-flight = "56"
+futures = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros"] }
+tokio-stream = "0.1"
+tonic = "0.13"
+bytes = "1"
 
 [profile.release]
 lto = true

@@ -37,4 +37,17 @@ defmodule ExArrow.Native do
 
   def ipc_file_writer_to_file(_path, _schema_ref, _batches),
     do: :erlang.nif_error(:nif_not_loaded)
+
+  # Flight server
+  def flight_server_start(_port), do: :erlang.nif_error(:nif_not_loaded)
+  def flight_server_port(_server_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def flight_server_stop(_server_ref), do: :erlang.nif_error(:nif_not_loaded)
+
+  # Flight client
+  def flight_client_connect(_host, _port), do: :erlang.nif_error(:nif_not_loaded)
+
+  def flight_client_do_put(_client_ref, _schema_ref, _batches),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  def flight_client_do_get(_client_ref, _ticket_binary), do: :erlang.nif_error(:nif_not_loaded)
 end
