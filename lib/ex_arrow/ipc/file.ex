@@ -7,8 +7,8 @@ defmodule ExArrow.IPC.File do
   use `ExArrow.RecordBatch` / `ExArrow.Schema` accessors.
   """
   alias ExArrow.Native
-  alias ExArrow.Schema
   alias ExArrow.RecordBatch
+  alias ExArrow.Schema
 
   @opaque t :: %__MODULE__{resource: reference()}
   defstruct [:resource]

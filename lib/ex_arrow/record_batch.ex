@@ -5,8 +5,8 @@ defmodule ExArrow.RecordBatch do
   A batch is a collection of arrays (columns) with a shared row count.
   Data stays in native memory; accessors return handles or small metadata.
   """
-  alias ExArrow.Schema
   alias ExArrow.Native
+  alias ExArrow.Schema
 
   @opaque t :: %__MODULE__{resource: reference()}
   defstruct [:resource]

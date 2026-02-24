@@ -17,7 +17,8 @@ defmodule ExArrow.Schema do
   """
   @spec fields(t()) :: [Field.t()]
   def fields(%__MODULE__{resource: ref}) do
-    Native.schema_fields(ref)
+    ref
+    |> Native.schema_fields()
     |> Enum.map(fn {name, type} -> %Field{name: name, type: type} end)
   end
 end

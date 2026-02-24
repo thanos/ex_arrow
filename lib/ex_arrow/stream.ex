@@ -5,9 +5,9 @@ defmodule ExArrow.Stream do
   Used for IPC streaming and Flight result streams. Yields record batches
   via an Elixir iterator; data stays in native memory until consumed.
   """
+  alias ExArrow.Native
   alias ExArrow.RecordBatch
   alias ExArrow.Schema
-  alias ExArrow.Native
 
   @opaque t :: %__MODULE__{resource: reference()}
   defstruct [:resource]

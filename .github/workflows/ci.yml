@@ -49,8 +49,20 @@ jobs:
       - name: Compile
         run: mix compile --warnings-as-errors
 
+      - name: Credo
+        run: mix credo --strict
+
       - name: Run tests
         run: mix test
+
+      - name: Test coverage
+        run: mix coveralls.html
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: cover/
 
       - name: Build docs
         run: mix docs
@@ -98,3 +110,6 @@ jobs:
 
       - name: Run tests
         run: mix test
+
+      - name: Test coverage
+        run: mix coveralls.html
