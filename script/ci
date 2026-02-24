@@ -6,6 +6,8 @@ echo "== mix deps.get"
 mix deps.get
 echo "== mix compile --warnings-as-errors"
 mix compile --warnings-as-errors
+echo "== mix format --check-formatted"
+mix format --check-formatted
 echo "== mix test"
 mix test
 echo "== mix docs"
