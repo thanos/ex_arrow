@@ -1,0 +1,7 @@
+# NIF symbols (enif_*) are provided by the BEAM at load time.
+# Allow undefined symbols on macOS so the dylib can be loaded by the VM.
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]

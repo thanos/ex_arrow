@@ -1,0 +1,18 @@
+[package]
+name = "ex_arrow_native"
+version = "0.1.0"
+edition = "2021"
+description = "Apache Arrow NIFs for ExArrow Elixir library"
+license = "Apache-2.0"
+
+[lib]
+name = "ex_arrow_native"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.32"
+
+[profile.release]
+lto = true
+strip = true
