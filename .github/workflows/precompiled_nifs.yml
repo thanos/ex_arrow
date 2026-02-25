@@ -2,6 +2,8 @@
 # See: https://hexdocs.pm/rustler_precompiled/precompilation_guide.html
 # Enable: Settings → Actions → General → Workflow permissions → Read and write.
 #
+# We target each build on a runner that matches the target (native builds). Cross is used only for
+# x86_64-unknown-linux-musl (no musl runner exists). aarch64 Linux uses ubuntu-22.04-arm.
 # Windows: Still disabled (toolchain/tar issues). macOS: re-enabled with explicit rustup default + target.
 
 name: Precompiled NIFs
@@ -25,7 +27,7 @@ jobs:
         job:
           - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04, use-cross: false }
           - { target: x86_64-unknown-linux-musl, os: ubuntu-22.04, use-cross: true }
-          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04, use-cross: true }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm, use-cross: false }
           - { target: aarch64-apple-darwin, os: macos-14, use-cross: false }
           - { target: x86_64-apple-darwin, os: macos-14, use-cross: false }
           # Windows disabled: toolchain/tar issues on those runners.
@@ -73,7 +75,8 @@ jobs:
           project-version: ${{ steps.version.outputs.version }}
           target: ${{ matrix.job.target }}
           nif-version: ${{ matrix.nif }}
-          use-cross: ${{ matrix.job.use-cross || false }}
+          # Must be boolean: "false" string is truthy in the action and triggers cross download on macOS.
+          use-cross: ${{ matrix.job.use-cross == true }}
 
       - name: Verify artifact exists
         run: |
