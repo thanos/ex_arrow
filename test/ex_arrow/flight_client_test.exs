@@ -11,12 +11,29 @@ defmodule ExArrow.Flight.ClientTest do
   # ── real implementation (no server) ─────────────────────────────────────────
 
   describe "real implementation (default)" do
-    test "connect/3 to non-existent server returns error" do
+    test "connect/3 to non-existent loopback server returns error" do
       assert {:error, _msg} = Client.connect("localhost", 39_281, [])
     end
 
-    test "connect/3 with tls: true returns :tls_not_supported" do
-      assert {:error, :tls_not_supported} = Client.connect("host", 39_282, tls: true)
+    test "connect/3 with tls: true attempts TLS and returns connection error" do
+      # tls: true is now supported; connecting to a non-existent server returns
+      # a connection error rather than :tls_not_supported.
+      assert {:error, _msg} = Client.connect("localhost", 39_282, tls: true)
+    end
+
+    test "connect/3 with tls: false uses plaintext" do
+      assert {:error, _msg} = Client.connect("localhost", 39_283, tls: false)
+    end
+
+    test "connect/3 with invalid tls list opt returns structured error" do
+      assert {:error, {:invalid_tls_opt, _}} =
+               Client.connect("localhost", 39_284, tls: [no_cert: true])
+    end
+
+    test "connect/3 to non-loopback host auto-selects TLS and returns connection error" do
+      # Non-loopback hosts default to TLS; connection to a non-existent server
+      # still fails, but with a TLS/transport error rather than :tls_not_supported.
+      assert {:error, _msg} = Client.connect("flight.example.invalid", 9999, [])
     end
   end
 

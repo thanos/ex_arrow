@@ -4,7 +4,7 @@ defmodule ExArrow.Flight.Client do
 
   Delegates to the configured implementation (see `:flight_client_impl` in
   application config). The default implementation uses NIFs backed by
-  `arrow-flight` + tonic over plaintext HTTP/2.
+  `arrow-flight` + tonic.
 
   ## Connection
 
@@ -12,11 +12,35 @@ defmodule ExArrow.Flight.Client do
 
   Options accepted by `connect/3`:
   - `:connect_timeout_ms` — TCP connection timeout in milliseconds (default: 0, no timeout).
+  - `:tls` — transport security (see below).
 
   ## TLS
 
-  Only plaintext HTTP/2 connections are supported. Passing `tls: true` returns
-  `{:error, :tls_not_supported}`. TLS support is planned for a future milestone.
+  Transport security is controlled by the `:tls` option and defaults to a
+  secure setting for non-loopback hosts:
+
+  | `:tls` value          | behaviour                                                   |
+  |-----------------------|-------------------------------------------------------------|
+  | not set, loopback host | plaintext HTTP/2 (auto; localhost / 127.x / ::1)           |
+  | not set, remote host  | TLS with native OS certificate store (auto, secure default) |
+  | `false`               | plaintext HTTP/2 regardless of host                         |
+  | `true`                | TLS with native OS certificate store                        |
+  | `[ca_cert_pem: pem]`  | TLS verified against the given PEM-encoded CA certificate   |
+
+  Using `tls: false` for a non-loopback host is permitted but exposes traffic on
+  untrusted networks — prefer the default or an explicit `tls: true`.
+
+  ### Examples
+
+      # Remote server — TLS enabled automatically
+      {:ok, client} = ExArrow.Flight.Client.connect("flight.example.com", 9999, [])
+
+      # Explicit TLS with a custom CA certificate
+      pem = File.read!("/etc/ssl/my-ca.pem")
+      {:ok, client} = ExArrow.Flight.Client.connect("internal.svc", 9999, tls: [ca_cert_pem: pem])
+
+      # Explicit plaintext (loopback only, development)
+      {:ok, client} = ExArrow.Flight.Client.connect("localhost", 9999, tls: false)
 
   ## Timeouts and cancellation
 
@@ -37,6 +61,8 @@ defmodule ExArrow.Flight.Client do
 
   Options:
   - `:connect_timeout_ms` — connection timeout in milliseconds (0 = no limit).
+  - `:tls` — `true | false | [ca_cert_pem: pem]`; see module doc for details.
+    Defaults to `:system_certs` for non-loopback hosts and plaintext for loopback.
   """
   @spec connect(String.t(), non_neg_integer(), keyword()) :: {:ok, t()} | {:error, term()}
   def connect(host, port, opts \\ []) do

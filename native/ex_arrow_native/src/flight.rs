@@ -21,17 +21,71 @@ use futures::StreamExt;
 use futures::TryStreamExt;
 use rustler::resource::ResourceArc;
 use rustler::{Encoder, Env, Term};
-use tonic::transport::{Channel, Server};
+use tonic::transport::{Certificate, Channel, ClientTlsConfig, Server};
 use tonic::{Request, Response, Status, Streaming};
 use tokio_stream::wrappers::TcpListenerStream;
 
 use crate::util::{err_encode, ok_encode};
 use crate::resources::{ExArrowIpcStream, ExArrowRecordBatch, ExArrowSchema, IpcStreamBacking};
 
-// Pre-registered atoms used when encoding/decoding descriptor tuples.
+// Pre-registered atoms used when encoding/decoding descriptor tuples and TLS mode.
 rustler::atoms! {
     cmd,
     path,
+    // TLS mode atoms sent from Elixir via flight_client_connect/4
+    plaintext,
+    system_certs,
+    custom_ca,
+}
+
+// ── TLS mode ─────────────────────────────────────────────────────────────────
+
+/// Represents the TLS mode selected by the caller for a client connection.
+enum TlsMode {
+    /// Plaintext HTTP/2 (no TLS).  Safe only for loopback / trusted networks.
+    Plaintext,
+    /// TLS with the native OS certificate store as the trust anchor.
+    SystemCerts,
+    /// TLS with a single PEM-encoded CA certificate as the only trust anchor.
+    /// Useful for self-signed / internal CA certificates.
+    CustomCa(Vec<u8>),
+}
+
+/// Decode the `tls_mode` term sent from Elixir:
+///   - `:plaintext`          → `TlsMode::Plaintext`
+///   - `:system_certs`       → `TlsMode::SystemCerts`
+///   - `{:custom_ca, pem}`   → `TlsMode::CustomCa(pem_bytes)`
+fn parse_tls_mode<'a>(term: Term<'a>) -> Result<TlsMode, String> {
+    // Atom path ──────────────────────────────────────────────────────────────
+    if let Ok(atom) = term.decode::<rustler::Atom>() {
+        if atom == plaintext() {
+            return Ok(TlsMode::Plaintext);
+        }
+        if atom == system_certs() {
+            return Ok(TlsMode::SystemCerts);
+        }
+        return Err(format!(
+            "unknown tls_mode atom; expected :plaintext or :system_certs"
+        ));
+    }
+
+    // Tuple path: {:custom_ca, pem_binary} ───────────────────────────────────
+    let tuple = rustler::types::tuple::get_tuple(term).map_err(|_| {
+        "tls_mode must be :plaintext, :system_certs, or {:custom_ca, pem_binary()}".to_string()
+    })?;
+
+    if tuple.len() == 2 {
+        if let Ok(tag) = tuple[0].decode::<rustler::Atom>() {
+            if tag == custom_ca() {
+                let pem: rustler::Binary = tuple[1]
+                    .decode()
+                    .map_err(|_| "custom_ca payload must be a binary".to_string())?;
+                return Ok(TlsMode::CustomCa(pem.as_slice().to_vec()));
+            }
+        }
+    }
+
+    Err("invalid tls_mode; expected :plaintext, :system_certs, or {:custom_ca, binary()}".to_string())
 }
 
 /// Encode a `&[u8]` slice as an Elixir **binary** (not a charlist).
@@ -594,28 +648,56 @@ pub struct FlightClientHandle {
 ///
 /// `connect_timeout_ms` sets the TCP connection timeout (0 = no limit).
 ///
-/// # Security
+/// # TLS
 ///
-/// Connections are **always plaintext HTTP/2** (no TLS). Only use this for
-/// loopback / localhost endpoints or on a trusted private network.
+/// `tls_mode` controls transport security:
+/// - `:plaintext`        — unencrypted HTTP/2; only safe for loopback or trusted networks.
+/// - `:system_certs`     — TLS verified against the native OS certificate store.
+/// - `{:custom_ca, pem}` — TLS verified against a single PEM-encoded CA certificate only
+///                          (no system roots); suited for self-signed / internal CAs.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn flight_client_connect<'a>(
     env: Env<'a>,
     host: String,
     port: u16,
     connect_timeout_ms: u64,
+    tls_mode: Term<'a>,
 ) -> Term<'a> {
-    // PLAINTEXT_ONLY: change this scheme to "https" and add TLS config when
-    // TLS is implemented (requires tonic TLS feature + certificate handling).
-    let endpoint_uri = format!("http://{}:{}", host, port);
+    let mode = match parse_tls_mode(tls_mode) {
+        Ok(m) => m,
+        Err(e) => return err_encode(env, &e),
+    };
+
+    // Choose URI scheme and build the optional TLS config.
+    let (scheme, tls_cfg) = match &mode {
+        TlsMode::Plaintext => ("http", None),
+        TlsMode::SystemCerts => {
+            let cfg = ClientTlsConfig::new().with_native_roots();
+            ("https", Some(cfg))
+        }
+        TlsMode::CustomCa(pem) => {
+            let cert = Certificate::from_pem(pem);
+            let cfg = ClientTlsConfig::new().ca_certificate(cert);
+            ("https", Some(cfg))
+        }
+    };
+
+    let endpoint_uri = format!("{}://{}:{}", scheme, host, port);
     let endpoint = match Channel::from_shared(endpoint_uri) {
-        Ok(c) => c,
+        Ok(e) => e,
         Err(e) => return err_encode(env, &e.to_string()),
     };
     let endpoint = if connect_timeout_ms > 0 {
         endpoint.connect_timeout(std::time::Duration::from_millis(connect_timeout_ms))
     } else {
         endpoint
+    };
+    let endpoint = match tls_cfg {
+        Some(cfg) => match endpoint.tls_config(cfg) {
+            Ok(e) => e,
+            Err(e) => return err_encode(env, &e.to_string()),
+        },
+        None => endpoint,
     };
     let rt = client_runtime();
     let channel = match rt.block_on(endpoint.connect()) {

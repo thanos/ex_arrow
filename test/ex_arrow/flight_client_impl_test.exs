@@ -27,17 +27,43 @@ defmodule ExArrow.Flight.ClientImplTest do
   # ── unit tests (no server) ───────────────────────────────────────────────────
 
   describe "connect/3 (no server)" do
-    test "returns error tuple for non-existent server" do
+    test "returns error tuple for non-existent loopback server" do
       assert {:error, _msg} = ClientImpl.connect("localhost", 39_281, [])
     end
 
-    test "tls: true is rejected with :tls_not_supported" do
-      assert {:error, :tls_not_supported} = ClientImpl.connect("host", 9999, tls: true)
+    test "tls: true attempts TLS and returns a connection error" do
+      # tls: true is now supported — it no longer returns :tls_not_supported.
+      # Connecting to a non-existent server still fails with a transport error.
+      assert {:error, _msg} = ClientImpl.connect("localhost", 39_282, tls: true)
+    end
+
+    test "tls: false uses plaintext for any host" do
+      assert {:error, _msg} = ClientImpl.connect("localhost", 39_283, tls: false)
+    end
+
+    test "tls: [ca_cert_pem: pem] uses custom CA" do
+      fake_pem = "-----BEGIN CERTIFICATE-----\nZmFrZQ==\n-----END CERTIFICATE-----\n"
+      # Should attempt connection (and fail — no server), not return :tls_not_supported.
+      assert {:error, _msg} =
+               ClientImpl.connect("localhost", 39_284, tls: [ca_cert_pem: fake_pem])
+    end
+
+    test "tls: [invalid_opt: true] returns {:error, {:invalid_tls_opt, _}}" do
+      assert {:error, {:invalid_tls_opt, msg}} =
+               ClientImpl.connect("localhost", 39_285, tls: [no_cert: true])
+
+      assert is_binary(msg)
+    end
+
+    test "non-loopback host with no tls opt auto-selects TLS (system_certs)" do
+      # Connection fails (no server), but the error is a TLS/transport error,
+      # not :tls_not_supported.
+      assert {:error, _msg} = ClientImpl.connect("flight.example.invalid", 9999, [])
     end
 
     test "connect_timeout_ms: 1 times out quickly against a non-listening port" do
       assert {:error, _msg} =
-               ClientImpl.connect("localhost", 39_282, connect_timeout_ms: 1)
+               ClientImpl.connect("localhost", 39_286, connect_timeout_ms: 1)
     end
   end
 
@@ -109,6 +135,16 @@ defmodule ExArrow.Flight.ClientImplTest do
 
     assert {:ok, %Client{} = client} = ClientImpl.connect("localhost", port, [])
     assert is_reference(client.resource)
+
+    ExArrow.Flight.Server.stop(server)
+  end
+
+  @tag :flight
+  test "connect/3 with tls: false succeeds against live plaintext server" do
+    {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
+    {:ok, port} = ExArrow.Flight.Server.port(server)
+
+    assert {:ok, %Client{}} = ClientImpl.connect("localhost", port, tls: false)
 
     ExArrow.Flight.Server.stop(server)
   end

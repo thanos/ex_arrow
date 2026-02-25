@@ -2,25 +2,54 @@ defmodule ExArrow.Flight.ClientImpl do
   @moduledoc false
   @behaviour ExArrow.Flight.ClientBehaviour
 
-  # TLS note: the native client always uses a plaintext http:// connection.
-  # Passing `tls: true` is rejected explicitly below rather than silently ignored.
-  # Full TLS support (certificate verification, mutual TLS) is deferred to a later
-  # milestone; until then, only localhost / loopback endpoints are safe to use.
-
   alias ExArrow.{Flight.ActionType, Flight.Client, Flight.FlightInfo, Native, Schema, Stream}
 
   @impl true
   def connect(host, port, opts) do
-    if Keyword.get(opts, :tls, false) do
-      {:error, :tls_not_supported}
-    else
+    with {:ok, tls_mode} <- tls_mode_for(host, opts) do
       connect_timeout_ms = Keyword.get(opts, :connect_timeout_ms, 0)
 
-      case Native.flight_client_connect(host, port, connect_timeout_ms) do
+      case Native.flight_client_connect(host, port, connect_timeout_ms, tls_mode) do
         {:ok, client_ref} -> {:ok, %Client{resource: client_ref}}
         {:error, msg} -> {:error, msg}
       end
     end
+  end
+
+  # Determine the TLS mode to pass to the NIF based on the `:tls` option and host.
+  #
+  # | `:tls` value            | result                           |
+  # |-------------------------|----------------------------------|
+  # | `false`                 | `:plaintext` (explicit opt-out)  |
+  # | `true`                  | `:system_certs`                  |
+  # | `[ca_cert_pem: pem]`    | `{:custom_ca, pem}`              |
+  # | not set, loopback host  | `:plaintext` (auto)              |
+  # | not set, remote host    | `:system_certs` (auto, default)  |
+  defp tls_mode_for(host, opts) do
+    case Keyword.get(opts, :tls) do
+      false ->
+        {:ok, :plaintext}
+
+      true ->
+        {:ok, :system_certs}
+
+      tls_opts when is_list(tls_opts) ->
+        case Keyword.fetch(tls_opts, :ca_cert_pem) do
+          {:ok, pem} when is_binary(pem) ->
+            {:ok, {:custom_ca, pem}}
+
+          _ ->
+            {:error, {:invalid_tls_opt, ":tls list must include a :ca_cert_pem binary"}}
+        end
+
+      nil ->
+        {:ok, if(loopback?(host), do: :plaintext, else: :system_certs)}
+    end
+  end
+
+  # Hosts considered safe for unencrypted connections by default.
+  defp loopback?(host) do
+    host in ~w[localhost 127.0.0.1 ::1 0:0:0:0:0:0:0:1 ip6-localhost]
   end
 
   @impl true
