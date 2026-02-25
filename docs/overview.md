@@ -1,6 +1,6 @@
 # Overview
 
-The main overview, installation, quick start, and usage examples live in the [README](../README.md).
+The main overview, installation, quick start, and usage examples live in the [README on GitHub](https://github.com/thanos/ex_arrow/blob/main/README.md).
 
 This doc set covers:
 
