@@ -113,4 +113,32 @@ defmodule ExArrow.StreamTest do
       assert_raise ArgumentError, fn -> Stream.next(stream) end
     end
   end
+
+  # ── backend :adbc ───────────────────────────────────────────────────────────
+
+  describe "schema/1 (backend :adbc)" do
+    test "raises ArgumentError for invalid resource when backend is :adbc" do
+      stream = %Stream{resource: make_ref(), backend: :adbc}
+      assert_raise ArgumentError, fn -> Stream.schema(stream) end
+    end
+  end
+
+  describe "next/1 (backend :adbc)" do
+    test "raises ArgumentError for invalid resource when backend is :adbc" do
+      stream = %Stream{resource: make_ref(), backend: :adbc}
+      assert_raise ArgumentError, fn -> Stream.next(stream) end
+    end
+  end
+
+  describe "struct" do
+    test "default backend is :ipc" do
+      stream = %Stream{resource: make_ref()}
+      assert stream.backend == :ipc
+    end
+
+    test "backend can be set to :adbc" do
+      stream = %Stream{resource: make_ref(), backend: :adbc}
+      assert stream.backend == :adbc
+    end
+  end
 end

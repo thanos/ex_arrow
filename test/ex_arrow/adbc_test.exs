@@ -24,9 +24,24 @@ defmodule ExArrow.ADBCTest do
       # driver_name without a loadable driver
       assert {:error, _} = Database.open(driver_name: "adbc_driver_nonexistent_xyz")
     end
+
+    test "open/1 with nil normalizes to opts and returns error from NIF" do
+      assert {:error, msg} = Database.open(nil)
+      assert is_binary(msg)
+    end
+
+    test "open/1 with non-string non-list (e.g. integer) returns error" do
+      assert {:error, msg} = Database.open(42)
+      assert is_binary(msg)
+    end
+
+    test "open/1 with empty list returns error (no driver_path or driver_name)" do
+      assert {:error, msg} = Database.open([])
+      assert is_binary(msg)
+    end
   end
 
-  describe "Connection (real impl, invalid resource)" do
+  describe "Connection (real impl)" do
     test "open/1 with invalid database ref raises ArgumentError" do
       db = %Database{resource: make_ref()}
 
@@ -34,14 +49,26 @@ defmodule ExArrow.ADBCTest do
         Connection.open(db)
       end
     end
+
+    test "open/1 requires a Database struct" do
+      assert_raise FunctionClauseError, fn ->
+        Connection.open(%Statement{resource: make_ref()})
+      end
+    end
   end
 
-  describe "Statement (real impl, invalid resource)" do
+  describe "Statement (real impl)" do
     test "new/1 with invalid connection raises ArgumentError" do
       conn = %Connection{resource: make_ref()}
 
       assert_raise ArgumentError, fn ->
         Statement.new(conn)
+      end
+    end
+
+    test "new/1 requires a Connection struct" do
+      assert_raise FunctionClauseError, fn ->
+        Statement.new(%Database{resource: make_ref()})
       end
     end
 
@@ -53,12 +80,134 @@ defmodule ExArrow.ADBCTest do
       end
     end
 
+    test "set_sql/2 accepts charlist and passes it to impl (impl converts to string)" do
+      Application.put_env(:ex_arrow, :adbc_statement_impl, ExArrow.ADBC.StatementMock)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_statement_impl) end)
+
+      stmt = %Statement{resource: make_ref()}
+
+      ExArrow.ADBC.StatementMock
+      |> Mox.expect(:set_sql, fn ^stmt, sql ->
+        # Public API passes through; impl receives charlist when given ~c"SELECT 1"
+        assert sql == ~c"SELECT 1" or sql == "SELECT 1"
+        :ok
+      end)
+
+      assert :ok = Statement.set_sql(stmt, ~c"SELECT 1")
+    end
+
     test "execute/1 with invalid statement raises ArgumentError" do
       stmt = %Statement{resource: make_ref()}
 
       assert_raise ArgumentError, fn ->
         Statement.execute(stmt)
       end
+    end
+
+    test "execute/1 requires a Statement struct" do
+      assert_raise FunctionClauseError, fn ->
+        Statement.execute(%Connection{resource: make_ref()})
+      end
+    end
+  end
+
+  # ── Test native (success/error branches without real driver) ─────────────────
+
+  describe "DatabaseImpl with TestNativeSuccess" do
+    test "open/1 returns {:ok, db} when native returns success" do
+      Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
+
+      assert {:ok, %Database{resource: ref}} = Database.open([])
+      assert is_reference(ref)
+    end
+  end
+
+  describe "DatabaseImpl with TestNativeError" do
+    test "open/1 returns {:error, msg} when native returns error" do
+      Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeError)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
+
+      assert {:error, "test error"} = Database.open("/any/path")
+    end
+  end
+
+  describe "ConnectionImpl with TestNativeSuccess" do
+    test "open/1 returns {:ok, conn} when native returns success" do
+      Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
+
+      {:ok, db} = Database.open([])
+      assert {:ok, %Connection{resource: ref}} = Connection.open(db)
+      assert is_reference(ref)
+    end
+  end
+
+  describe "ConnectionImpl with TestNativeError" do
+    test "open/1 returns {:error, msg} when native returns error" do
+      Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
+
+      {:ok, db} = Database.open([])
+      Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeError)
+
+      assert {:error, "test error"} = Connection.open(db)
+    end
+  end
+
+  describe "StatementImpl with TestNativeSuccess" do
+    test "new/1 set_sql/2 execute/1 return success when native returns success" do
+      Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
+
+      {:ok, db} = Database.open([])
+      {:ok, conn} = Connection.open(db)
+
+      assert {:ok, stmt} = Statement.new(conn)
+      assert is_reference(stmt.resource)
+
+      assert :ok = Statement.set_sql(stmt, "SELECT 1")
+
+      assert {:ok, %Stream{resource: stream_ref, backend: :adbc}} = Statement.execute(stmt)
+
+      assert is_reference(stream_ref)
+    end
+  end
+
+  describe "StatementImpl with TestNativeError" do
+    test "new/1 returns {:error, msg} when native returns error" do
+      Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
+
+      {:ok, db} = Database.open([])
+      {:ok, conn} = Connection.open(db)
+      Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeError)
+
+      assert {:error, "test error"} = Statement.new(conn)
+    end
+
+    test "set_sql/2 returns {:error, msg} when native returns error" do
+      Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
+
+      {:ok, db} = Database.open([])
+      {:ok, conn} = Connection.open(db)
+      {:ok, stmt} = Statement.new(conn)
+      Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeError)
+
+      assert {:error, "test error"} = Statement.set_sql(stmt, "SELECT 1")
+    end
+
+    test "execute/1 returns {:error, msg} when native returns error" do
+      Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
+
+      {:ok, db} = Database.open([])
+      {:ok, conn} = Connection.open(db)
+      {:ok, stmt} = Statement.new(conn)
+      Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeError)
+
+      assert {:error, "test error"} = Statement.execute(stmt)
     end
   end
 

@@ -55,6 +55,21 @@ defmodule ExArrow.Flight.ClientImplTest do
       assert is_binary(msg)
     end
 
+    test "tls: [ca_cert_pem: non_binary] returns {:error, {:invalid_tls_opt, _}}" do
+      assert {:error, {:invalid_tls_opt, msg}} =
+               ClientImpl.connect("localhost", 39_285, tls: [ca_cert_pem: nil])
+
+      assert is_binary(msg)
+    end
+
+    test "loopback ::1 with no tls opt uses plaintext (connection fails)" do
+      assert {:error, _msg} = ClientImpl.connect("::1", 39_287, [])
+    end
+
+    test "loopback ip6-localhost with no tls opt uses plaintext" do
+      assert {:error, _msg} = ClientImpl.connect("ip6-localhost", 39_288, [])
+    end
+
     test "non-loopback host with no tls opt auto-selects TLS (system_certs)" do
       # Connection fails (no server), but the error is a TLS/transport error,
       # not :tls_not_supported.
