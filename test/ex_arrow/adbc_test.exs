@@ -35,9 +35,30 @@ defmodule ExArrow.ADBCTest do
       assert is_binary(msg)
     end
 
+    test "open/1 with invalid type returns clear validation error without calling NIF" do
+      assert {:error, msg} = Database.open(%{driver: "x"})
+      assert msg =~ "expected driver path"
+      assert msg =~ "driver_path or :driver_name"
+      assert msg =~ "%{"
+    end
+
     test "open/1 with empty list returns error (no driver_path or driver_name)" do
       assert {:error, msg} = Database.open([])
       assert is_binary(msg)
+      assert msg =~ "driver_path or :driver_name"
+      assert msg =~ "got keys: []"
+    end
+
+    test "open/1 with non-keyword list returns clear validation error without calling NIF" do
+      assert {:error, msg} = Database.open([1, 2, 3])
+      assert msg =~ "keyword list"
+      assert msg =~ "[1, 2, 3]"
+    end
+
+    test "open/1 with invalid option value type returns clear validation error without calling NIF" do
+      assert {:error, msg} = Database.open(driver_path: 123)
+      assert msg =~ "option :driver_path must be a string"
+      assert msg =~ "123"
     end
   end
 
@@ -118,7 +139,7 @@ defmodule ExArrow.ADBCTest do
       Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
       on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
 
-      assert {:ok, %Database{resource: ref}} = Database.open([])
+      assert {:ok, %Database{resource: ref}} = Database.open(driver_path: "test")
       assert is_reference(ref)
     end
   end
@@ -137,7 +158,7 @@ defmodule ExArrow.ADBCTest do
       Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
       on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
 
-      {:ok, db} = Database.open([])
+      {:ok, db} = Database.open(driver_path: "test")
       assert {:ok, %Connection{resource: ref}} = Connection.open(db)
       assert is_reference(ref)
     end
@@ -148,7 +169,7 @@ defmodule ExArrow.ADBCTest do
       Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
       on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
 
-      {:ok, db} = Database.open([])
+      {:ok, db} = Database.open(driver_path: "test")
       Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeError)
 
       assert {:error, "test error"} = Connection.open(db)
@@ -160,7 +181,7 @@ defmodule ExArrow.ADBCTest do
       Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
       on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
 
-      {:ok, db} = Database.open([])
+      {:ok, db} = Database.open(driver_path: "test")
       {:ok, conn} = Connection.open(db)
 
       assert {:ok, stmt} = Statement.new(conn)
@@ -179,7 +200,7 @@ defmodule ExArrow.ADBCTest do
       Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
       on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
 
-      {:ok, db} = Database.open([])
+      {:ok, db} = Database.open(driver_path: "test")
       {:ok, conn} = Connection.open(db)
       Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeError)
 
@@ -190,7 +211,7 @@ defmodule ExArrow.ADBCTest do
       Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
       on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
 
-      {:ok, db} = Database.open([])
+      {:ok, db} = Database.open(driver_path: "test")
       {:ok, conn} = Connection.open(db)
       {:ok, stmt} = Statement.new(conn)
       Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeError)
@@ -202,7 +223,7 @@ defmodule ExArrow.ADBCTest do
       Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
       on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
 
-      {:ok, db} = Database.open([])
+      {:ok, db} = Database.open(driver_path: "test")
       {:ok, conn} = Connection.open(db)
       {:ok, stmt} = Statement.new(conn)
       Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeError)
@@ -268,21 +289,23 @@ defmodule ExArrow.ADBCTest do
     end
   end
 
-  # ── Integration: live driver (skip if unavailable) ──────────────────────────
+  # ── Integration: live driver (skip if no driver) ─────────────────────────────
+  # Prefer a real skip: when ExUnit supports it, return {:skip, reason} from
+  # setup when the driver can't be opened so the test is reported as skipped.
+  # ExUnit 1.18 does not support that; we raise instead so the test never passes
+  # when the driver is missing (mix test --exclude adbc to omit).
 
   @tag :adbc
   test "full query path: database -> connection -> statement -> execute -> stream (skip if no driver)" do
-    # Load from path (env ADBC_DRIVER) or by driver name (e.g. adbc_driver_sqlite).
     opts =
       case System.get_env("ADBC_DRIVER") do
         path when is_binary(path) and path != "" -> [driver_path: path]
-        _ -> [driver_name: "adbc_driver_sqlite"]
+        _ -> [driver_name: "adbc_driver_sqlite", uri: ":memory:"]
       end
 
     case Database.open(opts) do
-      {:error, _} ->
-        # Driver not available: skip (DoD: skip gracefully)
-        assert true
+      {:error, reason} ->
+        raise "ADBC driver not available: #{inspect(reason)}. Set ADBC_DRIVER or install a driver. Run with --exclude adbc to omit this test."
 
       {:ok, db} ->
         assert {:ok, conn} = Connection.open(db)
@@ -291,7 +314,6 @@ defmodule ExArrow.ADBCTest do
         assert {:ok, stream} = Statement.execute(stmt)
         assert stream.backend == :adbc
         assert {:ok, %Schema{}} = Stream.schema(stream)
-        # Consume at least one batch or nil
         first = Stream.next(stream)
         if first, do: assert(ExArrow.RecordBatch.num_rows(first) >= 0)
     end

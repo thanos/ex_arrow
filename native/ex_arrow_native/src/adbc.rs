@@ -75,7 +75,7 @@ fn decode_driver_spec<'a>(term: Term<'a>) -> Result<DriverSpec, String> {
     } else if let Some(n) = driver_name_val {
         Ok(DriverSpec::Name {
             name: n,
-            uri: uri_val.unwrap_or_else(|| ":memory:".to_string()),
+            uri: uri_val,
         })
     } else {
         Err("opts must include driver_path or driver_name".to_string())
@@ -84,7 +84,11 @@ fn decode_driver_spec<'a>(term: Term<'a>) -> Result<DriverSpec, String> {
 
 enum DriverSpec {
     Path(String),
-    Name { name: String, uri: String },
+    /// name: driver library name; uri: only set when caller provides :uri (no default).
+    Name {
+        name: String,
+        uri: Option<String>,
+    },
 }
 
 /// Open a database: load driver from path or by name (env), init database.
@@ -113,11 +117,19 @@ pub fn adbc_database_open<'a>(env: Env<'a>, driver_path_or_opts: Term<'a>) -> Te
                 Ok(d) => d,
                 Err(e) => return err_encode(env, &e.to_string()),
             };
-            let opts: Vec<(OptionDatabase, OptionValue)> =
-                vec![(OptionDatabase::Uri, OptionValue::String(uri))];
-            let db = match d.new_database_with_opts(opts) {
-                Ok(db) => db,
-                Err(e) => return err_encode(env, &e.to_string()),
+            let db = match uri {
+                Some(u) => {
+                    let opts: Vec<(OptionDatabase, OptionValue)> =
+                        vec![(OptionDatabase::Uri, OptionValue::String(u))];
+                    match d.new_database_with_opts(opts) {
+                        Ok(db) => db,
+                        Err(e) => return err_encode(env, &e.to_string()),
+                    }
+                }
+                None => match d.new_database() {
+                    Ok(db) => db,
+                    Err(e) => return err_encode(env, &e.to_string()),
+                },
             };
             (d, db)
         }
