@@ -52,6 +52,34 @@ end
 
 In scripts, match on `{:error, _}` to log and exit or skip the workflow.
 
-## Errors
+## Metadata APIs
 
-NIF errors (driver load failure, execute failure, invalid handle) are returned as `{:error, message}` where `message` is a string. Map these to `ExArrow.Error` at the call site if you need a structured exception.
+When the driver supports them, you can query catalog metadata without executing SQL:
+
+- **`Connection.get_table_types/1`** — returns a stream of table types (e.g. `TABLE`, `VIEW`). Use `ExArrow.Stream.schema/1` and `ExArrow.Stream.next/1` to read.
+- **`Connection.get_table_schema/3`** — returns the Arrow schema of a table. Arguments: `(conn, catalog, db_schema, table_name)`; `catalog` and `db_schema` may be `nil` if not applicable.
+- **`Connection.get_objects/2`** — hierarchical view of catalogs, schemas, tables, columns. Options: `:depth` (`"all"`, `"catalogs"`, `"schemas"`, `"tables"`, `"columns"`), optional `:catalog`, `:db_schema`, `:table_name`, `:column_name` filters.
+
+If the driver does not support a given call, you get `{:error, message}`.
+
+## Parameter binding
+
+**`Statement.bind/2`** binds a record batch to the statement (e.g. for prepared statements or bulk insert). Pass an `ExArrow.RecordBatch` (e.g. from `ExArrow.Stream.next/1` or built from Arrow data). Not all drivers support binding; unsupported drivers return `{:error, message}`.
+
+## Errors and diagnostics
+
+Errors (driver load failure, execute failure, unsupported operation) are returned as `{:error, message}` where `message` is a string. The format is driver-dependent; it may include SQLSTATE, vendor codes, or internal details. Use `ExArrow.ADBC.Error.from_message/1` to wrap a string in a struct for consistent handling; `ExArrow.ADBC.Error.message/1` works on both structs and raw strings.
+
+## Support matrix
+
+| Feature | ExArrow API | Driver support |
+|---------|-------------|----------------|
+| Database.open (path / name) | ✓ | All drivers |
+| Connection.open | ✓ | All drivers |
+| Statement.new, set_sql, execute | ✓ | All drivers |
+| get_table_types | ✓ | Varies (e.g. SQLite ✓) |
+| get_table_schema | ✓ | Varies |
+| get_objects | ✓ | Varies |
+| Statement.bind | ✓ | Varies |
+
+Run `mix test --include adbc` with a driver to exercise metadata and binding; without a driver those tests fail with a clear message. Use `mix test --exclude adbc` to skip ADBC integration tests.

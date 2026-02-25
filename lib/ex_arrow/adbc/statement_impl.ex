@@ -22,6 +22,14 @@ defmodule ExArrow.ADBC.StatementImpl do
   end
 
   @impl true
+  def bind(%Statement{resource: stmt_ref}, %ExArrow.RecordBatch{resource: batch_ref}) do
+    case native().adbc_statement_bind(stmt_ref, batch_ref) do
+      :ok -> :ok
+      {:error, msg} -> {:error, msg}
+    end
+  end
+
+  @impl true
   def execute(%Statement{resource: stmt_ref}) do
     case native().adbc_statement_execute(stmt_ref) do
       {:ok, stream_ref} -> {:ok, %Stream{resource: stream_ref, backend: :adbc}}

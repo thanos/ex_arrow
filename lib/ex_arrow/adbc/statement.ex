@@ -30,6 +30,15 @@ defmodule ExArrow.ADBC.Statement do
   end
 
   @doc """
+  Binds a record batch to the statement (e.g. for prepared statements or bulk insert).
+  Not all drivers support binding; returns `{:error, message}` if unsupported.
+  """
+  @spec bind(t(), ExArrow.RecordBatch.t()) :: :ok | {:error, term()}
+  def bind(stmt, batch) do
+    impl().bind(stmt, batch)
+  end
+
+  @doc """
   Executes the statement and returns a stream of record batches.
   Use `ExArrow.Stream.schema/1` and `ExArrow.Stream.next/1` to read the result.
   """

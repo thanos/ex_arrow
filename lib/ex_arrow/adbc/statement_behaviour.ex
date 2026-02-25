@@ -6,6 +6,8 @@ defmodule ExArrow.ADBC.StatementBehaviour do
               {:ok, ExArrow.ADBC.Statement.t()} | {:error, term()}
   @callback set_sql(statement :: ExArrow.ADBC.Statement.t(), sql :: String.t()) ::
               :ok | {:error, term()}
+  @callback bind(statement :: ExArrow.ADBC.Statement.t(), batch :: ExArrow.RecordBatch.t()) ::
+              :ok | {:error, term()}
   @callback execute(statement :: ExArrow.ADBC.Statement.t()) ::
               {:ok, ExArrow.Stream.t()} | {:error, term()}
 end

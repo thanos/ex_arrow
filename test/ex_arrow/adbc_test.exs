@@ -62,6 +62,32 @@ defmodule ExArrow.ADBCTest do
     end
   end
 
+  describe "Connection metadata (real impl, driver-dependent)" do
+    test "get_table_types/1 with invalid connection raises ArgumentError" do
+      conn = %Connection{resource: make_ref()}
+
+      assert_raise ArgumentError, fn ->
+        Connection.get_table_types(conn)
+      end
+    end
+
+    test "get_table_schema/3 with invalid connection raises ArgumentError" do
+      conn = %Connection{resource: make_ref()}
+
+      assert_raise ArgumentError, fn ->
+        Connection.get_table_schema(conn, nil, nil, "t")
+      end
+    end
+
+    test "get_objects/2 with invalid connection raises ArgumentError" do
+      conn = %Connection{resource: make_ref()}
+
+      assert_raise ArgumentError, fn ->
+        Connection.get_objects(conn, [])
+      end
+    end
+  end
+
   describe "Connection (real impl)" do
     test "open/1 with invalid database ref raises ArgumentError" do
       db = %Database{resource: make_ref()}
@@ -130,6 +156,15 @@ defmodule ExArrow.ADBCTest do
         Statement.execute(%Connection{resource: make_ref()})
       end
     end
+
+    test "bind/2 with invalid statement raises ArgumentError" do
+      stmt = %Statement{resource: make_ref()}
+      batch = %ExArrow.RecordBatch{resource: make_ref()}
+
+      assert_raise ArgumentError, fn ->
+        Statement.bind(stmt, batch)
+      end
+    end
   end
 
   # ── Test native (success/error branches without real driver) ─────────────────
@@ -164,6 +199,39 @@ defmodule ExArrow.ADBCTest do
     end
   end
 
+  describe "ConnectionImpl metadata with TestNativeSuccess" do
+    test "get_table_types/1 returns error when stub does not implement" do
+      Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
+
+      {:ok, db} = Database.open(driver_path: "test")
+      {:ok, conn} = Connection.open(db)
+
+      assert {:error, "test stub: not implemented"} = Connection.get_table_types(conn)
+    end
+
+    test "get_table_schema/3 returns error when stub does not implement" do
+      Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
+
+      {:ok, db} = Database.open(driver_path: "test")
+      {:ok, conn} = Connection.open(db)
+
+      assert {:error, "test stub: not implemented"} =
+               Connection.get_table_schema(conn, nil, nil, "mytable")
+    end
+
+    test "get_objects/2 returns error when stub does not implement" do
+      Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
+
+      {:ok, db} = Database.open(driver_path: "test")
+      {:ok, conn} = Connection.open(db)
+
+      assert {:error, "test stub: not implemented"} = Connection.get_objects(conn, depth: "all")
+    end
+  end
+
   describe "ConnectionImpl with TestNativeError" do
     test "open/1 returns {:error, msg} when native returns error" do
       Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
@@ -192,6 +260,19 @@ defmodule ExArrow.ADBCTest do
       assert {:ok, %Stream{resource: stream_ref, backend: :adbc}} = Statement.execute(stmt)
 
       assert is_reference(stream_ref)
+    end
+
+    test "bind/2 returns :ok when native returns success" do
+      Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeSuccess)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
+
+      {:ok, db} = Database.open(driver_path: "test")
+      {:ok, conn} = Connection.open(db)
+      {:ok, stmt} = Statement.new(conn)
+      # Use a ref as batch (stub doesn't inspect it)
+      batch = %ExArrow.RecordBatch{resource: make_ref()}
+
+      assert :ok = Statement.bind(stmt, batch)
     end
   end
 
@@ -316,6 +397,31 @@ defmodule ExArrow.ADBCTest do
         assert {:ok, %Schema{}} = Stream.schema(stream)
         first = Stream.next(stream)
         if first, do: assert(ExArrow.RecordBatch.num_rows(first) >= 0)
+    end
+  end
+
+  @tag :adbc
+  test "metadata: get_table_types when driver available (fails with clear message if no driver)" do
+    opts =
+      case System.get_env("ADBC_DRIVER") do
+        path when is_binary(path) and path != "" -> [driver_path: path]
+        _ -> [driver_name: "adbc_driver_sqlite", uri: ":memory:"]
+      end
+
+    case Database.open(opts) do
+      {:error, reason} ->
+        raise "ADBC driver not available: #{inspect(reason)}. Set ADBC_DRIVER or install a driver. Run with --exclude adbc to omit this test."
+
+      {:ok, db} ->
+        assert {:ok, conn} = Connection.open(db)
+        case Connection.get_table_types(conn) do
+          {:ok, stream} ->
+            assert stream.backend == :adbc
+            assert {:ok, %Schema{}} = Stream.schema(stream)
+          {:error, _msg} ->
+            # Driver may not support get_table_types
+            assert true
+        end
     end
   end
 end

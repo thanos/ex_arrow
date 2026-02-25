@@ -2,7 +2,7 @@
 
 use std::sync::{Mutex, OnceLock};
 
-use adbc_core::options::{AdbcVersion, OptionDatabase, OptionValue};
+use adbc_core::options::{AdbcVersion, ObjectDepth, OptionDatabase, OptionValue};
 use adbc_core::{Connection, Database, Driver, Statement};
 use adbc_driver_manager::{ManagedConnection, ManagedDatabase, ManagedDriver, ManagedStatement};
 use arrow::record_batch::{RecordBatch, RecordBatchReader};
@@ -13,6 +13,7 @@ use rustler::{Encoder, Env, Term};
 
 use crate::resources::{ExArrowRecordBatch, ExArrowSchema};
 use crate::util::{err_encode, ok_encode, SyncResourceType};
+use std::sync::Arc;
 
 rustler::atoms! {
     driver_path,
@@ -257,6 +258,172 @@ pub fn adbc_stream_next<'a>(env: Env<'a>, stream: ResourceArc<AdbcResultStream>)
     drop(batches_guard);
     let handle = ExArrowRecordBatch { batch };
     ok_encode(env, ResourceArc::new(handle))
+}
+
+// ── Connection metadata (where supported by driver) ────────────────────────────
+
+/// Get table types (e.g. TABLE, VIEW). Returns {:ok, stream_ref} or {:error, msg}.
+/// Not all drivers support this; driver may return an error.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn adbc_connection_get_table_types<'a>(
+    env: Env<'a>,
+    connection: ResourceArc<AdbcConnection>,
+) -> Term<'a> {
+    let guard = match connection.connection.lock() {
+        Ok(g) => g,
+        Err(_) => return err_encode(env, "connection lock"),
+    };
+    let out = match guard.get_table_types() {
+        Ok(reader) => {
+            let schema = reader.schema();
+            let batches: Vec<RecordBatch> = match reader
+                .collect::<std::result::Result<Vec<_>, _>>()
+            {
+                Ok(b) => b,
+                Err(e) => return err_encode(env, &e.to_string()),
+            };
+            ok_encode(
+                env,
+                ResourceArc::new(AdbcResultStream {
+                    schema,
+                    batches: Mutex::new(batches),
+                    index: Mutex::new(0),
+                }),
+            )
+        }
+        Err(e) => err_encode(env, &e.to_string()),
+    };
+    out
+}
+
+fn decode_optional_string<'a>(term: Term<'a>) -> Option<String> {
+    term.decode::<String>().ok()
+}
+
+/// Get the Arrow schema of a table. Returns {:ok, schema_ref} or {:error, msg}.
+/// catalog and db_schema are optional (pass nil from Elixir if not applicable).
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn adbc_connection_get_table_schema<'a>(
+    env: Env<'a>,
+    connection: ResourceArc<AdbcConnection>,
+    catalog: Term<'a>,
+    db_schema: Term<'a>,
+    table_name: Term<'a>,
+) -> Term<'a> {
+    let table_name_str = match table_name.decode::<String>() {
+        Ok(s) => s,
+        Err(_) => return err_encode(env, "table_name must be a string"),
+    };
+    let catalog_o = decode_optional_string(catalog);
+    let db_schema_o = decode_optional_string(db_schema);
+    let catalog_opt = catalog_o.as_deref();
+    let db_schema_opt = db_schema_o.as_deref();
+    let guard = match connection.connection.lock() {
+        Ok(g) => g,
+        Err(_) => return err_encode(env, "connection lock"),
+    };
+    match guard.get_table_schema(catalog_opt, db_schema_opt, table_name_str.as_str()) {
+        Ok(schema) => {
+            let handle = ExArrowSchema {
+                schema: Arc::new(schema),
+            };
+            ResourceArc::new(handle).encode(env)
+        }
+        Err(e) => err_encode(env, &e.to_string()),
+    }
+}
+
+fn decode_object_depth(s: &str) -> Result<ObjectDepth, String> {
+    match s {
+        "all" => Ok(ObjectDepth::All),
+        "catalogs" => Ok(ObjectDepth::Catalogs),
+        "schemas" => Ok(ObjectDepth::Schemas),
+        "tables" => Ok(ObjectDepth::Tables),
+        "columns" => Ok(ObjectDepth::Columns),
+        _ => Err(format!(
+            "depth must be one of: all, catalogs, schemas, tables, columns; got: {}",
+            s
+        )),
+    }
+}
+
+/// Get a hierarchical view of catalogs, schemas, tables, columns.
+/// depth: "all" | "catalogs" | "schemas" | "tables" | "columns".
+/// Optional filters: pass nil from Elixir for any you don't need.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn adbc_connection_get_objects<'a>(
+    env: Env<'a>,
+    connection: ResourceArc<AdbcConnection>,
+    depth: Term<'a>,
+    catalog: Term<'a>,
+    db_schema: Term<'a>,
+    table_name: Term<'a>,
+    column_name: Term<'a>,
+) -> Term<'a> {
+    let depth_str: String = match depth.decode() {
+        Ok(s) => s,
+        Err(_) => return err_encode(env, "depth must be a string"),
+    };
+    let depth_val = match decode_object_depth(&depth_str) {
+        Ok(d) => d,
+        Err(e) => return err_encode(env, &e),
+    };
+    let catalog_o = decode_optional_string(catalog);
+    let db_schema_o = decode_optional_string(db_schema);
+    let table_name_o = decode_optional_string(table_name);
+    let column_name_o = decode_optional_string(column_name);
+    let guard = match connection.connection.lock() {
+        Ok(g) => g,
+        Err(_) => return err_encode(env, "connection lock"),
+    };
+    let out = match guard.get_objects(
+        depth_val,
+        catalog_o.as_deref(),
+        db_schema_o.as_deref(),
+        table_name_o.as_deref(),
+        None::<Vec<&str>>,
+        column_name_o.as_deref(),
+    ) {
+        Ok(reader) => {
+            let schema = reader.schema();
+            let batches: Vec<RecordBatch> = match reader
+                .collect::<std::result::Result<Vec<_>, _>>()
+            {
+                Ok(b) => b,
+                Err(e) => return err_encode(env, &e.to_string()),
+            };
+            ok_encode(
+                env,
+                ResourceArc::new(AdbcResultStream {
+                    schema,
+                    batches: Mutex::new(batches),
+                    index: Mutex::new(0),
+                }),
+            )
+        }
+        Err(e) => err_encode(env, &e.to_string()),
+    };
+    out
+}
+
+// ── Statement bind (where supported by driver) ─────────────────────────────────
+
+/// Bind a record batch to the statement (e.g. for prepared statements or bulk insert).
+/// Returns :ok or {:error, msg}. Not all drivers support binding.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn adbc_statement_bind<'a>(
+    env: Env<'a>,
+    statement: ResourceArc<AdbcStatement>,
+    batch: ResourceArc<ExArrowRecordBatch>,
+) -> Term<'a> {
+    let mut guard = match statement.statement.lock() {
+        Ok(g) => g,
+        Err(_) => return err_encode(env, "statement lock"),
+    };
+    match guard.bind(batch.batch.clone()) {
+        Ok(()) => rustler::types::atom::Atom::from_str(env, "ok").unwrap().encode(env),
+        Err(e) => err_encode(env, &e.to_string()),
+    }
 }
 
 // ── Resource type registration ────────────────────────────────────────────────
