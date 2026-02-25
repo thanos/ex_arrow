@@ -104,6 +104,11 @@ rustler::init!(
         flight::flight_client_connect,
         flight::flight_client_do_put,
         flight::flight_client_do_get,
+        flight::flight_client_list_flights,
+        flight::flight_client_get_flight_info,
+        flight::flight_client_get_schema,
+        flight::flight_client_list_actions,
+        flight::flight_client_do_action,
     ],
     load = on_load
 );

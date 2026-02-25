@@ -1,81 +1,336 @@
 defmodule ExArrow.Flight.ClientImplTest do
   use ExUnit.Case, async: false
 
-  describe "unit behaviour (no server)" do
-    test "connect/3 to non-existent server returns error tuple" do
-      assert {:error, _msg} = ExArrow.Flight.ClientImpl.connect("localhost", 39_281, [])
+  alias ExArrow.Flight.{ActionType, Client, ClientImpl, FlightInfo}
+  alias ExArrow.{Schema, Stream}
+
+  # ── helpers ─────────────────────────────────────────────────────────────────
+
+  defp fixture do
+    {:ok, binary} = ExArrow.Native.ipc_test_fixture_binary()
+    {:ok, stream} = ExArrow.IPC.Reader.from_binary(binary)
+    {:ok, schema} = Stream.schema(stream)
+    batch = Stream.next(stream)
+    {schema, batch}
+  end
+
+  defp collect(stream, acc \\ []) do
+    case Stream.next(stream) do
+      nil -> Enum.reverse(acc)
+      {:error, msg} -> raise "stream error: #{msg}"
+      batch -> collect(stream, [batch | acc])
+    end
+  end
+
+  defp fake_client, do: %Client{resource: make_ref()}
+
+  # ── unit tests (no server) ───────────────────────────────────────────────────
+
+  describe "connect/3 (no server)" do
+    test "returns error tuple for non-existent loopback server" do
+      assert {:error, _msg} = ClientImpl.connect("localhost", 39_281, [])
     end
 
-    test "do_get/2 with invalid client resource raises ArgumentError" do
-      client = %ExArrow.Flight.Client{resource: make_ref()}
-
-      assert_raise ArgumentError, fn ->
-        ExArrow.Flight.ClientImpl.do_get(client, "ticket")
-      end
+    test "tls: true attempts TLS and returns a connection error" do
+      # tls: true is now supported — it no longer returns :tls_not_supported.
+      # Connecting to a non-existent server still fails with a transport error.
+      assert {:error, _msg} = ClientImpl.connect("localhost", 39_282, tls: true)
     end
 
-    test "do_put/3 with invalid client/schema resources raises ArgumentError" do
-      client = %ExArrow.Flight.Client{resource: make_ref()}
-      schema = %ExArrow.Schema{resource: make_ref()}
-      batch = %ExArrow.RecordBatch{resource: make_ref()}
+    test "tls: false uses plaintext for any host" do
+      assert {:error, _msg} = ClientImpl.connect("localhost", 39_283, tls: false)
+    end
 
+    test "tls: [ca_cert_pem: pem] uses custom CA" do
+      fake_pem = "-----BEGIN CERTIFICATE-----\nZmFrZQ==\n-----END CERTIFICATE-----\n"
+      # Should attempt connection (and fail — no server), not return :tls_not_supported.
+      assert {:error, _msg} =
+               ClientImpl.connect("localhost", 39_284, tls: [ca_cert_pem: fake_pem])
+    end
+
+    test "tls: [invalid_opt: true] returns {:error, {:invalid_tls_opt, _}}" do
+      assert {:error, {:invalid_tls_opt, msg}} =
+               ClientImpl.connect("localhost", 39_285, tls: [no_cert: true])
+
+      assert is_binary(msg)
+    end
+
+    test "non-loopback host with no tls opt auto-selects TLS (system_certs)" do
+      # Connection fails (no server), but the error is a TLS/transport error,
+      # not :tls_not_supported.
+      assert {:error, _msg} = ClientImpl.connect("flight.example.invalid", 9999, [])
+    end
+
+    test "connect_timeout_ms: 1 times out quickly against a non-listening port" do
+      assert {:error, _msg} =
+               ClientImpl.connect("localhost", 39_286, connect_timeout_ms: 1)
+    end
+  end
+
+  describe "do_get/2 (invalid resource)" do
+    test "raises ArgumentError" do
       assert_raise ArgumentError, fn ->
-        ExArrow.Flight.ClientImpl.do_put(client, schema, [batch])
+        ClientImpl.do_get(fake_client(), "ticket")
       end
     end
   end
 
+  describe "do_put/3 (invalid resource)" do
+    test "raises ArgumentError" do
+      schema = %Schema{resource: make_ref()}
+      batch = %ExArrow.RecordBatch{resource: make_ref()}
+
+      assert_raise ArgumentError, fn ->
+        ClientImpl.do_put(fake_client(), schema, [batch])
+      end
+    end
+  end
+
+  describe "list_flights/2 (invalid resource)" do
+    test "raises ArgumentError" do
+      assert_raise ArgumentError, fn ->
+        ClientImpl.list_flights(fake_client(), <<>>)
+      end
+    end
+  end
+
+  describe "get_flight_info/2 (invalid resource)" do
+    test "raises ArgumentError" do
+      assert_raise ArgumentError, fn ->
+        ClientImpl.get_flight_info(fake_client(), {:cmd, "echo"})
+      end
+    end
+  end
+
+  describe "get_schema/2 (invalid resource)" do
+    test "raises ArgumentError" do
+      assert_raise ArgumentError, fn ->
+        ClientImpl.get_schema(fake_client(), {:cmd, "echo"})
+      end
+    end
+  end
+
+  describe "list_actions/1 (invalid resource)" do
+    test "raises ArgumentError" do
+      assert_raise ArgumentError, fn ->
+        ClientImpl.list_actions(fake_client())
+      end
+    end
+  end
+
+  describe "do_action/3 (invalid resource)" do
+    test "raises ArgumentError" do
+      assert_raise ArgumentError, fn ->
+        ClientImpl.do_action(fake_client(), "ping", <<>>)
+      end
+    end
+  end
+
+  # ── live server tests ────────────────────────────────────────────────────────
+
   @tag :flight
-  test "connect/3 to running Flight echo server returns client" do
-    assert {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
-    assert {:ok, port} = ExArrow.Flight.Server.port(server)
+  test "connect/3 to running echo server returns %Client{}" do
+    {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
+    {:ok, port} = ExArrow.Flight.Server.port(server)
 
-    assert {:ok, %ExArrow.Flight.Client{} = client} =
-             ExArrow.Flight.ClientImpl.connect("localhost", port, [])
-
+    assert {:ok, %Client{} = client} = ClientImpl.connect("localhost", port, [])
     assert is_reference(client.resource)
 
-    assert :ok = ExArrow.Flight.Server.stop(server)
+    ExArrow.Flight.Server.stop(server)
+  end
+
+  @tag :flight
+  test "connect/3 with tls: false succeeds against live plaintext server" do
+    {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
+    {:ok, port} = ExArrow.Flight.Server.port(server)
+
+    assert {:ok, %Client{}} = ClientImpl.connect("localhost", port, tls: false)
+
+    ExArrow.Flight.Server.stop(server)
+  end
+
+  @tag :flight
+  test "connect/3 with connect_timeout_ms succeeds against a live server" do
+    {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
+    {:ok, port} = ExArrow.Flight.Server.port(server)
+
+    assert {:ok, %Client{}} =
+             ClientImpl.connect("localhost", port, connect_timeout_ms: 5_000)
+
+    ExArrow.Flight.Server.stop(server)
   end
 
   @tag :flight
   test "do_put/3 and do_get/2 roundtrip via impl" do
-    assert {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
-    assert {:ok, port} = ExArrow.Flight.Server.port(server)
-    assert {:ok, client} = ExArrow.Flight.ClientImpl.connect("localhost", port, [])
+    {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
+    {:ok, port} = ExArrow.Flight.Server.port(server)
+    {:ok, client} = ClientImpl.connect("localhost", port, [])
+    {schema, batch} = fixture()
 
-    # Fixture: schema + one batch (id int64, name utf8; 2 rows)
-    {:ok, binary} = ExArrow.Native.ipc_test_fixture_binary()
-    {:ok, stream} = ExArrow.IPC.Reader.from_binary(binary)
-    {:ok, schema} = ExArrow.Stream.schema(stream)
-    batch = ExArrow.Stream.next(stream)
-    assert batch != nil
-    assert ExArrow.Stream.next(stream) == nil
+    assert :ok = ClientImpl.do_put(client, schema, [batch])
 
-    # do_put via impl
-    assert :ok = ExArrow.Flight.ClientImpl.do_put(client, schema, [batch])
+    assert {:ok, get_stream} = ClientImpl.do_get(client, "echo")
+    assert {:ok, %Schema{}} = Stream.schema(get_stream)
 
-    # do_get via impl with ticket "echo"
-    assert {:ok, get_stream} = ExArrow.Flight.ClientImpl.do_get(client, "echo")
-
-    # Same schema field count
-    assert {:ok, get_schema} = ExArrow.Stream.schema(get_stream)
-    fields = ExArrow.Schema.fields(get_schema)
-    assert length(fields) == 2
-
-    # One batch, 2 rows
-    batches = collect_batches(get_stream, [])
+    batches = collect(get_stream)
     assert length(batches) == 1
     assert ExArrow.RecordBatch.num_rows(hd(batches)) == 2
 
-    assert :ok = ExArrow.Flight.Server.stop(server)
+    ExArrow.Flight.Server.stop(server)
   end
 
-  defp collect_batches(stream, acc) do
-    case ExArrow.Stream.next(stream) do
-      nil -> Enum.reverse(acc)
-      {:error, msg} -> raise "stream error: #{msg}"
-      batch -> collect_batches(stream, [batch | acc])
-    end
+  @tag :flight
+  test "do_get/2 before do_put returns error" do
+    {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
+    {:ok, port} = ExArrow.Flight.Server.port(server)
+    {:ok, client} = ClientImpl.connect("localhost", port, [])
+
+    assert {:error, msg} = ClientImpl.do_get(client, "echo")
+    assert msg =~ "no data"
+
+    ExArrow.Flight.Server.stop(server)
+  end
+
+  @tag :flight
+  test "list_flights/2 returns empty list when no data is stored" do
+    {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
+    {:ok, port} = ExArrow.Flight.Server.port(server)
+    {:ok, client} = ClientImpl.connect("localhost", port, [])
+
+    assert {:ok, []} = ClientImpl.list_flights(client, <<>>)
+
+    ExArrow.Flight.Server.stop(server)
+  end
+
+  @tag :flight
+  test "list_flights/2 returns one FlightInfo after do_put" do
+    {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
+    {:ok, port} = ExArrow.Flight.Server.port(server)
+    {:ok, client} = ClientImpl.connect("localhost", port, [])
+    {schema, batch} = fixture()
+
+    assert :ok = ClientImpl.do_put(client, schema, [batch])
+
+    assert {:ok, [%FlightInfo{} = info]} = ClientImpl.list_flights(client, <<>>)
+    assert info.total_records == 2
+    assert info.descriptor == {:cmd, "echo"}
+    assert is_binary(info.schema_bytes)
+    assert [%{ticket: "echo"}] = info.endpoints
+
+    ExArrow.Flight.Server.stop(server)
+  end
+
+  @tag :flight
+  test "get_flight_info/2 returns FlightInfo for echo descriptor after do_put" do
+    {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
+    {:ok, port} = ExArrow.Flight.Server.port(server)
+    {:ok, client} = ClientImpl.connect("localhost", port, [])
+    {schema, batch} = fixture()
+
+    assert :ok = ClientImpl.do_put(client, schema, [batch])
+
+    assert {:ok, %FlightInfo{} = info} =
+             ClientImpl.get_flight_info(client, {:cmd, "echo"})
+
+    assert info.total_records == 2
+    assert info.descriptor == {:cmd, "echo"}
+
+    ExArrow.Flight.Server.stop(server)
+  end
+
+  @tag :flight
+  test "get_flight_info/2 returns error for unknown descriptor" do
+    {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
+    {:ok, port} = ExArrow.Flight.Server.port(server)
+    {:ok, client} = ClientImpl.connect("localhost", port, [])
+
+    assert {:error, _} = ClientImpl.get_flight_info(client, {:cmd, "unknown"})
+
+    ExArrow.Flight.Server.stop(server)
+  end
+
+  @tag :flight
+  test "get_schema/2 returns a Schema with correct field names after do_put" do
+    {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
+    {:ok, port} = ExArrow.Flight.Server.port(server)
+    {:ok, client} = ClientImpl.connect("localhost", port, [])
+    {schema, batch} = fixture()
+
+    assert :ok = ClientImpl.do_put(client, schema, [batch])
+
+    assert {:ok, %Schema{} = got} = ClientImpl.get_schema(client, {:cmd, "echo"})
+    fields = ExArrow.Schema.fields(got)
+    assert length(fields) == 2
+    names = Enum.map(fields, & &1.name)
+    assert "id" in names
+    assert "name" in names
+
+    ExArrow.Flight.Server.stop(server)
+  end
+
+  @tag :flight
+  test "get_schema/2 returns error for unknown descriptor" do
+    {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
+    {:ok, port} = ExArrow.Flight.Server.port(server)
+    {:ok, client} = ClientImpl.connect("localhost", port, [])
+
+    assert {:error, _} = ClientImpl.get_schema(client, {:cmd, "no_such"})
+
+    ExArrow.Flight.Server.stop(server)
+  end
+
+  @tag :flight
+  test "list_actions/1 returns ActionType structs for clear and ping" do
+    {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
+    {:ok, port} = ExArrow.Flight.Server.port(server)
+    {:ok, client} = ClientImpl.connect("localhost", port, [])
+
+    assert {:ok, actions} = ClientImpl.list_actions(client)
+    assert Enum.all?(actions, &match?(%ActionType{}, &1))
+
+    types = Enum.map(actions, & &1.type)
+    assert "clear" in types
+    assert "ping" in types
+    assert Enum.all?(actions, fn a -> is_binary(a.description) end)
+
+    ExArrow.Flight.Server.stop(server)
+  end
+
+  @tag :flight
+  test "do_action/3 ping returns [pong]" do
+    {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
+    {:ok, port} = ExArrow.Flight.Server.port(server)
+    {:ok, client} = ClientImpl.connect("localhost", port, [])
+
+    assert {:ok, ["pong"]} = ClientImpl.do_action(client, "ping", <<>>)
+
+    ExArrow.Flight.Server.stop(server)
+  end
+
+  @tag :flight
+  test "do_action/3 clear removes stored data so subsequent do_get fails" do
+    {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
+    {:ok, port} = ExArrow.Flight.Server.port(server)
+    {:ok, client} = ClientImpl.connect("localhost", port, [])
+    {schema, batch} = fixture()
+
+    assert :ok = ClientImpl.do_put(client, schema, [batch])
+    assert {:ok, []} = ClientImpl.do_action(client, "clear", <<>>)
+
+    assert {:error, msg} = ClientImpl.do_get(client, "echo")
+    assert msg =~ "no data"
+
+    ExArrow.Flight.Server.stop(server)
+  end
+
+  @tag :flight
+  test "do_action/3 returns error for unknown action" do
+    {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
+    {:ok, port} = ExArrow.Flight.Server.port(server)
+    {:ok, client} = ClientImpl.connect("localhost", port, [])
+
+    assert {:error, _} = ClientImpl.do_action(client, "no_such_action", <<>>)
+
+    ExArrow.Flight.Server.stop(server)
   end
 end
