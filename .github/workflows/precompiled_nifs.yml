@@ -1,0 +1,88 @@
+# Build precompiled NIFs for ExArrow and attach to GitHub releases on tag push.
+# See: https://hexdocs.pm/rustler_precompiled/precompilation_guide.html
+# Enable: Settings → Actions → General → Workflow permissions → Read and write.
+
+name: Precompiled NIFs
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build_nifs:
+    name: NIF ${{ matrix.nif }} - ${{ matrix.job.target }}
+    runs-on: ${{ matrix.job.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        nif: ["2.15", "2.16"]
+        job:
+          - { target: aarch64-apple-darwin, os: macos-14 }
+          - { target: x86_64-apple-darwin, os: macos-14 }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04 }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-22.04, use-cross: true }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04, use-cross: true }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+          - { target: x86_64-pc-windows-gnu, os: windows-latest }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract project version
+        id: version
+        run: |
+          v=$(sed -n 's/^      version: "\([^"]*\)".*/\1/p' mix.exs | head -n1)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.job.target }}
+
+      - name: Build NIF
+        id: build
+        uses: philss/rustler-precompiled-action@v1.1.4
+        with:
+          project-name: ex_arrow_native
+          project-dir: native/ex_arrow_native
+          project-version: ${{ steps.version.outputs.version }}
+          target: ${{ matrix.job.target }}
+          nif-version: ${{ matrix.nif }}
+          use-cross: ${{ matrix.job.use-cross || false }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.file-name }}
+          path: ${{ steps.build.outputs.file-path }}
+
+  release:
+    name: Create release
+    needs: build_nifs
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download all NIF artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Flatten tarballs for release
+        run: |
+          mkdir -p nifs
+          find release-artifacts -name '*.tar.gz' -exec cp {} nifs/ \;
+          ls -la nifs/
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: nifs/*.tar.gz
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

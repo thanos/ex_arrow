@@ -11,7 +11,7 @@ path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-rustler = "0.32"
+rustler = { version = "0.32", default-features = false, features = ["derive"] }
 arrow = { version = "56", default-features = false, features = ["ipc"] }
 arrow-ipc = "56"
 arrow-schema = { version = "56", default-features = false }
@@ -24,6 +24,11 @@ tonic = { version = "0.13", features = ["tls-ring", "tls-native-roots"] }
 bytes = "1"
 adbc_driver_manager = "0.22"
 adbc_core = "0.22"
+
+[features]
+default = ["nif_version_2_16"]
+nif_version_2_15 = ["rustler/nif_version_2_15"]
+nif_version_2_16 = ["rustler/nif_version_2_16"]
 
 [profile.release]
 lto = true

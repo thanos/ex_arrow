@@ -125,6 +125,8 @@ jobs:
         run: mix deps.get
 
       - name: Compile (includes NIF)
+        env:
+          EX_ARROW_BUILD: "1"
         run: mix compile --force
 
       - name: Run tests

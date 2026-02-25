@@ -11,6 +11,7 @@ defmodule ExArrow.MixProject do
       deps: deps(),
       docs: docs(),
       aliases: aliases(),
+      package: package(),
       test_coverage: [tool: ExCoveralls],
       dialyzer: [
         plt_file: {:no_warn, "priv/plts/project.plt"},
@@ -20,6 +21,29 @@ defmodule ExArrow.MixProject do
         coveralls: :test,
         "coveralls.html": :test,
         "coveralls.github": :test
+      ]
+    ]
+  end
+
+  defp package do
+    [
+      description: "Apache Arrow support for the BEAM: IPC, Flight, ADBC bindings",
+      licenses: ["Apache-2.0"],
+      maintainers: ["Thanos Vassilakis"],
+      links: %{
+        "GitHub" => "https://github.com/your-org/ex_arrow",
+        "Docs" => "https://hexdocs.pm/ex_arrow"
+      },
+      files: [
+        "lib",
+        "native/ex_arrow_native/.cargo",
+        "native/ex_arrow_native/src",
+        "native/ex_arrow_native/Cargo.toml",
+        "native/ex_arrow_native/Cargo.lock",
+        "checksum-*.exs",
+        "mix.exs",
+        "README.md",
+        "CHANGELOG.md"
       ]
     ]
   end
@@ -39,7 +63,8 @@ defmodule ExArrow.MixProject do
 
   defp deps do
     [
-      {:rustler, "~> 0.32"},
+      {:rustler_precompiled, "~> 0.8"},
+      {:rustler, "~> 0.32.0", optional: true},
       {:ex_doc, "~> 0.34", only: :dev},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
@@ -55,6 +80,7 @@ defmodule ExArrow.MixProject do
       main: "overview",
       formatters: ["html"],
       source_url: "https://github.com/your-org/ex_arrow",
+      source_ref: "main",
       extras: [
         "docs/overview.md",
         "docs/memory_model.md",

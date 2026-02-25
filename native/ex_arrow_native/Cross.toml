@@ -1,0 +1,3 @@
+# Pass NIF version through when cross builds (used by rustler-precompiled-action when needed).
+[build.env]
+passthrough = ["RUSTLER_NIF_VERSION"]
