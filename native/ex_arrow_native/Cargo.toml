@@ -25,8 +25,9 @@ bytes = "1"
 adbc_driver_manager = "0.22"
 adbc_core = "0.22"
 
+# Default to lowest NIF version we support so CI can build 2.15 (no extra flag) and 2.16 (action adds --features nif_version_2_16).
 [features]
-default = ["nif_version_2_16"]
+default = ["nif_version_2_15"]
 nif_version_2_15 = ["rustler/nif_version_2_15"]
 nif_version_2_16 = ["rustler/nif_version_2_16"]
 
