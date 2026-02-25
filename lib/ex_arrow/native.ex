@@ -1,10 +1,21 @@
 defmodule ExArrow.Native do
   @moduledoc false
-  use Rustler,
+
+  version = Mix.Project.config()[:version]
+  base_url = "https://github.com/your-org/ex_arrow/releases/download/v#{version}"
+
+  # When base_url still has the placeholder or EX_ARROW_BUILD is set, build from source.
+  # Replace "your-org" with your GitHub org before publishing releases.
+  force_build =
+    System.get_env("EX_ARROW_BUILD") in ["1", "true"] or
+      String.contains?(base_url, "your-org")
+
+  use RustlerPrecompiled,
     otp_app: :ex_arrow,
-    crate: :ex_arrow_native,
-    path: "native/ex_arrow_native",
-    mode: if(Mix.env() == :prod, do: :release, else: :debug)
+    crate: "ex_arrow_native",
+    base_url: base_url,
+    force_build: force_build,
+    version: version
 
   @doc false
   @spec nif_loaded?() :: boolean()
