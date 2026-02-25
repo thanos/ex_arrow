@@ -9,7 +9,7 @@ defmodule ExArrow.Flight.ActionType do
   - `description` — human-readable description of what the action does.
   """
 
-  @type t :: %__MODULE__{type: String.t(), description: String.t()}
+  @type t :: %__MODULE__{type: String.t() | nil, description: String.t() | nil}
 
   defstruct [:type, :description]
 
