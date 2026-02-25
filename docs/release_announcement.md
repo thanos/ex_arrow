@@ -18,7 +18,7 @@ Data stays in native Rust/Arrow buffers; Elixir uses opaque handles (Schema, Rec
 
 Use it for: ingesting Arrow IPC from pipelines, querying databases via ADBC and re-exporting to IPC or Flight, connecting to Flight-compatible services (e.g. Dremio, InfluxDB IOx), and interchanging Arrow files with Explorer, Python, or R.
 
-Requirements: Elixir ~> 1.18, OTP 26+.
+Requirements: Elixir ~> 1.14 (OTP 25/26, NIF 2.15 and 2.16).
 
 - Hex: https://hex.pm/packages/ex_arrow  
 - Docs: https://hexdocs.pm/ex_arrow  
@@ -36,7 +36,7 @@ Feedback and issues welcome.
 
 First release of ExArrow is on Hex. It brings Apache Arrow to Elixir: read/write IPC streams and files, Arrow Flight client and echo server (gRPC), and ADBC so you can run SQL and get Arrow result batches from SQLite, Postgres, etc. Data lives in native buffers; Elixir holds handles. Precompiled NIFs for Linux, macOS, and Windows so you don’t need Rust.
 
-Good fit for data pipelines, ETL, talking to Flight services (Dremio, InfluxDB IOx), and swapping Arrow data with Explorer or Python/R. Elixir ~> 1.18, OTP 26+.
+Good fit for data pipelines, ETL, talking to Flight services (Dremio, InfluxDB IOx), and swapping Arrow data with Explorer or Python/R. Elixir ~> 1.14, OTP 25+.
 
 - https://hex.pm/packages/ex_arrow  
 - https://hexdocs.pm/ex_arrow  
@@ -50,7 +50,7 @@ Good fit for data pipelines, ETL, talking to Flight services (Dremio, InfluxDB I
 
 **Body:**
 
-ExArrow 0.1.0 is a new Elixir library for Apache Arrow: IPC stream/file read-write, Arrow Flight (gRPC) client and server, and ADBC for SQL-to-Arrow result streams. Data stays in native memory; precompiled NIFs so no Rust toolchain needed. Elixir ~> 1.18.
+ExArrow 0.1.0 is a new Elixir library for Apache Arrow: IPC stream/file read-write, Arrow Flight (gRPC) client and server, and ADBC for SQL-to-Arrow result streams. Data stays in native memory; precompiled NIFs so no Rust toolchain needed. Elixir ~> 1.14.
 
 https://hex.pm/packages/ex_arrow | https://github.com/thanos/ex_arrow
 
@@ -62,7 +62,7 @@ https://hex.pm/packages/ex_arrow | https://github.com/thanos/ex_arrow
 
 **Blurb:**
 
-ExArrow 0.1.0 is on Hex. Apache Arrow support for Elixir: IPC (stream and file), Arrow Flight (client and echo server), and ADBC for Arrow-native database results. Data in native buffers; precompiled NIFs for Linux, macOS, Windows. Elixir ~> 1.18, OTP 26+. [Hex](https://hex.pm/packages/ex_arrow) | [Docs](https://hexdocs.pm/ex_arrow) | [GitHub](https://github.com/thanos/ex_arrow)
+ExArrow 0.1.0 is on Hex. Apache Arrow support for Elixir: IPC (stream and file), Arrow Flight (client and echo server), and ADBC for Arrow-native database results. Data in native buffers; precompiled NIFs for Linux, macOS, Windows. Elixir ~> 1.14, OTP 25+. [Hex](https://hex.pm/packages/ex_arrow) | [Docs](https://hexdocs.pm/ex_arrow) | [GitHub](https://github.com/thanos/ex_arrow)
 
 ---
 

@@ -1,49 +1,73 @@
-# Build precompiled NIFs for ExArrow and attach to GitHub releases on tag push.
+# Precompiled NIFs for ExArrow. Modeled on Explorer's release workflow.
+# https://github.com/elixir-explorer/explorer/blob/main/.github/workflows/release.yml
 # See: https://hexdocs.pm/rustler_precompiled/precompilation_guide.html
 # Enable: Settings → Actions → General → Workflow permissions → Read and write.
-#
-# We target each build on a runner that matches the target (native builds only). No cross tool.
-# x86_64-unknown-linux-musl omitted: cross/install-binary-action only provides x86_64 host binary,
-# so it fails when GitHub schedules the job on an arm64 runner. Windows: disabled (toolchain/tar).
 
 name: Precompiled NIFs
 
 on:
   push:
+    branches:
+      - main
+    paths:
+      - "native/**"
+      - ".github/workflows/precompiled_nifs.yml"
     tags:
       - "v*"
+  pull_request:
+    paths:
+      - ".github/workflows/precompiled_nifs.yml"
+  workflow_dispatch:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build_nifs:
-    name: NIF ${{ matrix.nif }} - ${{ matrix.job.target }}
+    name: NIF ${{ matrix.nif }} - ${{ matrix.job.target }} (${{ matrix.job.os }} | ${{ matrix.job.variant || 'default' }})
     runs-on: ${{ matrix.job.os }}
+
     strategy:
       fail-fast: false
       matrix:
-        nif: ["2.16"]
+        # Same NIF coverage as Explorer: 2.15 (OTP 25), 2.16 (OTP 26)
+        nif: ["2.15", "2.16"]
         job:
-          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04, use-cross: false }
-          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm, use-cross: false }
-          - { target: aarch64-apple-darwin, os: macos-14, use-cross: false }
-          - { target: x86_64-apple-darwin, os: macos-14, use-cross: false }
-          # Windows disabled: toolchain/tar issues on those runners.
-          # - { target: x86_64-pc-windows-msvc, os: windows-latest }
-          # - { target: x86_64-pc-windows-gnu, os: windows-latest }
+          # macOS (same as Explorer: macos-15)
+          - { target: aarch64-apple-darwin, os: macos-15 }
+          - { target: x86_64-apple-darwin, os: macos-15 }
+          # Linux: native and cross (cross from-source works on any runner arch)
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04, use-cross: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-22.04, use-cross: true }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04, rustflags: "-C target-feature=+fxsr,+sse,+sse2,+sse3,+ssse3,+sse4.1,+sse4.2,+popcnt,+avx,+fma" }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04, variant: "legacy_cpu" }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-22.04, use-cross: true }
+          # FreeBSD (cross)
+          - { target: x86_64-unknown-freebsd, os: ubuntu-22.04, use-cross: true, rustflags: "-C target-feature=+fxsr,+sse,+sse2,+sse3,+ssse3,+sse4.1,+sse4.2,+popcnt,+avx,+fma" }
+          - { target: x86_64-unknown-freebsd, os: ubuntu-22.04, use-cross: true, variant: "legacy_cpu" }
+          # Windows (same as Explorer: windows-2025)
+          - { target: x86_64-pc-windows-gnu, os: windows-2025, rustflags: "-C target-feature=+fxsr,+sse,+sse2,+sse3,+ssse3,+sse4.1,+sse4.2,+popcnt,+avx,+fma" }
+          - { target: x86_64-pc-windows-gnu, os: windows-2025, variant: "legacy_cpu" }
+          - { target: x86_64-pc-windows-msvc, os: windows-2025, rustflags: "-C target-feature=+fxsr,+sse,+sse2,+sse3,+ssse3,+sse4.1,+sse4.2,+popcnt,+avx,+fma" }
+          - { target: x86_64-pc-windows-msvc, os: windows-2025, variant: "legacy_cpu" }
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set Rust toolchain for job
-        run: echo "RUSTUP_TOOLCHAIN=stable" >> "$GITHUB_ENV"
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Extract project version
-        id: version
+        shell: bash
         run: |
           v=$(sed -n 's/^      version: "\([^"]*\)".*/\1/p' mix.exs | head -n1)
-          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "PROJECT_VERSION=$v" >> $GITHUB_ENV
+
+      - name: Set Rust flags for compilation
+        shell: bash
+        run: |
+          echo "RUSTFLAGS=${{ matrix.job.rustflags }}" >> $GITHUB_ENV
+        if: ${{ matrix.job.rustflags }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -51,8 +75,9 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.job.target }}
 
-      - name: Set default toolchain and target (macOS)
+      - name: Add target (macOS)
         if: runner.os == 'macOS'
+        shell: bash
         run: |
           rustup default stable
           rustup target add ${{ matrix.job.target }}
@@ -63,6 +88,14 @@ jobs:
           brew install gnu-tar
           echo "PATH=$(brew --prefix gnu-tar)/libexec/gnubin:$PATH" >> $GITHUB_ENV
 
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: ex-arrow-precomp
+          shared-key: ${{ matrix.job.target }}-${{ matrix.nif }}-${{ matrix.job.variant || 'default' }}
+          workspaces: |
+            native/ex_arrow_native
+
       - name: Build NIF
         id: build
         uses: philss/rustler-precompiled-action@v1.1.4
@@ -71,19 +104,26 @@ jobs:
         with:
           project-name: ex_arrow_native
           project-dir: native/ex_arrow_native
-          project-version: ${{ steps.version.outputs.version }}
+          project-version: ${{ env.PROJECT_VERSION }}
           target: ${{ matrix.job.target }}
           nif-version: ${{ matrix.nif }}
-          # Must be boolean: "false" string is truthy in the action and triggers cross download on macOS.
-          use-cross: ${{ matrix.job.use-cross == true }}
+          use-cross: ${{ matrix.job.use-cross || '' }}
+          cross-version: ${{ matrix.job.cross-version || 'from-source' }}
+          variant: ${{ matrix.job.variant || '' }}
+          cargo-args: ${{ matrix.job.cargo-args || '' }}
 
-      - name: Verify artifact exists
+      - name: Artifact attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: ${{ steps.build.outputs.file-path }}
+
+      - name: Verify artifact
+        shell: bash
         run: |
           if [ ! -f "${{ steps.build.outputs.file-path }}" ]; then
             echo "::error::Build did not produce artifact: ${{ steps.build.outputs.file-path }}"
             exit 1
           fi
-        if: success()
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -97,13 +137,13 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - name: Download all NIF artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-artifacts
           merge-multiple: true
 
-      - name: Flatten tarballs for release
+      - name: Flatten tarballs
         run: |
           mkdir -p nifs
           find release-artifacts -name '*.tar.gz' -exec cp {} nifs/ \;

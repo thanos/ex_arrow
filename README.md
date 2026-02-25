@@ -11,7 +11,7 @@ ExArrow provides a native core (Arrow in Rust buffers, Elixir handles), a stable
 
 ## Requirements
 
-- Elixir ~> 1.18, OTP 26+
+- Elixir ~> 1.14 (OTP 25 / NIF 2.15 and OTP 26+ / NIF 2.16)
 
 ## Installation
 

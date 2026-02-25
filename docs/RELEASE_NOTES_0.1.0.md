@@ -9,7 +9,7 @@
 
 ExArrow 0.1.0 is the first public release. It brings Apache Arrow support to the BEAM: IPC (stream and file), Arrow Flight (client and server), and ADBC (Arrow Database Connectivity). Data stays in native Rust/Arrow buffers; Elixir uses opaque handles. Precompiled NIFs are provided for Linux (x86_64, aarch64), macOS (x86_64, arm64), and Windows (x86_64), so no Rust toolchain is required for normal use.
 
-**Requirements:** Elixir ~> 1.18, OTP 26+
+**Requirements:** Elixir ~> 1.14 (OTP 25 / NIF 2.15 and OTP 26+ / NIF 2.16)
 
 ---
 
