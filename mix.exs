@@ -55,7 +55,8 @@ defmodule ExArrow.MixProject do
         "docs/overview.md",
         "docs/memory_model.md",
         "docs/ipc_guide.md",
-        "docs/flight_guide.md"
+        "docs/flight_guide.md",
+        "docs/adbc_guide.md"
       ]
     ]
   end

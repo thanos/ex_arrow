@@ -14,7 +14,6 @@ defmodule ExArrow.ADBC.Connection do
 
   @doc """
   Opens a connection from a database handle.
-  Stub: returns error until NIF is implemented.
   """
   @spec open(Database.t()) :: {:ok, t()} | {:error, term()}
   def open(database) do

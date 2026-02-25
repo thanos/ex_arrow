@@ -159,8 +159,8 @@ defmodule ExArrowTest do
       end
     end
 
-    test "ADBC.Database.open returns not_implemented" do
-      assert ExArrow.ADBC.Database.open("/path/to/driver") == {:error, :not_implemented}
+    test "ADBC.Database.open returns error when driver path invalid" do
+      assert {:error, _} = ExArrow.ADBC.Database.open("/path/to/driver")
     end
   end
 

@@ -1,5 +1,6 @@
-//! ExArrow NIFs: IPC stream read/write, Schema and RecordBatch handles, Flight client/server.
+//! ExArrow NIFs: IPC stream read/write, Schema and RecordBatch handles, Flight client/server, ADBC.
 
+mod adbc;
 mod flight;
 mod ipc;
 mod resources;
@@ -73,6 +74,9 @@ fn on_load(env: Env, _: rustler::Term) -> bool {
     if !flight::flight_register_resources(env) {
         return false;
     }
+    if !adbc::adbc_register_resources(env) {
+        return false;
+    }
     true
 }
 
@@ -109,6 +113,13 @@ rustler::init!(
         flight::flight_client_get_schema,
         flight::flight_client_list_actions,
         flight::flight_client_do_action,
+        adbc::adbc_database_open,
+        adbc::adbc_connection_open,
+        adbc::adbc_statement_new,
+        adbc::adbc_statement_set_sql,
+        adbc::adbc_statement_execute,
+        adbc::adbc_stream_schema,
+        adbc::adbc_stream_next,
     ],
     load = on_load
 );

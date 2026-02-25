@@ -1,4 +1,4 @@
-ExUnit.start(exclude: [flight: true])
+ExUnit.start(exclude: [flight: true, adbc: true])
 
 # Define Mox mocks for behaviours (Flight, ADBC). Use in tests with Application.put_env and Mox.stub/expect.
 Mox.defmock(ExArrow.Flight.ClientMock, for: ExArrow.Flight.ClientBehaviour)
