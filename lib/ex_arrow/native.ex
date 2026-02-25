@@ -71,8 +71,24 @@ defmodule ExArrow.Native do
   # ADBC
   def adbc_database_open(_driver_path_or_opts), do: :erlang.nif_error(:nif_not_loaded)
   def adbc_connection_open(_database_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def adbc_connection_get_table_types(_connection_ref), do: :erlang.nif_error(:nif_not_loaded)
+
+  def adbc_connection_get_table_schema(_connection_ref, _catalog, _db_schema, _table_name),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  def adbc_connection_get_objects(
+        _connection_ref,
+        _depth,
+        _catalog,
+        _db_schema,
+        _table_name,
+        _column_name
+      ),
+      do: :erlang.nif_error(:nif_not_loaded)
+
   def adbc_statement_new(_connection_ref), do: :erlang.nif_error(:nif_not_loaded)
   def adbc_statement_set_sql(_statement_ref, _sql), do: :erlang.nif_error(:nif_not_loaded)
+  def adbc_statement_bind(_statement_ref, _batch_ref), do: :erlang.nif_error(:nif_not_loaded)
   def adbc_statement_execute(_statement_ref), do: :erlang.nif_error(:nif_not_loaded)
   def adbc_stream_schema(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
   def adbc_stream_next(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
