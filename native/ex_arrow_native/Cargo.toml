@@ -22,6 +22,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "
 tokio-stream = "0.1"
 tonic = { version = "0.13", features = ["tls-ring", "tls-native-roots"] }
 bytes = "1"
+adbc_driver_manager = "0.22"
+adbc_core = "0.22"
 
 [profile.release]
 lto = true

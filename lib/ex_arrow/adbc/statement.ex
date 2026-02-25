@@ -15,7 +15,6 @@ defmodule ExArrow.ADBC.Statement do
 
   @doc """
   Creates a new statement from a connection.
-  Stub: returns error until NIF is implemented.
   """
   @spec new(Connection.t()) :: {:ok, t()} | {:error, term()}
   def new(conn) do
@@ -24,7 +23,6 @@ defmodule ExArrow.ADBC.Statement do
 
   @doc """
   Sets the SQL for this statement.
-  Stub: returns error until NIF is implemented.
   """
   @spec set_sql(t(), String.t()) :: :ok | {:error, term()}
   def set_sql(stmt, sql) do
@@ -33,7 +31,7 @@ defmodule ExArrow.ADBC.Statement do
 
   @doc """
   Executes the statement and returns a stream of record batches.
-  Stub: returns error until NIF is implemented.
+  Use `ExArrow.Stream.schema/1` and `ExArrow.Stream.next/1` to read the result.
   """
   @spec execute(t()) :: {:ok, Stream.t()} | {:error, term()}
   def execute(stmt) do

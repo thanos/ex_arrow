@@ -7,6 +7,7 @@ defmodule ExArrow.MixProject do
       version: "0.1.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
+      elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       docs: docs(),
       aliases: aliases(),
@@ -22,6 +23,9 @@ defmodule ExArrow.MixProject do
       ]
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   defp aliases do
     [ci: "ci"]
@@ -55,7 +59,8 @@ defmodule ExArrow.MixProject do
         "docs/overview.md",
         "docs/memory_model.md",
         "docs/ipc_guide.md",
-        "docs/flight_guide.md"
+        "docs/flight_guide.md",
+        "docs/adbc_guide.md"
       ]
     ]
   end

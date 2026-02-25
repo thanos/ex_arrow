@@ -67,4 +67,13 @@ defmodule ExArrow.Native do
 
   def flight_client_do_action(_client_ref, _action_type, _action_body, _timeout_ms),
     do: :erlang.nif_error(:nif_not_loaded)
+
+  # ADBC
+  def adbc_database_open(_driver_path_or_opts), do: :erlang.nif_error(:nif_not_loaded)
+  def adbc_connection_open(_database_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def adbc_statement_new(_connection_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def adbc_statement_set_sql(_statement_ref, _sql), do: :erlang.nif_error(:nif_not_loaded)
+  def adbc_statement_execute(_statement_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def adbc_stream_schema(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def adbc_stream_next(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
 end
