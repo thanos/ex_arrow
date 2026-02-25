@@ -18,16 +18,12 @@ jobs:
     runs-on: ${{ matrix.job.os }}
     strategy:
       fail-fast: false
+      # Single build until multi-target and NIF 2.15 matrix are debugged.
+      # Add more targets (macOS, Windows, cross) and nif: ["2.15", "2.16"] later.
       matrix:
-        nif: ["2.15", "2.16"]
+        nif: ["2.16"]
         job:
-          - { target: aarch64-apple-darwin, os: macos-14 }
-          - { target: x86_64-apple-darwin, os: macos-14 }
           - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04 }
-          - { target: x86_64-unknown-linux-musl, os: ubuntu-22.04, use-cross: true }
-          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04, use-cross: true }
-          - { target: x86_64-pc-windows-msvc, os: windows-latest }
-          - { target: x86_64-pc-windows-gnu, os: windows-latest }
 
     steps:
       - uses: actions/checkout@v4
