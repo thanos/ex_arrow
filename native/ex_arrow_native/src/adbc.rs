@@ -117,6 +117,9 @@ pub fn adbc_database_open<'a>(env: Env<'a>, driver_path_or_opts: Term<'a>) -> Te
                 Ok(d) => d,
                 Err(e) => return err_encode(env, &e.to_string()),
             };
+            // Only set OptionDatabase::Uri when the caller provided :uri. We do not default to
+            // ":memory:" or any other value, since that is driver-specific (e.g. SQLite) and
+            // can cause surprising errors for other drivers.
             let db = match uri {
                 Some(u) => {
                     let opts: Vec<(OptionDatabase, OptionValue)> =
