@@ -2,9 +2,9 @@
 # See: https://hexdocs.pm/rustler_precompiled/precompilation_guide.html
 # Enable: Settings → Actions → General → Workflow permissions → Read and write.
 #
-# We target each build on a runner that matches the target (native builds). Cross is used only for
-# x86_64-unknown-linux-musl (no musl runner exists). aarch64 Linux uses ubuntu-22.04-arm.
-# Windows: Still disabled (toolchain/tar issues). macOS: re-enabled with explicit rustup default + target.
+# We target each build on a runner that matches the target (native builds only). No cross tool.
+# x86_64-unknown-linux-musl omitted: cross/install-binary-action only provides x86_64 host binary,
+# so it fails when GitHub schedules the job on an arm64 runner. Windows: disabled (toolchain/tar).
 
 name: Precompiled NIFs
 
@@ -26,7 +26,6 @@ jobs:
         nif: ["2.16"]
         job:
           - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04, use-cross: false }
-          - { target: x86_64-unknown-linux-musl, os: ubuntu-22.04, use-cross: true }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm, use-cross: false }
           - { target: aarch64-apple-darwin, os: macos-14, use-cross: false }
           - { target: x86_64-apple-darwin, os: macos-14, use-cross: false }
