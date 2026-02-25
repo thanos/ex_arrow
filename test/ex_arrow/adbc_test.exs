@@ -414,10 +414,12 @@ defmodule ExArrow.ADBCTest do
 
       {:ok, db} ->
         assert {:ok, conn} = Connection.open(db)
+
         case Connection.get_table_types(conn) do
           {:ok, stream} ->
             assert stream.backend == :adbc
             assert {:ok, %Schema{}} = Stream.schema(stream)
+
           {:error, _msg} ->
             # Driver may not support get_table_types
             assert true

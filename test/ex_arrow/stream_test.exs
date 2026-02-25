@@ -64,6 +64,18 @@ defmodule ExArrow.StreamTest do
 
   describe "next/1" do
     @tag :ipc
+    test "returns nil on first call for an empty stream" do
+      stream = fixture_stream()
+      {:ok, schema} = Stream.schema(stream)
+      _batch = Stream.next(stream)
+
+      {:ok, empty_binary} = ExArrow.IPC.Writer.to_binary(schema, [])
+      {:ok, empty_stream} = IPC.Reader.from_binary(empty_binary)
+
+      assert Stream.next(empty_stream) == nil
+    end
+
+    @tag :ipc
     test "returns a RecordBatch then nil when the single-batch stream is exhausted" do
       stream = fixture_stream()
       assert %ExArrow.RecordBatch{} = Stream.next(stream)
@@ -111,6 +123,81 @@ defmodule ExArrow.StreamTest do
     test "raises ArgumentError for an invalid (non-NIF) resource" do
       stream = %Stream{resource: make_ref()}
       assert_raise ArgumentError, fn -> Stream.next(stream) end
+    end
+
+    @tag :ipc
+    test "drain returns empty list when stream yields no batches" do
+      stream = fixture_stream()
+      {:ok, schema} = Stream.schema(stream)
+      _ = Stream.next(stream)
+
+      {:ok, empty_binary} = ExArrow.IPC.Writer.to_binary(schema, [])
+      {:ok, empty_stream} = IPC.Reader.from_binary(empty_binary)
+
+      assert drain(empty_stream) == []
+    end
+
+    @tag :ipc
+    test "two streams from same binary are independent" do
+      binary =
+        fixture_stream()
+        |> then(fn s ->
+          {:ok, schema} = Stream.schema(s)
+          batch = Stream.next(s)
+          {:ok, b} = ExArrow.IPC.Writer.to_binary(schema, [batch])
+          b
+        end)
+
+      {:ok, stream_a} = IPC.Reader.from_binary(binary)
+      {:ok, stream_b} = IPC.Reader.from_binary(binary)
+
+      assert %ExArrow.RecordBatch{} = Stream.next(stream_a)
+      assert nil == Stream.next(stream_a)
+
+      assert %ExArrow.RecordBatch{} = Stream.next(stream_b)
+      assert nil == Stream.next(stream_b)
+    end
+  end
+
+  # ── schema/1 and next/1 error return paths ───────────────────────────────────
+
+  describe "schema/1 with wrong resource type" do
+    @tag :ipc
+    test "raises ArgumentError when ref is not a stream resource" do
+      stream = fixture_stream()
+      {:ok, schema} = Stream.schema(stream)
+      schema_ref = ExArrow.Schema.resource_ref(schema)
+      wrong_stream = %Stream{resource: schema_ref, backend: :ipc}
+
+      assert_raise ArgumentError, fn ->
+        Stream.schema(wrong_stream)
+      end
+    end
+  end
+
+  describe "next/1 with wrong resource type" do
+    @tag :ipc
+    test "raises ArgumentError when ref is not a stream resource" do
+      stream = fixture_stream()
+      {:ok, schema} = Stream.schema(stream)
+      wrong_stream = %Stream{resource: ExArrow.Schema.resource_ref(schema), backend: :ipc}
+
+      assert_raise ArgumentError, fn ->
+        Stream.next(wrong_stream)
+      end
+    end
+  end
+
+  describe "drain/1" do
+    @tag :ipc
+    test "propagates ArgumentError when next/1 raises" do
+      stream = fixture_stream()
+      {:ok, schema} = Stream.schema(stream)
+      wrong_stream = %Stream{resource: ExArrow.Schema.resource_ref(schema), backend: :ipc}
+
+      assert_raise ArgumentError, fn ->
+        drain(wrong_stream)
+      end
     end
   end
 
