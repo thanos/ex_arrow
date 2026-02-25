@@ -24,8 +24,8 @@ defmodule ExArrow.ADBC.ConnectionImpl do
   @impl true
   def get_table_schema(%Connection{resource: conn_ref}, catalog, db_schema, table_name) do
     case native().adbc_connection_get_table_schema(conn_ref, catalog, db_schema, table_name) do
-      {:ok, schema_ref} -> {:ok, Schema.from_ref(schema_ref)}
       {:error, msg} -> {:error, msg}
+      schema_ref -> {:ok, Schema.from_ref(schema_ref)}
     end
   end
 

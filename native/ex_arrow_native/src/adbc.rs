@@ -300,7 +300,7 @@ fn decode_optional_string<'a>(term: Term<'a>) -> Option<String> {
     term.decode::<String>().ok()
 }
 
-/// Get the Arrow schema of a table. Returns {:ok, schema_ref} or {:error, msg}.
+/// Get the Arrow schema of a table. Returns schema_ref or {:error, msg}.
 /// catalog and db_schema are optional (pass nil from Elixir if not applicable).
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn adbc_connection_get_table_schema<'a>(

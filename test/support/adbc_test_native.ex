@@ -15,7 +15,7 @@ defmodule ExArrow.ADBC.TestNativeSuccess do
   def adbc_connection_get_table_types(_conn_ref), do: {:error, "test stub: not implemented"}
 
   @spec adbc_connection_get_table_schema(reference(), term(), term(), String.t()) ::
-          {:ok, reference()} | {:error, String.t()}
+          reference() | {:error, String.t()}
   def adbc_connection_get_table_schema(_conn_ref, _catalog, _db_schema, _table_name),
     do: {:error, "test stub: not implemented"}
 
@@ -57,7 +57,7 @@ defmodule ExArrow.ADBC.TestNativeError do
   def adbc_connection_get_table_types(_conn_ref), do: {:error, "test error"}
 
   @spec adbc_connection_get_table_schema(reference(), term(), term(), String.t()) ::
-          {:ok, reference()} | {:error, String.t()}
+          reference() | {:error, String.t()}
   def adbc_connection_get_table_schema(_conn_ref, _catalog, _db_schema, _table_name),
     do: {:error, "test error"}
 
