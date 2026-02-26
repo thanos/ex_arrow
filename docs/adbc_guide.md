@@ -19,6 +19,47 @@ Flow: **Database.open** → **Connection.open** → **Statement.new** → **set_
 
 If the driver cannot be loaded (wrong path, missing env), `Database.open/1` returns `{:error, message}`.
 
+## Using the `adbc` package for driver setup
+
+ExArrow does **not** manage or download ADBC drivers itself. It assumes that
+drivers such as `adbc_driver_sqlite` or `adbc_driver_postgresql` are already
+installed and discoverable by the ADBC driver manager.
+
+If you want higher-level driver management (configuration and on-demand
+download), you can use the separate
+[`adbc`](https://github.com/livebook-dev/adbc) package:
+
+- Add `{:adbc, "~> 0.7"}` to your project.
+- Configure drivers or call `Adbc.download_driver!/1` to ensure they are
+  available (for example `:sqlite`, `:postgresql`, `:snowflake`).
+- Then open the database with ExArrow, either by path or by `driver_name` and
+  `uri`, exactly as described above.
+
+For example, using `adbc` for driver setup and ExArrow for Arrow result
+streams:
+
+```elixir
+# Ensure the SQLite driver is present (no-op if already installed)
+Adbc.download_driver!(:sqlite)
+
+{:ok, db} =
+  ExArrow.ADBC.Database.open(driver_name: "adbc_driver_sqlite", uri: ":memory:")
+
+{:ok, conn} = ExArrow.ADBC.Connection.open(db)
+{:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
+:ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS n")
+{:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
+```
+
+Alternatively, you can use
+`ExArrow.ADBC.DriverHelper.ensure_driver_and_open/2`, which will call
+`Adbc.download_driver!/1` when the `:adbc` package is available and then open
+the database via `ExArrow.ADBC.Database.open/1`:
+
+```elixir
+{:ok, db} = ExArrow.ADBC.DriverHelper.ensure_driver_and_open(:sqlite, ":memory:")
+```
+
 ## Example
 
 ```elixir

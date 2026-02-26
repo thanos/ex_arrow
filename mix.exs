@@ -65,6 +65,7 @@ defmodule ExArrow.MixProject do
   defp deps do
     [
       {:rustler_precompiled, "~> 0.8"},
+      {:adbc, "~> 0.7", optional: true},
       {:rustler, "~> 0.32.0", optional: true},
       {:ex_doc, "~> 0.34", only: :dev},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},

@@ -225,6 +225,49 @@ batch = ExArrow.Stream.next(stream)
 
 Errors are `{:error, message}`. Use `ExArrow.ADBC.Error.from_message/1` for consistent handling.
 
+### Driver setup and optional download (using the `adbc` package)
+
+ExArrow does not manage or download ADBC drivers itself. It works with **any**
+ADBC driver that exposes a shared library (for example
+`adbc_driver_sqlite`, `adbc_driver_postgresql`) and is discoverable by the
+ADBC driver manager.
+
+If you want a higher-level way to **configure drivers and download them on
+first use**, use the separate
+[`adbc`](https://github.com/livebook-dev/adbc) package:
+
+- Add it to your project (optional dependency alongside ExArrow):
+
+  ```elixir
+  {:adbc, "~> 0.7"}
+  ```
+
+- Use `Adbc.download_driver!/1` (or its configuration) to ensure drivers such as
+  `:sqlite` or `:postgresql` are available.
+- Then open the database with ExArrow as usual, either by path or by
+  `driver_name` + `uri`.
+
+For example, using `adbc` to download the SQLite driver and ExArrow to get
+Arrow result streams:
+
+```elixir
+# Ensure the SQLite driver is available (no-op if already installed)
+Adbc.download_driver!(:sqlite)
+
+# Then use ExArrow's ADBC APIs for Arrow streams
+{:ok, db} =
+  ExArrow.ADBC.Database.open(driver_name: "adbc_driver_sqlite", uri: ":memory:")
+
+{:ok, conn} = ExArrow.ADBC.Connection.open(db)
+{:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
+:ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS n")
+{:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
+```
+
+If you prefer, you can also use `ExArrow.ADBC.DriverHelper.ensure_driver_and_open/2`,
+which calls `Adbc.download_driver!/1` when the `:adbc` package is available and
+then opens the database via `ExArrow.ADBC.Database.open/1`.
+
 ---
 
 ## Use case examples
