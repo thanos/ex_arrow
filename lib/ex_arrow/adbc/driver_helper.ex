@@ -63,4 +63,3 @@ defmodule ExArrow.ADBC.DriverHelper do
     "adbc_driver_#{driver_key}"
   end
 end
-
