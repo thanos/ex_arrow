@@ -247,7 +247,7 @@ ADBC driver manager.
 
 If you want a higher-level way to **configure drivers and download them on
 first use**, use the separate
-[`adbc`](https://github.com/livebook-dev/adbc) package:
+[`adbc`](https://hex.pm/packages/adbc) package:
 
 - Add it to your project (optional dependency alongside ExArrow):
 

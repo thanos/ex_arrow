@@ -9,14 +9,18 @@ defmodule ExArrow.ADBC.DriverHelper do
     before opening a database with `ExArrow.ADBC.Database.open/1`.
   - If `:adbc` is not available, helpers fall back to calling
     `ExArrow.ADBC.Database.open/1` directly.
+
+  For tests, you can inject the download module via application config
+  `:ex_arrow`, `:adbc_download_module` (default: `Adbc`).
   """
 
   alias ExArrow.ADBC.Database
 
   @doc """
-  Ensures the given ADBC driver is available (using `Adbc.download_driver!/1`
+  Ensures the given ADBC driver is available (using `Adbc.download_driver/1`
   when the `:adbc` package is present), then opens a database via
-  `ExArrow.ADBC.Database.open/1`.
+  `ExArrow.ADBC.Database.open/1`. Returns `{:error, reason}` if the download
+  fails or if `Database.open/1` fails.
 
   This is a convenience around the common pattern:
 
@@ -41,22 +45,31 @@ defmodule ExArrow.ADBC.DriverHelper do
   """
   @spec ensure_driver_and_open(atom(), String.t()) :: {:ok, Database.t()} | {:error, term()}
   def ensure_driver_and_open(driver_key, uri) when is_atom(driver_key) and is_binary(uri) do
-    maybe_download_driver(driver_key)
+    case maybe_download_driver(driver_key) do
+      :ok ->
+        opts = [
+          driver_name: driver_name_from_key(driver_key),
+          uri: uri
+        ]
 
-    opts = [
-      driver_name: driver_name_from_key(driver_key),
-      uri: uri
-    ]
+        Database.open(opts)
 
-    Database.open(opts)
+      {:error, _} = err ->
+        err
+    end
   end
 
   defp maybe_download_driver(driver_key) do
-    if Code.ensure_loaded?(Adbc) and function_exported?(Adbc, :download_driver!, 1) do
-      _ = Adbc.download_driver!(driver_key)
-    end
+    module = Application.get_env(:ex_arrow, :adbc_download_module, Adbc)
 
-    :ok
+    if Code.ensure_loaded?(module) and function_exported?(module, :download_driver, 1) do
+      case module.download_driver(driver_key) do
+        :ok -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      :ok
+    end
   end
 
   defp driver_name_from_key(driver_key) do

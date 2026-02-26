@@ -27,7 +27,7 @@ installed and discoverable by the ADBC driver manager.
 
 If you want higher-level driver management (configuration and on-demand
 download), you can use the separate
-[`adbc`](https://github.com/livebook-dev/adbc) package:
+[`adbc`](https://hex.pm/packages/adbc) package:
 
 - Add `{:adbc, "~> 0.7"}` to your project.
 - Configure drivers or call `Adbc.download_driver!/1` to ensure they are
