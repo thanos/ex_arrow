@@ -1,6 +1,8 @@
 defmodule ExArrow.MixProject do
   use Mix.Project
 
+
+
   def project do
     [
       app: :ex_arrow,
@@ -32,7 +34,7 @@ defmodule ExArrow.MixProject do
       licenses: ["Apache-2.0"],
       maintainers: ["Thanos Vassilakis"],
       links: %{
-        "GitHub" => "https://github.com/your-org/ex_arrow",
+        "GitHub" => "https://github.com/thanos/ex_arrow",
         "Docs" => "https://hexdocs.pm/ex_arrow"
       },
       files: [
@@ -81,7 +83,7 @@ defmodule ExArrow.MixProject do
     [
       main: "overview",
       formatters: ["html"],
-      source_url: "https://github.com/your-org/ex_arrow",
+      source_url: "https://github.com/thanos/ex_arrow",
       source_ref: "main",
       extras: [
         "docs/overview.md",
