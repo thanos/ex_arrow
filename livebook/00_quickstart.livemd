@@ -1,8 +1,30 @@
 # ExArrow Quick Start
 
+```elixir
+Mix.install([
+  {:ex_arrow, path: Path.join(__DIR__, "..")},
+  {:rustler, "~> 0.32.0", optional: true},
+  {:adbc, "~> 0.7"},
+  {:kino_explorer, "~> 0.1.20"}
+],
+  config: [adbc: [drivers: [:sqlite]]]
+)
+
+# Configure adbc to use the SQLite driver (for section 5)
+Application.put_env(:adbc, :drivers, [:sqlite])
+```
+
+## Section
+
 Get up and running with ExArrow in a few minutes. This notebook touches all three pillars: **IPC** (read/write Arrow streams), **Arrow Flight** (client/server), and **ADBC** (query databases and get Arrow results).
 
 ---
+
+```elixir
+db = Kino.start_child!({Adbc.Database, driver: :sqlite})
+conn = Kino.start_child!({Adbc.Connection, database: db})
+{:ok, result} = Adbc.Connection.query(conn, "SELECT 1 AS n, 'hello' AS msg")
+```
 
 ## 1. Setup
 
@@ -103,39 +125,50 @@ ExArrow.Flight.Server.stop(server)
 
 With ADBC you open a database (e.g. SQLite), run SQL, and get an **Arrow stream** of result batches—same `ExArrow.Stream` API as IPC and Flight.
 
-You need an ADBC driver. If the [`adbc`](https://github.com/livebook-dev/adbc) package is available, we use it to ensure the SQLite driver is present; otherwise open by path or driver name yourself.
+**Note:** ExArrow's ADBC layer uses the **C driver manager** and needs a **loadable shared library** (e.g. `libadbc_driver_sqlite.so`). The [`adbc`](https://hex.pm/packages/adbc) Hex package has its own process-based Database/Connection and native stack; its drivers are not necessarily loadable by ExArrow. So if opening with ExArrow fails below, we fall back to the adbc package's API so you still see a working query. To use ExArrow's ADBC (and get `ExArrow.Stream` batches), see [Installing an ADBC driver](INSTALL_ADBC_DRIVER.md).
 
 ```elixir
-# Option A: use DriverHelper when adbc package is available (e.g. in Livebook)
-case ExArrow.ADBC.DriverHelper.ensure_driver_and_open(:sqlite, ":memory:") do
+# Try ExArrow first (needs a driver loadable by the ADBC C driver manager)
+ex_arrow_db =
+  ExArrow.ADBC.Database.open(driver_name: "adbc_driver_sqlite", uri: ":memory:")
+  |> case do
+    {:ok, _} = ok -> ok
+    {:error, _} -> ExArrow.ADBC.DriverHelper.ensure_driver_and_open(:sqlite, ":memory:")
+  end
+
+case ex_arrow_db do
   {:ok, db} ->
+    # ExArrow path: Arrow stream of record batches
     {:ok, conn} = ExArrow.ADBC.Connection.open(db)
     {:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
     :ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS n, 'hello' AS msg")
     {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
     {:ok, schema} = ExArrow.Stream.schema(stream)
     batch = ExArrow.Stream.next(stream)
-    IO.inspect(ExArrow.Schema.fields(schema), label: "Columns")
+    IO.inspect(ExArrow.Schema.fields(schema), label: "Columns (ExArrow)")
     IO.inspect(ExArrow.RecordBatch.num_rows(batch), label: "Rows")
 
   {:error, msg} ->
-    IO.puts("ADBC driver not available: #{msg}")
-    IO.puts("Add {:adbc, \"~> 0.7\"} and/or install an ADBC driver to run this cell.")
+    # Fallback: adbc package's own API (works when the package is in deps)
+    if Code.ensure_loaded?(Kino) and Code.ensure_loaded?(Adbc.Database) do
+      db = Kino.start_child!({Adbc.Database, driver: :sqlite})
+      conn = Kino.start_child!({Adbc.Connection, database: db})
+      {:ok, result} = Adbc.Connection.query(conn, "SELECT 1 AS n, 'hello' AS msg")
+      IO.inspect(result, label: "Query result (adbc package API)")
+      IO.puts("\n(ExArrow's ADBC could not load a driver. This uses the adbc package's Database/Connection. For ExArrow Arrow streams, install a standalone ADBC C driver: see livebook/INSTALL_ADBC_DRIVER.md)")
+    else
+      IO.puts("ADBC driver not available: #{msg}")
+      IO.puts("See livebook/INSTALL_ADBC_DRIVER.md for how to install a driver ExArrow can load.")
+    end
 end
-```
-
-```elixir
-# Option B: open by driver name (no adbc package)
-# {:ok, db} = ExArrow.ADBC.Database.open(driver_name: "adbc_driver_sqlite", uri: ":memory:")
-# Then: Connection.open -> Statement.new -> set_sql -> execute -> Stream.schema / Stream.next
 ```
 
 ---
 
 ## Next steps
 
-- **Notebook 01 — IPC**: Stream vs file format, reading from files, writing to files, schema and types.
-- **Notebook 02 — Flight**: Full server/client API: `list_flights`, `get_flight_info`, `get_schema`, actions.
-- **Notebook 03 — ADBC**: Metadata APIs, optional Explorer roundtrip, and production tips.
+* **Notebook 01 — IPC**: Stream vs file format, reading from files, writing to files, schema and types.
+* **Notebook 02 — Flight**: Full server/client API: `list_flights`, `get_flight_info`, `get_schema`, actions.
+* **Notebook 03 — ADBC**: Metadata APIs, optional Explorer roundtrip, and production tips.
 
 Docs: [hexdocs.pm/ex_arrow](https://hexdocs.pm/ex_arrow).

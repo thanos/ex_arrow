@@ -89,7 +89,7 @@ The `package` in `mix.exs` already includes `checksum-*.exs`, so this file will 
 ## CI and NIF notes
 
 - **CI**: Elixir/OTP and Rust jobs run on push/PR; the Rust job uses `EX_ARROW_BUILD=1` so the NIF is built from source when no precompiled NIFs exist yet.
-- **Elixir**: `~> 1.14` (see `mix.exs`; same as Explorer; OTP 25/26). **Rustler**: `0.32` (Elixir dep and Rust crate).
+- **Elixir**: `~> 1.14` (see `mix.exs`; same as Explorer; OTP 25/26). **Rustler**: `0.37` (Elixir dep; Rust crate per `native/ex_arrow_native/Cargo.toml`).
 - **NIF**: Default is to **download** a precompiled NIF from GitHub releases. To build from source (e.g. unsupported platform or dev), set `EX_ARROW_BUILD=1` and have Rust (and `rustler` as optional dep) available.
 - Native code lives under `native/ex_arrow_native` (cdylib `ex_arrow_native`). Long-running NIF work uses **dirty schedulers** (`schedule = "DirtyIo"`).
 

@@ -27,7 +27,18 @@ end
 After `mix deps.get` and `mix compile`, ExArrow downloads a prebuilt NIF for your platform from the project’s GitHub releases. No Rust or C toolchain is required. This is the recommended way to use ExArrow on supported platforms (Linux x86_64/aarch64, macOS x86_64/arm64, Windows x86_64).
 
 **Building from source**  
-If no precompiled NIF exists for your platform (e.g. FreeBSD, or an older OS), or you are developing ExArrow itself, set `EX_ARROW_BUILD=1` and have Rust installed. Then `mix compile` will build the NIF from the crate in `native/ex_arrow_native`. The optional dependency `rustler` is used for this path.
+If no precompiled NIF exists for your platform (e.g. FreeBSD, or an older OS), or you are developing ExArrow itself, set `EX_ARROW_BUILD=1` and have Rust installed. Then `mix compile` will build the NIF from the crate in `native/ex_arrow_native`. **The optional dependency `rustler` is required for this path:** RustlerPrecompiled needs it to trigger the build. In a normal Mix project, `ex_arrow` already lists `{:rustler, "~> 0.37.3", optional: true}` in its own `mix.exs`, so `mix deps.get` brings it in. If you use ExArrow as a **path dependency** (e.g. `{:ex_arrow, path: ".."}` in Livebook or `Mix.install`), the precompiled NIF may not be used (e.g. unreleased version or placeholder release URL), so the build-from-source path runs and **you must add `rustler` to your deps** and have Rust installed. For example in Livebook:
+
+```elixir
+Mix.install([
+  {:ex_arrow, path: "/path/to/ex_arrow"},
+  {:rustler, "~> 0.37.3", optional: true}
+])
+```
+
+Then run the notebook with Rust available so the NIF can compile. Alternatively, use the published Hex package in Livebook so the precompiled NIF is downloaded and no Rust or rustler is needed: `Mix.install([{:ex_arrow, "~> 0.1.0"}])`.
+
+In a normal Mix project when building from source:
 
 ```bash
 EX_ARROW_BUILD=1 mix deps.get

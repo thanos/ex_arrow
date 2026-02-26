@@ -1,8 +1,6 @@
 defmodule ExArrow.MixProject do
   use Mix.Project
 
-
-
   def project do
     [
       app: :ex_arrow,
@@ -60,7 +58,8 @@ defmodule ExArrow.MixProject do
 
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger],
+      mod: {ExArrow.Application, []}
     ]
   end
 
@@ -68,14 +67,16 @@ defmodule ExArrow.MixProject do
     [
       {:rustler_precompiled, "~> 0.8"},
       {:adbc, "~> 0.7", optional: true},
-      {:rustler, "~> 0.32.0", optional: true},
+      {:explorer, "~> 0.8", optional: true},
+      {:nimble_pool, "~> 1.1", optional: true},
+      {:rustler, "~>  0.32.0", optional: true},
       {:ex_doc, "~> 0.34", only: :dev},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:excoveralls, "~> 0.18", only: :test},
       {:mox, "~> 1.0", only: :test},
-      {:stream_data, "~> 0.6", only: :test}
+      {:stream_data, "~> 1.2.0", only: :test}
     ]
   end
 

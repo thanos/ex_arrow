@@ -6,6 +6,10 @@ defmodule ExArrow.ADBC.ConnectionImpl do
   alias ExArrow.{Schema, Stream}
 
   @impl true
+  def open(%Database{resource: :adbc_package}) do
+    {:ok, %Connection{resource: :adbc_package}}
+  end
+
   def open(%Database{resource: db_ref}) do
     case native().adbc_connection_open(db_ref) do
       {:ok, ref} -> {:ok, %Connection{resource: ref}}
@@ -14,6 +18,10 @@ defmodule ExArrow.ADBC.ConnectionImpl do
   end
 
   @impl true
+  def get_table_types(%Connection{resource: :adbc_package}) do
+    {:error, "get_table_types not implemented for adbc_package backend"}
+  end
+
   def get_table_types(%Connection{resource: conn_ref}) do
     case native().adbc_connection_get_table_types(conn_ref) do
       {:ok, stream_ref} -> {:ok, %Stream{resource: stream_ref, backend: :adbc}}
@@ -22,6 +30,10 @@ defmodule ExArrow.ADBC.ConnectionImpl do
   end
 
   @impl true
+  def get_table_schema(%Connection{resource: :adbc_package}, _catalog, _db_schema, _table_name) do
+    {:error, "get_table_schema not implemented for adbc_package backend"}
+  end
+
   def get_table_schema(%Connection{resource: conn_ref}, catalog, db_schema, table_name) do
     case native().adbc_connection_get_table_schema(conn_ref, catalog, db_schema, table_name) do
       {:error, msg} -> {:error, msg}
@@ -30,6 +42,10 @@ defmodule ExArrow.ADBC.ConnectionImpl do
   end
 
   @impl true
+  def get_objects(%Connection{resource: :adbc_package}, _opts) do
+    {:error, "get_objects not implemented for adbc_package backend"}
+  end
+
   def get_objects(%Connection{resource: conn_ref}, opts) do
     depth = Keyword.get(opts, :depth, "all")
     catalog = Keyword.get(opts, :catalog)

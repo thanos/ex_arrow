@@ -19,6 +19,8 @@ Flow: **Database.open** → **Connection.open** → **Statement.new** → **set_
 
 If the driver cannot be loaded (wrong path, missing env), `Database.open/1` returns `{:error, message}`.
 
+**Installing a driver:** For step-by-step options (the [`adbc`](https://hex.pm/packages/adbc) Hex package and its precompiled artifacts, or building from [Apache Arrow ADBC](https://github.com/apache/arrow-adbc)), see [livebook/INSTALL_ADBC_DRIVER.md](https://github.com/thanos/ex_arrow/blob/main/livebook/INSTALL_ADBC_DRIVER.md).
+
 ## Using the `adbc` package for driver setup
 
 ExArrow does **not** manage or download ADBC drivers itself. It assumes that
@@ -52,13 +54,54 @@ Adbc.download_driver!(:sqlite)
 ```
 
 Alternatively, you can use
-`ExArrow.ADBC.DriverHelper.ensure_driver_and_open/2`, which will call
-`Adbc.download_driver!/1` when the `:adbc` package is available and then open
+`ExArrow.ADBC.DriverHelper.ensure_driver_and_open/2`, which calls
+`Adbc.download_driver/1` when the `:adbc` package is available and then opens
 the database via `ExArrow.ADBC.Database.open/1`:
 
 ```elixir
 {:ok, db} = ExArrow.ADBC.DriverHelper.ensure_driver_and_open(:sqlite, ":memory:")
 ```
+
+## Using the adbc package as the backend (supervised)
+
+When you want to use the [`adbc`](https://hex.pm/packages/adbc) Hex package’s process-based Database/Connection (and its drivers) **instead of** loading a native ADBC C driver, configure ExArrow to start and supervise the adbc processes:
+
+1. Add `{:adbc, "~> 0.7"}`, `{:explorer, "~> 0.8"}` (needed to convert query results to `ExArrow.Stream`), and optionally `{:nimble_pool, "~> 1.1"}` (for connection pooling) to your deps.
+2. Set `config :ex_arrow, :adbc_package` to a keyword list of options passed to `Adbc.Database.start_link/1` (e.g. `[driver: :sqlite, uri: ":memory:"]`).
+
+ExArrow’s application will then start the adbc_package backend (which starts `Adbc.Database` and `Adbc.Connection` under ExArrow’s supervisor. You can open that connection with `Database.open(:adbc_package)` and use the usual flow (Connection.open → Statement.new → set_sql → execute). No native driver path or name is required.
+
+**Example (e.g. in config/config.exs or Livebook):**
+
+```elixir
+config :ex_arrow, :adbc_package, [driver: :sqlite, uri: ":memory:"]
+```
+
+Then in code:
+
+```elixir
+{:ok, db} = ExArrow.ADBC.Database.open(:adbc_package)
+{:ok, conn} = ExArrow.ADBC.Connection.open(db)
+{:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
+:ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS n, 'hello' AS msg")
+{:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
+{:ok, schema} = ExArrow.Stream.schema(stream)
+batch = ExArrow.Stream.next(stream)
+```
+
+`ExArrow.ADBC.DriverHelper.ensure_driver_and_open/2` will use this supervised connection when `:adbc_package` is configured (and will not try to download or open a native driver in that case). If config is set after the application has started (e.g. in a Livebook cell), the connection is started lazily on first use.
+
+### Connection pooling (optional)
+
+By default, the adbc-package backend starts a single `Adbc.Connection` process, so queries are serialized. If you want concurrent query throughput, set:
+
+```elixir
+config :ex_arrow, :adbc_package_pool_size, 8
+```
+
+When `:adbc_package_pool_size` is greater than 1 and `:nimble_pool` is available, ExArrow starts a `NimblePool` of `Adbc.Connection` workers and uses it for `Statement.execute/1`.
+
+**Limitations when using the adbc_package backend:** metadata APIs (`get_table_types`, `get_table_schema`, `get_objects`) and `Statement.bind/2` are not implemented and return an error. Query results are converted to `ExArrow.Stream` via Explorer (Adbc.Result → DataFrame → IPC → ExArrow.Stream); if Explorer is not available, `execute/1` returns an error.
 
 ## Example
 
