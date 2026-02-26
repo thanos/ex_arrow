@@ -1,0 +1,141 @@
+# ExArrow Quick Start
+
+Get up and running with ExArrow in a few minutes. This notebook touches all three pillars: **IPC** (read/write Arrow streams), **Arrow Flight** (client/server), and **ADBC** (query databases and get Arrow results).
+
+---
+
+## 1. Setup
+
+Add `ex_arrow` to your Mix project and start a Livebook (or run in IEx). Here we assume the dependency is already in place.
+
+```elixir
+# Verify the NIF loaded
+ExArrow.native_version()
+```
+
+---
+
+## 2. IPC: Read an Arrow stream
+
+ExArrow can read Arrow IPC from a binary (e.g. from a file, socket, or HTTP body). We'll use a small built-in fixture so you can run this without any external file.
+
+```elixir
+# Get a small IPC stream binary (schema: id int64, name utf8; 2 rows)
+{:ok, ipc_bytes} = ExArrow.Native.ipc_test_fixture_binary()
+
+# Open a stream from the binary
+{:ok, stream} = ExArrow.IPC.Reader.from_binary(ipc_bytes)
+
+# Inspect schema (without consuming the stream)
+{:ok, schema} = ExArrow.Stream.schema(stream)
+ExArrow.Schema.fields(schema) |> Enum.map(& &1.name)
+```
+
+Read batches one at a time until the stream is done:
+
+```elixir
+# First batch
+batch1 = ExArrow.Stream.next(stream)
+if batch1, do: ExArrow.RecordBatch.num_rows(batch1), else: nil
+
+# Second call: no more batches
+ExArrow.Stream.next(stream)
+```
+
+---
+
+## 3. IPC: Write then read (roundtrip)
+
+You can write the same schema and batches back to a binary or file, then read again.
+
+```elixir
+# Rebuild stream from fixture and collect schema + all batches
+{:ok, ipc_bytes} = ExArrow.Native.ipc_test_fixture_binary()
+{:ok, stream} = ExArrow.IPC.Reader.from_binary(ipc_bytes)
+{:ok, schema} = ExArrow.Stream.schema(stream)
+
+batches =
+  Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end)
+  |> Enum.take_while(&(is_struct(&1, ExArrow.RecordBatch)))
+
+# Write to binary
+{:ok, out_binary} = ExArrow.IPC.Writer.to_binary(schema, batches)
+byte_size(out_binary)
+```
+
+---
+
+## 4. Arrow Flight: Echo server and client
+
+Arrow Flight is a gRPC-based protocol for streaming Arrow data. ExArrow includes a small **echo server**: you upload data with `do_put`, then download it with `do_get` using the ticket `"echo"`.
+
+Start the server (one cell), then use the client in the next.
+
+```elixir
+# Start the built-in echo server on port 9999
+{:ok, server} = ExArrow.Flight.Server.start_link(9999, [])
+ExArrow.Flight.Server.port(server)
+```
+
+```elixir
+# Connect and upload our fixture data
+{:ok, ipc_bytes} = ExArrow.Native.ipc_test_fixture_binary()
+{:ok, stream} = ExArrow.IPC.Reader.from_binary(ipc_bytes)
+{:ok, schema} = ExArrow.Stream.schema(stream)
+batches = Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end) |> Enum.take_while(&is_struct(&1, ExArrow.RecordBatch))
+
+{:ok, client} = ExArrow.Flight.Client.connect("localhost", 9999, [])
+:ok = ExArrow.Flight.Client.do_put(client, schema, batches)
+
+# Download the same data via do_get
+{:ok, down_stream} = ExArrow.Flight.Client.do_get(client, "echo")
+{:ok, down_schema} = ExArrow.Stream.schema(down_stream)
+first = ExArrow.Stream.next(down_stream)
+ExArrow.RecordBatch.num_rows(first)
+
+# Clean up
+ExArrow.Flight.Server.stop(server)
+```
+
+---
+
+## 5. ADBC: Query a database, get Arrow results
+
+With ADBC you open a database (e.g. SQLite), run SQL, and get an **Arrow stream** of result batches—same `ExArrow.Stream` API as IPC and Flight.
+
+You need an ADBC driver. If the [`adbc`](https://github.com/livebook-dev/adbc) package is available, we use it to ensure the SQLite driver is present; otherwise open by path or driver name yourself.
+
+```elixir
+# Option A: use DriverHelper when adbc package is available (e.g. in Livebook)
+case ExArrow.ADBC.DriverHelper.ensure_driver_and_open(:sqlite, ":memory:") do
+  {:ok, db} ->
+    {:ok, conn} = ExArrow.ADBC.Connection.open(db)
+    {:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
+    :ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS n, 'hello' AS msg")
+    {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
+    {:ok, schema} = ExArrow.Stream.schema(stream)
+    batch = ExArrow.Stream.next(stream)
+    IO.inspect(ExArrow.Schema.fields(schema), label: "Columns")
+    IO.inspect(ExArrow.RecordBatch.num_rows(batch), label: "Rows")
+
+  {:error, msg} ->
+    IO.puts("ADBC driver not available: #{msg}")
+    IO.puts("Add {:adbc, \"~> 0.7\"} and/or install an ADBC driver to run this cell.")
+end
+```
+
+```elixir
+# Option B: open by driver name (no adbc package)
+# {:ok, db} = ExArrow.ADBC.Database.open(driver_name: "adbc_driver_sqlite", uri: ":memory:")
+# Then: Connection.open -> Statement.new -> set_sql -> execute -> Stream.schema / Stream.next
+```
+
+---
+
+## Next steps
+
+- **Notebook 01 — IPC**: Stream vs file format, reading from files, writing to files, schema and types.
+- **Notebook 02 — Flight**: Full server/client API: `list_flights`, `get_flight_info`, `get_schema`, actions.
+- **Notebook 03 — ADBC**: Metadata APIs, optional Explorer roundtrip, and production tips.
+
+Docs: [hexdocs.pm/ex_arrow](https://hexdocs.pm/ex_arrow).

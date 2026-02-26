@@ -76,6 +76,19 @@ batch = ExArrow.Stream.next(stream)
 
 ---
 
+## Livebook tutorials
+
+Interactive notebooks (open in [Livebook](https://livebook.dev)):
+
+- **[Quick start](livebook/00_quickstart.livemd)** — IPC, Flight, and ADBC in one notebook.
+- **[01 IPC](livebook/01_ipc.livemd)** — Stream vs file format, read/write, schema, Explorer interop.
+- **[02 Flight](livebook/02_flight.livemd)** — Echo server, client, list_flights, get_schema, actions.
+- **[03 ADBC](livebook/03_adbc.livemd)** — Database → Connection → Statement → Stream, metadata APIs.
+
+See [livebook/README.md](livebook/README.md) for an index and run instructions.
+
+---
+
 ## What ExArrow provides
 
 | Area | Description |
