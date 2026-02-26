@@ -125,6 +125,11 @@ Any upgrade of Arrow/ADBC crates should be done in a coordinated fashion and not
 - **ADBC driver availability**
   - Integration tests are driver-dependent. When no driver is available, ADBC tests tagged `:adbc` **fail with a clear message** instead of being marked as skipped (ExUnit 1.18 does not support dynamic runtime skip).
   - Use `mix test --exclude adbc` when no driver is installed.
+  - ExArrow does not manage or download ADBC drivers itself. For higher-level
+    driver configuration and optional download (e.g. in Livebook or apps that
+    want automatic driver setup), consumers can add the separate
+    [`adbc`](https://hex.pm/packages/adbc) package to their own project and use
+    it to ensure drivers are available before calling `ExArrow.ADBC.Database.open/1`.
 - **Driver feature coverage**
   - ADBC metadata APIs (`get_table_types/1`, `get_table_schema/3`, `get_objects/2`) and parameter binding (`Statement.bind/2`) are exposed, but actual support is **driver-dependent**. Some drivers may return `{:error, message}` for these calls.
 - **Platform coverage**
