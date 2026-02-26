@@ -27,7 +27,7 @@ defmodule ExArrow do
   ### ADBC (`ExArrow.ADBC`)
   - `ExArrow.ADBC.Database.open/1` – open database (driver path or opts)
   - `ExArrow.ADBC.Connection.open/1` – open connection from database
-  - `ExArrow.ADBC.Statement` – new, set_sql, execute (returns stream)
+  - `ExArrow.ADBC.Statement` – new(conn, sql) or new(conn, sql, bind: batch), execute (returns stream); set_sql/bind for reuse/rebind
 
   ### Errors
   - `ExArrow.Error` – structured exception with code, message, details

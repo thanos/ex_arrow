@@ -43,8 +43,7 @@ defmodule ExArrow.ADBC.DriverHelper do
         ExArrow.ADBC.DriverHelper.ensure_driver_and_open(:sqlite, ":memory:")
 
       {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-      {:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-      :ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS n")
+      {:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT 1 AS n")
       {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 
   If the `:adbc` package is not installed, this function still works; it simply

@@ -156,7 +156,8 @@ end
 ```elixir
 if Code.ensure_loaded?(Explorer.DataFrame) do
   df = Explorer.DataFrame.new(x: [1, 2, 3], y: ["a", "b", "c"])
-  binary = Explorer.DataFrame.dump_ipc!(df)
+  # Reader.from_binary expects stream format; use dump_ipc_stream!
+  binary = Explorer.DataFrame.dump_ipc_stream!(df)
   {:ok, stream} = ExArrow.IPC.Reader.from_binary(binary)
   {:ok, schema} = ExArrow.Stream.schema(stream)
   ExArrow.Schema.fields(schema) |> Enum.map(& &1.name)
@@ -169,6 +170,6 @@ end
 
 ## Summary
 
-- **Stream**: `Reader.from_binary/1` or `from_file/1` then `Stream.schema/1`, `Stream.next/1`; write with `Writer.to_binary/2` or `to_file/3`.
+- **Stream**: `Reader.from_binary/1` or `from_file/1` then `Stream.schema/1`, `Stream.next/1`; write with `Writer.to_binary/2` or `to_file/3`. Explorer → ExArrow: use `Explorer.DataFrame.dump_ipc_stream!/1` (stream format) then `Reader.from_binary/1`.
 - **File format**: `IPC.File.from_binary/1` or `from_file/1` then `schema/1`, `batch_count/1`, `get_batch/2`.
 - Schema and batches are shared across IPC, Flight, and ADBC. Next notebook: **Arrow Flight**.

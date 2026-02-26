@@ -222,7 +222,8 @@ defmodule ExArrow.ADBC.AdbcPackageManager do
 
     if Code.ensure_loaded?(explorer_df) do
       df = apply(explorer_df, :new, [map])
-      binary = apply(explorer_df, :dump_ipc!, [df])
+      # ExArrow.IPC.Reader expects stream format; dump_ipc! writes file format (footer).
+      binary = apply(explorer_df, :dump_ipc_stream!, [df])
 
       case Reader.from_binary(binary) do
         {:ok, stream} -> {:ok, stream}

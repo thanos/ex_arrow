@@ -14,7 +14,7 @@ This notebook covers: opening a database (with optional `adbc` package), executi
 | Connection | `ExArrow.ADBC.Connection` | Session from a database. |
 | Statement | `ExArrow.ADBC.Statement` | Set SQL, execute → returns `ExArrow.Stream` of record batches. |
 
-Flow: **Database.open** → **Connection.open** → **Statement.new** → **set_sql** → **execute** → **Stream** (schema + next).
+Flow: **Database.open** → **Connection.open** → **Statement.new(conn, sql)** → **execute** → **Stream** (schema + next).
 
 ---
 
@@ -68,8 +68,7 @@ Open a connection, create a statement, set SQL, execute. You get back an `ExArro
 ```elixir
 if db do
   {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-  {:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-  :ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS n, 'hello' AS msg")
+  {:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT 1 AS n, 'hello' AS msg")
   {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 
   {:ok, schema} = ExArrow.Stream.schema(stream)
@@ -92,8 +91,7 @@ Typical pattern: loop until `next/1` returns `nil` or `{:error, _}`.
 ```elixir
 if db do
   {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-  {:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-  :ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS x UNION SELECT 2 UNION SELECT 3")
+  {:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT 1 AS x UNION SELECT 2 UNION SELECT 3")
   {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 
   batches =
@@ -122,8 +120,7 @@ if db do
   {:ok, conn} = ExArrow.ADBC.Connection.open(db)
 
   # Create a table so we can ask for its schema
-  {:ok, stmt_create} = ExArrow.ADBC.Statement.new(conn)
-  :ok = ExArrow.ADBC.Statement.set_sql(stmt_create, "CREATE TABLE demo (id INTEGER, name TEXT)")
+  {:ok, stmt_create} = ExArrow.ADBC.Statement.new(conn, "CREATE TABLE demo (id INTEGER, name TEXT)")
   {:ok, _} = ExArrow.ADBC.Statement.execute(stmt_create)
 
   # Get table schema (SQLite: catalog/db_schema often nil)
@@ -151,11 +148,14 @@ end
 
 ## 8. Statement.bind (when supported)
 
-Some drivers support binding a record batch to a statement (e.g. for bulk insert or prepared parameters). Pass an `ExArrow.RecordBatch`; unsupported drivers return `{:error, message}`.
+Some drivers support binding a record batch to a statement (e.g. for bulk insert or prepared parameters). Use `Statement.new(conn, sql, bind: record_batch)` for an initial bind, or `Statement.bind(stmt, record_batch)` to rebind; unsupported drivers return `{:error, message}`.
 
 ```elixir
-# Example pattern (driver support varies):
-# :ok = ExArrow.ADBC.Statement.bind(stmt, record_batch)
+# Example (driver support varies):
+# {:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT * FROM t WHERE id = ?", bind: record_batch)
+# {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
+# Rebinding:
+# :ok = ExArrow.ADBC.Statement.bind(stmt, other_batch)
 ```
 
 ---
@@ -180,8 +180,7 @@ A common pattern: query with ADBC, get Arrow batches, write to IPC (binary or fi
 ```elixir
 if db && Code.ensure_loaded?(Explorer.DataFrame) do
   {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-  {:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-  :ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS a, 'x' AS b UNION SELECT 2, 'y'")
+  {:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT 1 AS a, 'x' AS b UNION SELECT 2, 'y'")
   {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 
   {:ok, schema} = ExArrow.Stream.schema(stream)
@@ -200,7 +199,7 @@ end
 ## Summary
 
 - **Database.open**: by path (string) or by `driver_name` + optional `uri`. Use `DriverHelper.ensure_driver_and_open/2` when the `adbc` package is available.
-- **Connection.open** → **Statement.new** → **set_sql** → **execute** → **Stream**: same `schema/1` and `next/1` as IPC and Flight.
+- **Connection.open** → **Statement.new(conn, sql)** → **execute** → **Stream**: same `schema/1` and `next/1` as IPC and Flight.
 - **Metadata**: get_table_types, get_table_schema, get_objects when the driver supports them.
 - **Statement.bind**: optional; driver-dependent.
 

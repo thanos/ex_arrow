@@ -1,5 +1,17 @@
 # ExArrow ADBC Integration
 
+```elixir
+Mix.install([
+  {:ex_arrow, path: Path.join(__DIR__, "..")},
+  {:adbc, "~> 0.7"},
+  {:explorer, "~> 0.8"},
+  {:nimble_pool, "~> 1.1"},
+  {:rustler, "~> 0.32.0"}
+])
+```
+
+## Section
+
 This notebook demonstrates the **adbc_package** backend: a single Livebook-friendly integration that uses the [`adbc`](https://hex.pm/packages/adbc) package (and optional **NimblePool**) so you can query a database and get `ExArrow.Stream` results without loading a native ADBC driver. It also demos **connection pooling** when `nimble_pool` is available.
 
 ---
@@ -9,12 +21,8 @@ This notebook demonstrates the **adbc_package** backend: a single Livebook-frien
 Run this cell first. It installs dependencies, configures the adbc_package backend (SQLite in-memory), enables a small connection pool, and starts the backend manager if the ExArrow application started without this config (e.g. in Livebook).
 
 ```elixir
-Mix.install([
-  {:ex_arrow, path: Path.join(__DIR__, "..")},
-  {:adbc, "~> 0.7"},
-  {:explorer, "~> 0.8"},
-  {:nimble_pool, "~> 1.1"}
-])
+# Ensure the SQLite driver is available (downloads if needed; required before opening :adbc_package)
+Adbc.download_driver!(:sqlite)
 
 # ADBC: use SQLite driver
 Application.put_env(:adbc, :drivers, [:sqlite])
@@ -42,8 +50,7 @@ Open the database with `Database.open(:adbc_package)`, then create a connection 
 ```elixir
 {:ok, db} = ExArrow.ADBC.Database.open(:adbc_package)
 {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-{:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-:ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS n, 'hello' AS msg")
+{:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT 1 AS n, 'hello' AS msg")
 {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 ```
 
@@ -64,6 +71,16 @@ IO.puts("Rows: #{ExArrow.RecordBatch.num_rows(batch)}")
 ExArrow.Stream.next(stream)
 ```
 
+**Display as a table (optional)** — In Livebook you can load the stream into Explorer to render a table. Run after the query cell:
+
+```elixir
+{:ok, schema} = ExArrow.Stream.schema(stream)
+batches = Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end)
+          |> Enum.take_while(&is_struct(&1, ExArrow.RecordBatch))
+{:ok, binary} = ExArrow.IPC.Writer.to_binary(schema, batches)
+Explorer.DataFrame.load_ipc!(binary)
+```
+
 ---
 
 ## 3. Another query (multiple rows)
@@ -71,8 +88,7 @@ ExArrow.Stream.next(stream)
 Run a query that returns several rows and consume all batches.
 
 ```elixir
-{:ok, stmt2} = ExArrow.ADBC.Statement.new(conn)
-:ok = ExArrow.ADBC.Statement.set_sql(stmt2, "SELECT 1 AS x UNION SELECT 2 UNION SELECT 3")
+{:ok, stmt2} = ExArrow.ADBC.Statement.new(conn, "SELECT 1 AS x UNION SELECT 2 UNION SELECT 3")
 {:ok, stream2} = ExArrow.ADBC.Statement.execute(stmt2)
 
 batches =
@@ -98,8 +114,7 @@ tasks =
     Task.async(fn ->
       {:ok, db} = ExArrow.ADBC.Database.open(:adbc_package)
       {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-      {:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-      :ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT #{i} AS id, 'query_#{i}' AS label")
+      {:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT #{i} AS id, 'query_#{i}' AS label")
       {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
       batch = ExArrow.Stream.next(stream)
       rows = if batch, do: ExArrow.RecordBatch.num_rows(batch), else: 0
@@ -115,6 +130,6 @@ IO.inspect(results, label: "Concurrent query results")
 
 ## Summary
 
-- **Setup**: Configure `:ex_arrow, :adbc_package` (e.g. `[driver: :sqlite, uri: ":memory:"]`) and optionally `:adbc_package_pool_size`. If the manager wasn’t started by the application (e.g. in Livebook), start it with `AdbcPackageManager.start_link/0`.
-- **Flow**: `Database.open(:adbc_package)` → `Connection.open(db)` → `Statement.new` → `set_sql` → `execute` → `ExArrow.Stream` (schema + next), same as in [Tutorial 3: ADBC](03_adbc.livemd).
-- **Pooling**: With `pool_size > 1` and `nimble_pool` in deps, the backend uses a connection pool so multiple concurrent executes can run in parallel.
+* **Setup**: Configure `:ex_arrow, :adbc_package` (e.g. `[driver: :sqlite, uri: ":memory:"]`) and optionally `:adbc_package_pool_size`. If the manager wasn’t started by the application (e.g. in Livebook), start it with `AdbcPackageManager.start_link/0`.
+* **Flow**: `Database.open(:adbc_package)` → `Connection.open(db)` → `Statement.new(conn, sql)` → `execute` → `ExArrow.Stream` (schema + next), same as in [Tutorial 3: ADBC](03_adbc.livemd).
+* **Pooling**: With `pool_size > 1` and `nimble_pool` in deps, the backend uses a connection pool so multiple concurrent executes can run in parallel.
