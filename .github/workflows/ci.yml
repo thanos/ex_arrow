@@ -43,6 +43,11 @@ jobs:
           elixir-version: ${{ matrix.elixir }}
           otp-version: ${{ matrix.otp }}
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
       - name: Restore Mix dependencies cache
         uses: actions/cache@v4
         with:
@@ -55,14 +60,24 @@ jobs:
         uses: actions/cache@v4
         with:
           path: _build
-          key: mix-build-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock', 'lib/**/*.ex', 'config/**') }}
+          key: mix-build-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock', 'lib/**/*.ex', 'config/**', 'native/ex_arrow_native/**') }}
           restore-keys: |
             mix-build-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      - name: Restore Rust target cache
+        uses: actions/cache@v4
+        with:
+          path: native/ex_arrow_native/target
+          key: rust-target-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('native/ex_arrow_native/Cargo.lock', 'native/ex_arrow_native/Cargo.toml', 'native/ex_arrow_native/src/**') }}
+          restore-keys: |
+            rust-target-${{ matrix.otp }}-${{ matrix.elixir }}-
 
       - name: Install dependencies
         run: mix deps.get
 
       - name: Compile
+        env:
+          EX_ARROW_BUILD: "1"
         run: mix compile --warnings-as-errors
 
       - name: Format check
