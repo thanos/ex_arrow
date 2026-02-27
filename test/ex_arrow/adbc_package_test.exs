@@ -37,6 +37,7 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
 
     on_exit(fn ->
       pid = Process.whereis(ExArrow.ADBC.AdbcPackageManager)
+
       if is_pid(pid) and Process.alive?(pid) do
         GenServer.stop(pid, :normal, 5_000)
       end
@@ -70,12 +71,12 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
 
     @tag :adbc_package
     test "open(:adbc_package) returns error when driver fails to start" do
-      unless Code.ensure_loaded?(Module.concat(["Elixir", "Adbc", "Database"])) do
+      unless Code.ensure_loaded?(Module.safe_concat(["Elixir", "Adbc", "Database"])) do
         raise "Adbc required to test driver failure path."
       end
 
       # Invalid driver option; manager lazy-starts and start_database fails
-      Application.put_env(:ex_arrow, :adbc_package, [driver: :nonexistent_driver, uri: ":memory:"])
+      Application.put_env(:ex_arrow, :adbc_package, driver: :nonexistent_driver, uri: ":memory:")
 
       assert {:error, msg} = Database.open(:adbc_package)
       assert is_binary(msg)
@@ -215,8 +216,8 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
   end
 
   defp adbc_and_explorer_available? do
-    adbc = Code.ensure_loaded?(Module.concat(["Elixir", "Adbc", "Database"]))
-    explorer = Code.ensure_loaded?(Module.concat(["Elixir", "Explorer", "DataFrame"]))
+    adbc = Code.ensure_loaded?(Module.safe_concat(["Elixir", "Adbc", "Database"]))
+    explorer = Code.ensure_loaded?(Module.safe_concat(["Elixir", "Explorer", "DataFrame"]))
     adbc && explorer
   end
 
