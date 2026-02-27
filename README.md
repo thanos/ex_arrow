@@ -1,14 +1,14 @@
 # ExArrow
 
-[CI](https://github.com/thanos/ex_arrow/actions/workflows/ci.yml)
-[Hex version](https://hex.pm/packages/ex_arrow)
-[Hex docs](https://hexdocs.pm/ex_arrow)
-[License](LICENSE)
+[![CI](https://github.com/thanos/ex_arrow/actions/workflows/ci.yml/badge.svg)](https://github.com/thanos/ex_arrow/actions/workflows/ci.yml)
+[![Hex version](https://img.shields.io/hexpm/v/ex_arrow.svg)](https://hex.pm/packages/ex_arrow)
+[![Hex docs](https://img.shields.io/badge/docs-hexdocs.pm-blue)](https://hexdocs.pm/ex_arrow)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, and ADBC database bindings. Column data lives in Rust buffers; Elixir holds lightweight opaque handles. Precompiled NIFs for Linux, macOS, and Windows — no Rust required to use.
 
-
-
+**Author:** Thanos Vassilakis
+**Package:** [hex.pm/packages/ex_arrow](https://hex.pm/packages/ex_arrow) | **Docs:** [hexdocs.pm/ex_arrow](https://hexdocs.pm/ex_arrow) | **Source:** [github.com/thanos/ex_arrow](https://github.com/thanos/ex_arrow)
 
 ---
 
@@ -106,23 +106,23 @@ of Explorer, Nx, or your own application logic.
 
 ## Where ExArrow fits
 
-```
-  ┌──────────────────────────────────────────────────────────────────────┐
-  │                       Your Elixir Application                        │
-  └──────┬──────────────┬──────────────┬──────────────┬──────────────────┘
-         │              │              │              │
-  ┌──────▼──────┐ ┌─────▼─────┐ ┌─────▼────────────┐ ┌──────▼──────────┐
-  │  Explorer   │ │    Nx     │ │     ExArrow        │ │     ExZarr      │
-  │  (analysis) │ │ (tensors) │ │ (IPC·Flight·ADBC)  │ │  (Zarr arrays)  │
-  └─────────────┘ └───────────┘ └────────────────────┘ └────────────────┘
-                                        │          │         │
-                                ┌───────▼──┐  ┌────▼───┐ ┌──▼──────┐
-                                │  Arrow   │  │ Flight │ │  ADBC   │
-                                │ IPC file │  │ server │ │  driver │
-                                └──────────┘  └────────┘ └─────────┘
-                                                 │             │
-                                          Dremio/InfluxDB  Postgres/SQLite
-                                          DuckDB/Snowflake  DuckDB/BigQuery
+```mermaid
+graph TD
+    App["Your Elixir Application"]
+
+    App --> Explorer["Explorer\n(dataframes & analysis)"]
+    App --> Nx["Nx\n(tensors & ML)"]
+    App --> ExArrow["ExArrow\n(IPC · Flight · ADBC)"]
+    App --> ExZarr["ExZarr\n(Zarr chunked arrays)"]
+
+    ExArrow --> IPC["Arrow IPC\n(stream & file)"]
+    ExArrow --> Flight["Arrow Flight\n(gRPC server)"]
+    ExArrow --> ADBC["ADBC\n(driver)"]
+
+    Flight --> FlightSvcs["Dremio · InfluxDB IOx\nDuckDB · Snowflake"]
+    ADBC --> DBs["PostgreSQL · SQLite\nDuckDB · BigQuery"]
+
+    IPC -.->|"interop via IPC binary"| Explorer
 ```
 
 ExArrow sits at the boundary between the BEAM and the Arrow ecosystem. It
