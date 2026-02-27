@@ -4,7 +4,7 @@ defmodule ExArrow.MixProject do
   def project do
     [
       app: :ex_arrow,
-      version: "0.1.0",
+      version: "0.1.1",
       # Same as Explorer: support OTP 25 (NIF 2.15) and OTP 26 (NIF 2.16) users
       elixir: "~> 1.14",
       start_permanent: Mix.env() == :prod,
