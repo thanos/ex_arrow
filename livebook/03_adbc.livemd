@@ -187,7 +187,7 @@ if db && Code.ensure_loaded?(Explorer.DataFrame) do
   batches = Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end) |> Enum.take_while(&is_struct(&1, ExArrow.RecordBatch))
 
   {:ok, binary} = ExArrow.IPC.Writer.to_binary(schema, batches)
-  df = Explorer.DataFrame.load_ipc!(binary)
+  df = Explorer.DataFrame.load_ipc_stream!(binary)
   Explorer.DataFrame.to_series(df, "a")
 else
   "Need db and Explorer to run this cell."

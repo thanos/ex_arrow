@@ -414,10 +414,10 @@ batches =
 batches = Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end)
           |> Enum.take_while(fn nil -> false; {:error, _} -> false; _ -> true end)
 {:ok, binary} = ExArrow.IPC.Writer.to_binary(schema, batches)
-df = Explorer.DataFrame.load_ipc!(binary)
+df = Explorer.DataFrame.load_ipc_stream!(binary)
 ```
 
-Or write to a file and use Explorer’s file API: `ExArrow.IPC.Writer.to_file(path, schema, batches)` then `Explorer.DataFrame.read_ipc!(path)`.
+Or write to a file and use Explorer’s file API: `ExArrow.IPC.Writer.to_file(path, schema, batches)` then `Explorer.DataFrame.read_ipc_stream!(path)` (Writer produces stream format).
 
 **Explorer to ExArrow** — Dump a dataframe to IPC stream binary and read it with ExArrow (use `dump_ipc_stream!`; `Reader.from_binary` expects stream format):
 
@@ -463,7 +463,7 @@ Use ExArrow when you need to read or write Arrow IPC (stream or file), talk to a
 Do not use ExArrow as a general-purpose dataframe or query engine. For in-memory analysis, filtering, grouping, and plotting, use Explorer or similar. Do not use it as a replacement for Ecto or DB drivers when you only need normal SQL results (use Ecto/Postgrex instead). For Parquet-only workflows with no Flight/ADBC, consider Explorer’s Parquet support first.
 
 **Can I use ExArrow and Explorer together?**  
-Yes. ExArrow handles streaming and protocol layers (IPC, Flight, ADBC). Use `ExArrow.IPC.Writer.to_binary/2` (or `to_file/3`) to produce IPC from ExArrow streams, then `Explorer.DataFrame.load_ipc!/1` to get a dataframe. Use `Explorer.DataFrame.dump_ipc_stream!/1` to get IPC stream binary and `ExArrow.IPC.Reader.from_binary/1` to read it back.
+Yes. ExArrow handles streaming and protocol layers (IPC, Flight, ADBC). Use `ExArrow.IPC.Writer.to_binary/2` (or `to_file/3`) to produce IPC stream from ExArrow, then `Explorer.DataFrame.load_ipc_stream!/1` to get a dataframe. Use `Explorer.DataFrame.dump_ipc_stream!/1` to get IPC stream binary and `ExArrow.IPC.Reader.from_binary/1` to read it back.
 
 **Why do I get a 404 or “couldn’t fetch NIF” on compile?**  
 Precompiled NIFs are hosted on GitHub releases. If you are on an unsupported platform or using a version that has no build yet, the download fails. Set `EX_ARROW_BUILD=1`, install Rust, and run `mix compile` to build from source.

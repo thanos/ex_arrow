@@ -96,7 +96,7 @@ batch = ExArrow.Stream.next(stream)
 batches = Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end)
           |> Enum.take_while(&is_struct(&1, ExArrow.RecordBatch))
 {:ok, binary} = ExArrow.IPC.Writer.to_binary(schema, batches)
-Explorer.DataFrame.load_ipc!(binary)
+Explorer.DataFrame.load_ipc_stream!(binary)
 ```
 
 `ExArrow.ADBC.DriverHelper.ensure_driver_and_open/2` will use this supervised connection when `:adbc_package` is configured (and will not try to download or open a native driver in that case). If config is set after the application has started (e.g. in a Livebook cell), the connection is started lazily on first use.

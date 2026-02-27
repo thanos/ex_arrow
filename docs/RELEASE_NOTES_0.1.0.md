@@ -36,7 +36,7 @@ ExArrow 0.1.0 is the first public release. It brings Apache Arrow support to the
 - Four notebooks in the repo: quick start (IPC, Flight, ADBC in one place), plus tutorials for IPC (stream vs file, read/write, schema, Explorer interop), Flight (echo server, client, list_flights, get_schema, actions), and ADBC (Database → Connection → Statement → Stream, metadata). Suitable for learning and for an introductory article.
 
 **Explorer interop**  
-- Move data between ExArrow and [Explorer](https://hex.pm/packages/explorer) via Arrow IPC: use `ExArrow.IPC.Writer.to_binary/2` (or `to_file/3`) and `Explorer.DataFrame.load_ipc!/1` to get a dataframe from ExArrow streams; use `Explorer.DataFrame.dump_ipc_stream!/1` (stream format) and `ExArrow.IPC.Reader.from_binary/1` for the reverse. ExArrow handles streaming and protocols; Explorer handles in-memory analysis.
+- Move data between ExArrow and [Explorer](https://hex.pm/packages/explorer) via Arrow IPC: use `ExArrow.IPC.Writer.to_binary/2` (or `to_file/3`) and `Explorer.DataFrame.load_ipc_stream!/1` to get a dataframe from ExArrow streams (stream format); use `Explorer.DataFrame.dump_ipc_stream!/1` (stream format) and `ExArrow.IPC.Reader.from_binary/1` for the reverse. ExArrow handles streaming and protocols; Explorer handles in-memory analysis.
 
 **Memory and scheduling**  
 - Arrow data lives in native memory; no BEAM heap copy by default.  

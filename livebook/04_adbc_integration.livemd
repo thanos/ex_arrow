@@ -74,11 +74,13 @@ ExArrow.Stream.next(stream)
 **Display as a table (optional)** — In Livebook you can load the stream into Explorer to render a table. Run after the query cell:
 
 ```elixir
+{:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 {:ok, schema} = ExArrow.Stream.schema(stream)
 batches = Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end)
           |> Enum.take_while(&is_struct(&1, ExArrow.RecordBatch))
 {:ok, binary} = ExArrow.IPC.Writer.to_binary(schema, batches)
-Explorer.DataFrame.load_ipc!(binary)
+# to_binary produces stream format; use load_ipc_stream!
+Explorer.DataFrame.load_ipc_stream!(binary)
 ```
 
 ---
