@@ -1,15 +1,24 @@
 # ExArrow Tutorial 1: IPC (Stream and File)
 
+```elixir
+Mix.install([
+  {:ex_arrow, path: Path.join(__DIR__, "..")},
+  {:explorer, "~> 0.8"}
+])
+```
+
+## Section
+
 This notebook covers **Arrow IPC** in ExArrow: reading and writing stream format (binary or file), random-access file format, and how schema and types are exposed. You'll use the same `ExArrow.Stream` and `ExArrow.RecordBatch` handles whether data came from IPC, Flight, or ADBC.
 
 ---
 
 ## 1. Stream vs file format
 
-| Format | Use case | API |
-|--------|----------|-----|
-| **Stream** | Sequential read/write (sockets, HTTP, one-pass files) | `Reader.from_binary/1`, `from_file/1` → `Stream`; `Writer.to_binary/2`, `to_file/3` |
-| **File** | Random access: schema, batch count, get batch by index | `IPC.File.from_file/1`, `from_binary/1` → `schema/1`, `batch_count/1`, `get_batch/2` |
+| Format     | Use case                                               | API                                                                                    |
+| ---------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| **Stream** | Sequential read/write (sockets, HTTP, one-pass files)  | `Reader.from_binary/1`, `from_file/1` → `Stream`; `Writer.to_binary/2`, `to_file/3`  |
+| **File**   | Random access: schema, batch count, get batch by index | `IPC.File.from_file/1`, `from_binary/1` → `schema/1`, `batch_count/1`, `get_batch/2` |
 
 Stream format has no footer; you read batches one by one until `next/1` returns `nil`. File format has a footer so you can jump to any batch without reading the whole file.
 
@@ -143,9 +152,8 @@ if Code.ensure_loaded?(Explorer.DataFrame) do
   {:ok, schema} = ExArrow.Stream.schema(stream)
   batches = Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end) |> Enum.take_while(&is_struct(&1, ExArrow.RecordBatch))
   {:ok, binary} = ExArrow.IPC.Writer.to_binary(schema, batches)
-
-  df = Explorer.DataFrame.load_ipc!(binary)
-  Explorer.DataFrame.to_series(df, "id")
+  df = Explorer.DataFrame.load_ipc_stream!(binary)
+  df["id"]
 else
   "Explorer not loaded; add {:explorer, \"~> 0.8\"} to deps to try this."
 end
@@ -156,7 +164,8 @@ end
 ```elixir
 if Code.ensure_loaded?(Explorer.DataFrame) do
   df = Explorer.DataFrame.new(x: [1, 2, 3], y: ["a", "b", "c"])
-  binary = Explorer.DataFrame.dump_ipc!(df)
+  # Reader.from_binary expects stream format; use dump_ipc_stream!
+  binary = Explorer.DataFrame.dump_ipc_stream!(df)
   {:ok, stream} = ExArrow.IPC.Reader.from_binary(binary)
   {:ok, schema} = ExArrow.Stream.schema(stream)
   ExArrow.Schema.fields(schema) |> Enum.map(& &1.name)
@@ -169,6 +178,6 @@ end
 
 ## Summary
 
-- **Stream**: `Reader.from_binary/1` or `from_file/1` then `Stream.schema/1`, `Stream.next/1`; write with `Writer.to_binary/2` or `to_file/3`.
-- **File format**: `IPC.File.from_binary/1` or `from_file/1` then `schema/1`, `batch_count/1`, `get_batch/2`.
-- Schema and batches are shared across IPC, Flight, and ADBC. Next notebook: **Arrow Flight**.
+* **Stream**: `Reader.from_binary/1` or `from_file/1` then `Stream.schema/1`, `Stream.next/1`; write with `Writer.to_binary/2` or `to_file/3`. Explorer → ExArrow: use `Explorer.DataFrame.dump_ipc_stream!/1` (stream format) then `Reader.from_binary/1`.
+* **File format**: `IPC.File.from_binary/1` or `from_file/1` then `schema/1`, `batch_count/1`, `get_batch/2`.
+* Schema and batches are shared across IPC, Flight, and ADBC. Next notebook: **Arrow Flight**.

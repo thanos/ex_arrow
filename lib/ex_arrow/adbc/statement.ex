@@ -1,7 +1,7 @@
 defmodule ExArrow.ADBC.Statement do
   @moduledoc """
-  ADBC Statement: set_sql, execute, returns Arrow stream (record batches).
-  Delegates to the configured implementation (see `:adbc_statement_impl` in application config).
+  ADBC Statement: create with `new(conn, sql)` or `new(conn, sql, bind: batch)`, then `execute` to get an Arrow stream (record batches).
+  Use `set_sql/2` and `bind/2` when reusing a statement. Delegates to the configured implementation (see `:adbc_statement_impl` in application config).
   """
   alias ExArrow.ADBC.Connection
   alias ExArrow.Stream
@@ -15,14 +15,44 @@ defmodule ExArrow.ADBC.Statement do
 
   @doc """
   Creates a new statement from a connection.
+
+  Optionally pass SQL and/or an initial bind as a record batch:
+
+      {:ok, stmt} = Statement.new(conn, "SELECT 1 AS n")
+      {:ok, stmt} = Statement.new(conn, "INSERT INTO t SELECT * FROM ?", bind: record_batch)
+
+  Use `bind/2` to rebind after creation.
   """
   @spec new(Connection.t()) :: {:ok, t()} | {:error, term()}
   def new(conn) do
     impl().new(conn)
   end
 
+  @spec new(Connection.t(), String.t()) :: {:ok, t()} | {:error, term()}
+  def new(conn, sql) when is_binary(sql) do
+    with {:ok, stmt} <- impl().new(conn),
+         :ok <- impl().set_sql(stmt, sql) do
+      {:ok, stmt}
+    end
+  end
+
+  @spec new(Connection.t(), String.t(), keyword()) :: {:ok, t()} | {:error, term()}
+  def new(conn, sql, opts) when is_binary(sql) and is_list(opts) do
+    with {:ok, stmt} <- new(conn, sql),
+         :ok <- maybe_bind(stmt, opts) do
+      {:ok, stmt}
+    end
+  end
+
+  defp maybe_bind(stmt, opts) do
+    case Keyword.get(opts, :bind) do
+      nil -> :ok
+      batch -> impl().bind(stmt, batch)
+    end
+  end
+
   @doc """
-  Sets the SQL for this statement.
+  Sets the SQL for this statement (e.g. when creating with `new/1` for reuse).
   """
   @spec set_sql(t(), String.t()) :: :ok | {:error, term()}
   def set_sql(stmt, sql) do

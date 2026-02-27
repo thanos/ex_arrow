@@ -10,6 +10,14 @@ defmodule ExArrow.ADBC.DriverHelper do
   - If `:adbc` is not available, helpers fall back to calling
     `ExArrow.ADBC.Database.open/1` directly.
 
+  **Important:** ExArrow's ADBC layer uses the C driver manager and expects a
+  **loadable shared library** (e.g. `libadbc_driver_sqlite.so`). The `adbc`
+  Hex package has its own process-based Database/Connection and native stack;
+  its drivers are not necessarily installed in a form the C driver manager can
+  load. So `ensure_driver_and_open/2` may return `{:error, _}` even after
+  `Adbc.download_driver/1` succeeds. In that case, use a standalone ADBC C
+  driver (see the project's livebook/INSTALL_ADBC_DRIVER.md or docs).
+
   For tests, you can inject the download module via application config
   `:ex_arrow`, `:adbc_download_module` (default: `Adbc`).
   """
@@ -35,8 +43,7 @@ defmodule ExArrow.ADBC.DriverHelper do
         ExArrow.ADBC.DriverHelper.ensure_driver_and_open(:sqlite, ":memory:")
 
       {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-      {:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-      :ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS n")
+      {:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT 1 AS n")
       {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 
   If the `:adbc` package is not installed, this function still works; it simply
@@ -45,17 +52,29 @@ defmodule ExArrow.ADBC.DriverHelper do
   """
   @spec ensure_driver_and_open(atom(), String.t()) :: {:ok, Database.t()} | {:error, term()}
   def ensure_driver_and_open(driver_key, uri) when is_atom(driver_key) and is_binary(uri) do
-    case maybe_download_driver(driver_key) do
-      :ok ->
-        opts = [
-          driver_name: driver_name_from_key(driver_key),
-          uri: uri
-        ]
+    # When config :ex_arrow, :adbc_package is set, use the supervised adbc connection (no native driver needed).
+    if adbc_package_configured?() do
+      Database.open(:adbc_package)
+    else
+      case maybe_download_driver(driver_key) do
+        :ok ->
+          opts = [
+            driver_name: driver_name_from_key(driver_key),
+            uri: uri
+          ]
 
-        Database.open(opts)
+          Database.open(opts)
 
-      {:error, _} = err ->
-        err
+        {:error, _} = err ->
+          err
+      end
+    end
+  end
+
+  defp adbc_package_configured? do
+    case Application.get_env(:ex_arrow, :adbc_package) do
+      opts when is_list(opts) and opts != [] -> true
+      _ -> false
     end
   end
 

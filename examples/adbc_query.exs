@@ -21,11 +21,10 @@ case Database.open(opts) do
   {:ok, db} ->
     IO.puts("Database opened")
     {:ok, conn} = Connection.open(db)
-    {:ok, stmt} = Statement.new(conn)
-    :ok = Statement.set_sql(stmt, "SELECT 1 AS n")
+    {:ok, stmt} = Statement.new(conn, "SELECT 1 AS n")
     {:ok, stream} = Statement.execute(stmt)
     {:ok, schema} = Stream.schema(stream)
-    IO.puts("Schema: #{inspect(ExArrow.Schema.fields(schema) |> Enum.map(& &1.name))}")
+    IO.puts("Columns: #{inspect(ExArrow.Schema.fields(schema) |> Enum.map(& &1.name))}")
     batch = Stream.next(stream)
 
     if batch do

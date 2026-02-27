@@ -1,5 +1,7 @@
 # ExArrow Tutorial 3: ADBC (Arrow Database Connectivity)
 
+## Section
+
 ADBC exposes databases through the Arrow Database Connectivity API. You open a **Database** (driver + options), then a **Connection**, then run **Statement** (SQL) and get an **Arrow stream** of result batches—the same `ExArrow.Stream` you use for IPC and Flight.
 
 This notebook covers: opening a database (with optional `adbc` package), executing SQL, consuming the result stream, and optional metadata APIs.
@@ -8,13 +10,13 @@ This notebook covers: opening a database (with optional `adbc` package), executi
 
 ## 1. Concepts
 
-| Handle | Module | Purpose |
-|--------|--------|---------|
-| Database | `ExArrow.ADBC.Database` | Driver (path or name) + init options (e.g. URI). |
-| Connection | `ExArrow.ADBC.Connection` | Session from a database. |
-| Statement | `ExArrow.ADBC.Statement` | Set SQL, execute → returns `ExArrow.Stream` of record batches. |
+| Handle     | Module                    | Purpose                                                          |
+| ---------- | ------------------------- | ---------------------------------------------------------------- |
+| Database   | `ExArrow.ADBC.Database`   | Driver (path or name) + init options (e.g. URI).                 |
+| Connection | `ExArrow.ADBC.Connection` | Session from a database.                                         |
+| Statement  | `ExArrow.ADBC.Statement`  | Set SQL, execute → returns `ExArrow.Stream` of record batches. |
 
-Flow: **Database.open** → **Connection.open** → **Statement.new** → **set_sql** → **execute** → **Stream** (schema + next).
+Flow: **Database.open** → **Connection.open** → **Statement.new(conn, sql)** → **execute** → **Stream** (schema + next).
 
 ---
 
@@ -22,8 +24,8 @@ Flow: **Database.open** → **Connection.open** → **Statement.new** → **set_
 
 ExArrow does not install or download ADBC drivers. You either:
 
-- **By path**: Pass the path to the driver shared library (e.g. `libadbc_driver_sqlite.so`).
-- **By name**: Pass `driver_name: "adbc_driver_sqlite"` and optionally `uri: ":memory:"`. The ADBC driver manager looks up the library by name (environment or system path).
+* **By path**: Pass the path to the driver shared library (e.g. `libadbc_driver_sqlite.so`).
+* **By name**: Pass `driver_name: "adbc_driver_sqlite"` and optionally `uri: ":memory:"`. The ADBC driver manager looks up the library by name (environment or system path).
 
 If the [`adbc`](https://github.com/livebook-dev/adbc) package is available, you can use it to download drivers on demand and then open with ExArrow.
 
@@ -68,8 +70,7 @@ Open a connection, create a statement, set SQL, execute. You get back an `ExArro
 ```elixir
 if db do
   {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-  {:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-  :ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS n, 'hello' AS msg")
+  {:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT 1 AS n, 'hello' AS msg")
   {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 
   {:ok, schema} = ExArrow.Stream.schema(stream)
@@ -92,8 +93,7 @@ Typical pattern: loop until `next/1` returns `nil` or `{:error, _}`.
 ```elixir
 if db do
   {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-  {:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-  :ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS x UNION SELECT 2 UNION SELECT 3")
+  {:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT 1 AS x UNION SELECT 2 UNION SELECT 3")
   {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 
   batches =
@@ -113,17 +113,16 @@ end
 
 When the driver supports them, you can query catalog metadata without SQL.
 
-- **get_table_types/1** — stream of table types (e.g. TABLE, VIEW).
-- **get_table_schema/3** — Arrow schema for a table: `(conn, catalog, db_schema, table_name)`; use `nil` for catalog/db_schema where not applicable.
-- **get_objects/2** — hierarchical view (catalogs, schemas, tables, columns) with optional filters.
+* **get_table_types/1** — stream of table types (e.g. TABLE, VIEW).
+* **get_table_schema/3** — Arrow schema for a table: `(conn, catalog, db_schema, table_name)`; use `nil` for catalog/db_schema where not applicable.
+* **get_objects/2** — hierarchical view (catalogs, schemas, tables, columns) with optional filters.
 
 ```elixir
 if db do
   {:ok, conn} = ExArrow.ADBC.Connection.open(db)
 
   # Create a table so we can ask for its schema
-  {:ok, stmt_create} = ExArrow.ADBC.Statement.new(conn)
-  :ok = ExArrow.ADBC.Statement.set_sql(stmt_create, "CREATE TABLE demo (id INTEGER, name TEXT)")
+  {:ok, stmt_create} = ExArrow.ADBC.Statement.new(conn, "CREATE TABLE demo (id INTEGER, name TEXT)")
   {:ok, _} = ExArrow.ADBC.Statement.execute(stmt_create)
 
   # Get table schema (SQLite: catalog/db_schema often nil)
@@ -151,11 +150,14 @@ end
 
 ## 8. Statement.bind (when supported)
 
-Some drivers support binding a record batch to a statement (e.g. for bulk insert or prepared parameters). Pass an `ExArrow.RecordBatch`; unsupported drivers return `{:error, message}`.
+Some drivers support binding a record batch to a statement (e.g. for bulk insert or prepared parameters). Use `Statement.new(conn, sql, bind: record_batch)` for an initial bind, or `Statement.bind(stmt, record_batch)` to rebind; unsupported drivers return `{:error, message}`.
 
 ```elixir
-# Example pattern (driver support varies):
-# :ok = ExArrow.ADBC.Statement.bind(stmt, record_batch)
+# Example (driver support varies):
+# {:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT * FROM t WHERE id = ?", bind: record_batch)
+# {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
+# Rebinding:
+# :ok = ExArrow.ADBC.Statement.bind(stmt, other_batch)
 ```
 
 ---
@@ -180,16 +182,15 @@ A common pattern: query with ADBC, get Arrow batches, write to IPC (binary or fi
 ```elixir
 if db && Code.ensure_loaded?(Explorer.DataFrame) do
   {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-  {:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-  :ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS a, 'x' AS b UNION SELECT 2, 'y'")
+  {:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT 1 AS a, 'x' AS b UNION SELECT 2, 'y'")
   {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 
   {:ok, schema} = ExArrow.Stream.schema(stream)
   batches = Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end) |> Enum.take_while(&is_struct(&1, ExArrow.RecordBatch))
 
   {:ok, binary} = ExArrow.IPC.Writer.to_binary(schema, batches)
-  df = Explorer.DataFrame.load_ipc!(binary)
-  Explorer.DataFrame.to_series(df, "a")
+  df = Explorer.DataFrame.load_ipc_stream!(binary)
+  df["a"]
 else
   "Need db and Explorer to run this cell."
 end
@@ -199,9 +200,9 @@ end
 
 ## Summary
 
-- **Database.open**: by path (string) or by `driver_name` + optional `uri`. Use `DriverHelper.ensure_driver_and_open/2` when the `adbc` package is available.
-- **Connection.open** → **Statement.new** → **set_sql** → **execute** → **Stream**: same `schema/1` and `next/1` as IPC and Flight.
-- **Metadata**: get_table_types, get_table_schema, get_objects when the driver supports them.
-- **Statement.bind**: optional; driver-dependent.
+* **Database.open**: by path (string) or by `driver_name` + optional `uri`. Use `DriverHelper.ensure_driver_and_open/2` when the `adbc` package is available.
+* **Connection.open** → **Statement.new(conn, sql)** → **execute** → **Stream**: same `schema/1` and `next/1` as IPC and Flight.
+* **Metadata**: get_table_types, get_table_schema, get_objects when the driver supports them.
+* **Statement.bind**: optional; driver-dependent.
 
 You’ve now seen **IPC**, **Flight**, and **ADBC**. ExArrow keeps Arrow data in native memory and gives you a single stream/batch API across all three—ideal for pipelines, ETL, and interchanging with Explorer or other Arrow consumers.

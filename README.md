@@ -27,7 +27,18 @@ end
 After `mix deps.get` and `mix compile`, ExArrow downloads a prebuilt NIF for your platform from the project’s GitHub releases. No Rust or C toolchain is required. This is the recommended way to use ExArrow on supported platforms (Linux x86_64/aarch64, macOS x86_64/arm64, Windows x86_64).
 
 **Building from source**  
-If no precompiled NIF exists for your platform (e.g. FreeBSD, or an older OS), or you are developing ExArrow itself, set `EX_ARROW_BUILD=1` and have Rust installed. Then `mix compile` will build the NIF from the crate in `native/ex_arrow_native`. The optional dependency `rustler` is used for this path.
+If no precompiled NIF exists for your platform (e.g. FreeBSD, or an older OS), or you are developing ExArrow itself, set `EX_ARROW_BUILD=1` and have Rust installed. Then `mix compile` will build the NIF from the crate in `native/ex_arrow_native`. **The optional dependency `rustler` is required for this path:** RustlerPrecompiled needs it to trigger the build. In a normal Mix project, `ex_arrow` already lists `{:rustler, "~> 0.32.0", optional: true}` in its own `mix.exs`, so `mix deps.get` brings it in. If you use ExArrow as a **path dependency** (e.g. `{:ex_arrow, path: ".."}` in Livebook or `Mix.install`), the precompiled NIF may not be used (e.g. unreleased version or placeholder release URL), so the build-from-source path runs and **you must add `rustler` to your deps** and have Rust installed. For example in Livebook:
+
+```elixir
+Mix.install([
+  {:ex_arrow, path: "/path/to/ex_arrow"},
+  {:rustler, "~> 0.37.3", optional: true}
+])
+```
+
+Then run the notebook with Rust available so the NIF can compile. Alternatively, use the published Hex package in Livebook so the precompiled NIF is downloaded and no Rust or rustler is needed: `Mix.install([{:ex_arrow, "~> 0.1.0"}])`.
+
+In a normal Mix project when building from source:
 
 ```bash
 EX_ARROW_BUILD=1 mix deps.get
@@ -67,8 +78,7 @@ Query a database with ADBC (e.g. SQLite) and get Arrow result batches:
 ```elixir
 {:ok, db} = ExArrow.ADBC.Database.open(driver_name: "adbc_driver_sqlite", uri: ":memory:")
 {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-{:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-:ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS n")
+{:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT 1 AS n")
 {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 {:ok, schema} = ExArrow.Stream.schema(stream)
 batch = ExArrow.Stream.next(stream)
@@ -188,8 +198,7 @@ Open by **driver path** or **driver name** (with optional URI). Then connection,
 ```elixir
 {:ok, db} = ExArrow.ADBC.Database.open(driver_name: "adbc_driver_sqlite", uri: ":memory:")
 {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-{:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-:ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS n, 'hello' AS s")
+{:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT 1 AS n, 'hello' AS s")
 {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 
 {:ok, schema} = ExArrow.Stream.schema(stream)
@@ -207,8 +216,7 @@ batch = ExArrow.Stream.next(stream)
 # By name + file URI (driver manager finds library via ADBC_DRIVER or system path)
 {:ok, db} = ExArrow.ADBC.Database.open(driver_name: "adbc_driver_sqlite", uri: "file:analytics.db")
 {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-{:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-:ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT * FROM events LIMIT 10000")
+{:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT * FROM events LIMIT 10000")
 {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 # Stream is the same ExArrow.Stream as IPC/Flight; use schema/1 and next/1
 ```
@@ -222,8 +230,7 @@ batch = ExArrow.Stream.next(stream)
   uri: "postgresql://user:pass@localhost:5432/mydb"
 )
 {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-{:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-:ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT id, name FROM users WHERE active = true")
+{:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT id, name FROM users WHERE active = true")
 {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 # Process Arrow batches with ExArrow.Stream.schema/1 and next/1
 ```
@@ -272,8 +279,7 @@ Adbc.download_driver!(:sqlite)
   ExArrow.ADBC.Database.open(driver_name: "adbc_driver_sqlite", uri: ":memory:")
 
 {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-{:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-:ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT 1 AS n")
+{:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT 1 AS n")
 {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 ```
 
@@ -312,8 +318,7 @@ Use ADBC to run SQL and get Arrow result sets; optionally re-export as IPC file 
 ```elixir
 {:ok, db} = ExArrow.ADBC.Database.open(driver_name: "adbc_driver_sqlite", uri: "file:report.db")
 {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-{:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-:ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT * FROM sales WHERE year = 2024")
+{:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT * FROM sales WHERE year = 2024")
 {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 
 {:ok, schema} = ExArrow.Stream.schema(stream)
@@ -381,8 +386,7 @@ Run a query, stream Arrow batches from ADBC, and push them to a Flight server fo
 # 1. Query Postgres (or SQLite) via ADBC
 {:ok, db} = ExArrow.ADBC.Database.open(driver_name: "adbc_driver_postgresql", uri: "postgresql://localhost/mydb")
 {:ok, conn} = ExArrow.ADBC.Connection.open(db)
-{:ok, stmt} = ExArrow.ADBC.Statement.new(conn)
-:ok = ExArrow.ADBC.Statement.set_sql(stmt, "SELECT * FROM sensor_readings WHERE ts > NOW() - INTERVAL '1 day'")
+{:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT * FROM sensor_readings WHERE ts > NOW() - INTERVAL '1 day'")
 {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 
 {:ok, schema} = ExArrow.Stream.schema(stream)
@@ -410,16 +414,16 @@ batches =
 batches = Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end)
           |> Enum.take_while(fn nil -> false; {:error, _} -> false; _ -> true end)
 {:ok, binary} = ExArrow.IPC.Writer.to_binary(schema, batches)
-df = Explorer.DataFrame.load_ipc!(binary)
+df = Explorer.DataFrame.load_ipc_stream!(binary)
 ```
 
-Or write to a file and use Explorer’s file API: `ExArrow.IPC.Writer.to_file(path, schema, batches)` then `Explorer.DataFrame.read_ipc!(path)`.
+Or write to a file and use Explorer’s file API: `ExArrow.IPC.Writer.to_file(path, schema, batches)` then `Explorer.DataFrame.read_ipc_stream!(path)` (Writer produces stream format).
 
-**Explorer to ExArrow** — Dump a dataframe to IPC binary and read it with ExArrow:
+**Explorer to ExArrow** — Dump a dataframe to IPC stream binary and read it with ExArrow (use `dump_ipc_stream!`; `Reader.from_binary` expects stream format):
 
 ```elixir
 df = Explorer.DataFrame.new(x: [1, 2, 3], y: ["a", "b", "c"])
-binary = Explorer.DataFrame.dump_ipc!(df)
+binary = Explorer.DataFrame.dump_ipc_stream!(df)
 {:ok, stream} = ExArrow.IPC.Reader.from_binary(binary)
 {:ok, schema} = ExArrow.Stream.schema(stream)
 batch = ExArrow.Stream.next(stream)
@@ -459,7 +463,7 @@ Use ExArrow when you need to read or write Arrow IPC (stream or file), talk to a
 Do not use ExArrow as a general-purpose dataframe or query engine. For in-memory analysis, filtering, grouping, and plotting, use Explorer or similar. Do not use it as a replacement for Ecto or DB drivers when you only need normal SQL results (use Ecto/Postgrex instead). For Parquet-only workflows with no Flight/ADBC, consider Explorer’s Parquet support first.
 
 **Can I use ExArrow and Explorer together?**  
-Yes. ExArrow handles streaming and protocol layers (IPC, Flight, ADBC). Use `ExArrow.IPC.Writer.to_binary/2` (or `to_file/3`) to produce IPC from ExArrow streams, then `Explorer.DataFrame.load_ipc!/1` to get a dataframe. Use `Explorer.DataFrame.dump_ipc!/1` to get IPC binary and `ExArrow.IPC.Reader.from_binary/1` to read it back.
+Yes. ExArrow handles streaming and protocol layers (IPC, Flight, ADBC). Use `ExArrow.IPC.Writer.to_binary/2` (or `to_file/3`) to produce IPC stream from ExArrow, then `Explorer.DataFrame.load_ipc_stream!/1` to get a dataframe. Use `Explorer.DataFrame.dump_ipc_stream!/1` to get IPC stream binary and `ExArrow.IPC.Reader.from_binary/1` to read it back.
 
 **Why do I get a 404 or “couldn’t fetch NIF” on compile?**  
 Precompiled NIFs are hosted on GitHub releases. If you are on an unsupported platform or using a version that has no build yet, the download fails. Set `EX_ARROW_BUILD=1`, install Rust, and run `mix compile` to build from source.

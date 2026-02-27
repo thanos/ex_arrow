@@ -368,6 +368,42 @@ defmodule ExArrow.ADBCTest do
       assert :ok = Statement.set_sql(stmt, "SELECT 1")
       assert {:ok, ^stream} = Statement.execute(stmt)
     end
+
+    test "new/2 with sql delegates to new/1 then set_sql" do
+      Application.put_env(:ex_arrow, :adbc_statement_impl, ExArrow.ADBC.StatementMock)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_statement_impl) end)
+
+      conn = %Connection{resource: make_ref()}
+      stmt = %Statement{resource: make_ref()}
+      stream = %Stream{resource: make_ref(), backend: :adbc}
+
+      ExArrow.ADBC.StatementMock
+      |> Mox.expect(:new, fn ^conn -> {:ok, stmt} end)
+      |> Mox.expect(:set_sql, fn ^stmt, "SELECT 1 AS n" -> :ok end)
+      |> Mox.expect(:execute, fn ^stmt -> {:ok, stream} end)
+
+      assert {:ok, ^stmt} = Statement.new(conn, "SELECT 1 AS n")
+      assert {:ok, ^stream} = Statement.execute(stmt)
+    end
+
+    test "new/3 with sql and bind: opts delegates to new/2 then bind" do
+      Application.put_env(:ex_arrow, :adbc_statement_impl, ExArrow.ADBC.StatementMock)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_statement_impl) end)
+
+      conn = %Connection{resource: make_ref()}
+      stmt = %Statement{resource: make_ref()}
+      batch = %ExArrow.RecordBatch{resource: make_ref()}
+      stream = %Stream{resource: make_ref(), backend: :adbc}
+
+      ExArrow.ADBC.StatementMock
+      |> Mox.expect(:new, fn ^conn -> {:ok, stmt} end)
+      |> Mox.expect(:set_sql, fn ^stmt, "SELECT * FROM t" -> :ok end)
+      |> Mox.expect(:bind, fn ^stmt, ^batch -> :ok end)
+      |> Mox.expect(:execute, fn ^stmt -> {:ok, stream} end)
+
+      assert {:ok, ^stmt} = Statement.new(conn, "SELECT * FROM t", bind: batch)
+      assert {:ok, ^stream} = Statement.execute(stmt)
+    end
   end
 
   # ── Integration: live driver (skip if no driver) ─────────────────────────────
@@ -390,8 +426,7 @@ defmodule ExArrow.ADBCTest do
 
       {:ok, db} ->
         assert {:ok, conn} = Connection.open(db)
-        assert {:ok, stmt} = Statement.new(conn)
-        assert :ok = Statement.set_sql(stmt, "SELECT 1 AS n")
+        assert {:ok, stmt} = Statement.new(conn, "SELECT 1 AS n")
         assert {:ok, stream} = Statement.execute(stmt)
         assert stream.backend == :adbc
         assert {:ok, %Schema{}} = Stream.schema(stream)
