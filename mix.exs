@@ -29,7 +29,7 @@ defmodule ExArrow.MixProject do
   defp package do
     [
       description: "Apache Arrow support for the BEAM: IPC, Flight, ADBC bindings",
-      licenses: ["Apache-2.0"],
+      licenses: ["MIT"],
       maintainers: ["Thanos Vassilakis"],
       links: %{
         "GitHub" => "https://github.com/thanos/ex_arrow",
@@ -44,7 +44,8 @@ defmodule ExArrow.MixProject do
         "checksum-*.exs",
         "mix.exs",
         "README.md",
-        "CHANGELOG.md"
+        "CHANGELOG.md",
+        "LICENSE"
       ]
     ]
   end
