@@ -2,7 +2,7 @@ defmodule ExArrow.Native do
   @moduledoc false
 
   version = Mix.Project.config()[:version]
-  base_url = "https://github.com/your-org/ex_arrow/releases/download/v#{version}"
+  base_url = "https://github.com/thanos/ex_arrow/releases/download/v#{version}"
 
   # When base_url still has the placeholder or EX_ARROW_BUILD is set, build from source.
   # Replace "your-org" with your GitHub org before publishing releases.
