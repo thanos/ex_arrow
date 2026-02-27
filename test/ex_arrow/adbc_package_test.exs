@@ -89,6 +89,16 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
       assert {:error, :not_configured} = AdbcPackageManager.get_pids()
     end
 
+    test "get_pids returns error when config set but backend fails to start" do
+      Application.put_env(:ex_arrow, :adbc_package, driver: :nonexistent_driver, uri: ":memory:")
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_package) end)
+
+      # First call triggers ensure_started -> start_database fails -> state becomes {:error, reason}
+      assert {:error, _reason} = AdbcPackageManager.get_pids()
+      # Second call hits handle_call(:get_pids, _from, {:error, reason})
+      assert {:error, _reason} = AdbcPackageManager.get_pids()
+    end
+
     test "create_statement returns a reference" do
       assert {:ok, ref} = AdbcPackageManager.create_statement()
       assert is_reference(ref)

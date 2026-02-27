@@ -20,7 +20,7 @@ mix dialyzer
 echo "== mix test"
 mix test
 echo "== mix coveralls.html"
-mix coveralls.html
+mix coveralls.html  --include adbc_package:true
 echo "== mix docs"
 mix docs --warninsg-as-errors
 echo "== CI (local) passed"

@@ -160,7 +160,8 @@ defmodule ExArrowTest do
     end
 
     test "ADBC.Database.open returns error when driver path invalid" do
-      assert {:error, _} = ExArrow.ADBC.Database.open("/path/to/driver")
+      assert {:error, msg} = ExArrow.ADBC.Database.open("/path/to/driver")
+      assert msg =~ "driver file not found"
     end
   end
 

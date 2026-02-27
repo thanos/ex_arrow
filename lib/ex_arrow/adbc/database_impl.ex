@@ -22,7 +22,13 @@ defmodule ExArrow.ADBC.DatabaseImpl do
     Application.get_env(:ex_arrow, :adbc_native, ExArrow.Native)
   end
 
-  defp validate_driver_spec(path) when is_binary(path), do: {:ok, path}
+  defp validate_driver_spec(path) when is_binary(path) do
+    if native() == ExArrow.Native and not File.exists?(path) do
+      {:error, "driver file not found: " <> path}
+    else
+      {:ok, path}
+    end
+  end
 
   defp validate_driver_spec(opts) when is_list(opts) do
     if Keyword.keyword?(opts) do

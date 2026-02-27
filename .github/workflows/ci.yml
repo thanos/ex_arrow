@@ -106,8 +106,19 @@ jobs:
       - name: Run tests
         run: mix test
 
-      - name: Test coverage
-        run: mix coveralls.html
+      - name: Test coverage and check threshold (70%)
+        run: |
+          mix coveralls.html  --include adbc_package:true 2>&1 | tee coveralls.log
+          COV=$(grep '^\[TOTAL\]' coveralls.log | awk '{gsub(/%/,""); print $2}')
+          if [ -z "$COV" ]; then
+            echo "::error::Could not parse coverage from coveralls output"
+            exit 1
+          fi
+          echo "Coverage: ${COV}% (threshold: 70%)"
+          if [ "$(printf '%s\n' "70" "$COV" | sort -n | head -1)" != "70" ]; then
+            echo "::error::Coverage ${COV}% is below 70% threshold"
+            exit 1
+          fi
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -179,5 +190,16 @@ jobs:
       - name: Run tests
         run: mix test
 
-      - name: Test coverage
-        run: mix coveralls.html
+      - name: Test coverage and check threshold (70%)
+        run: |
+          mix coveralls.html 2>&1 | tee coveralls.log
+          COV=$(grep '^\[TOTAL\]' coveralls.log | awk '{gsub(/%/,""); print $2}')
+          if [ -z "$COV" ]; then
+            echo "::error::Could not parse coverage from coveralls output"
+            exit 1
+          fi
+          echo "Coverage: ${COV}% (threshold: 70%)"
+          if [ "$(printf '%s\n' "70" "$COV" | sort -n | head -1)" != "70" ]; then
+            echo "::error::Coverage ${COV}% is below 70% threshold"
+            exit 1
+          fi
