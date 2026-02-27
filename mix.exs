@@ -54,7 +54,10 @@ defmodule ExArrow.MixProject do
   defp elixirc_paths(_), do: ["lib"]
 
   defp aliases do
-    [ci: "ci"]
+    [
+      ci: "ci",
+      bench: "run --no-halt bench/run_all.exs"
+    ]
   end
 
   def application do
@@ -72,6 +75,9 @@ defmodule ExArrow.MixProject do
       {:nimble_pool, "~> 1.1", optional: true},
       {:rustler, "~>  0.32.0", optional: true},
       {:ex_doc, "~> 0.34", only: :dev},
+      {:benchee, "~> 1.4", only: :dev},
+      {:benchee_html, "~> 1.0", only: :dev},
+      {:benchee_json, "~> 1.0", only: :dev},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
@@ -92,7 +98,8 @@ defmodule ExArrow.MixProject do
         "docs/memory_model.md",
         "docs/ipc_guide.md",
         "docs/flight_guide.md",
-        "docs/adbc_guide.md"
+        "docs/adbc_guide.md",
+        "docs/benchmarks.md"
       ]
     ]
   end

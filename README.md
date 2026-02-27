@@ -447,6 +447,49 @@ Typical workflow: fetch or stream Arrow data with ExArrow (ADBC, Flight, IPC), o
 
 API reference: `mix docs` or [Hex Docs](https://hexdocs.pm/ex_arrow).
 
+## Benchmarks
+
+ExArrow ships a Benchee-based benchmark suite in `bench/` that highlights its
+zero-copy streaming advantage over row-oriented alternatives.
+
+### Running locally
+
+Benchee is a `:dev`-only dependency so `MIX_ENV=dev` is required.
+Set `EX_ARROW_BUILD=1` the first time to compile the NIF from source.
+
+```bash
+# Run a single benchmark
+MIX_ENV=dev mix run bench/ipc_read_bench.exs
+
+# Run all benchmarks (HTML reports written to bench/output/)
+MIX_ENV=dev mix run bench/run_all.exs
+
+# Convenience alias (defined in mix.exs)
+MIX_ENV=dev mix bench
+```
+
+### Benchmark suites
+
+| File | What it measures |
+|---|---|
+| `bench/ipc_read_bench.exs` | Stream handle vs materialise — shows BEAM memory saved by keeping data native |
+| `bench/ipc_write_bench.exs` | IPC serialisation vs `term_to_binary` — columnar vs row-oriented write cost |
+| `bench/flight_bench.exs` | Flight do\_put / do\_get roundtrip latency using a built-in in-process server |
+| `bench/adbc_bench.exs` | ADBC stream handle vs collect — schema peek and batch accumulation cost |
+| `bench/pipeline_bench.exs` | End-to-end: IPC file on disk → Flight do\_put without materialising in BEAM |
+
+### Published results
+
+Benchmark results from every push to `main` are stored in the `gh-pages`
+branch and displayed at:
+
+**https://thanos.github.io/ex_arrow/dev/bench/**
+
+The workflow (`benchmarks.yml`) also posts a PR comment when a new run
+regresses more than 20% relative to the previous baseline.
+
+---
+
 ## Development
 
 Until a release with precompiled NIFs exists, set `EX_ARROW_BUILD=1` and have Rust installed so `mix compile` builds the NIF from source.
