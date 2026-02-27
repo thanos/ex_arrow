@@ -2,6 +2,9 @@
 # Run CI steps locally (no push). Same as .github/workflows/ci.yml Elixir job.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# Build the NIF from source locally instead of downloading precompiled artifacts
+export EX_ARROW_BUILD="${EX_ARROW_BUILD:-1}"
 echo "== mix deps.get"
 mix deps.get
 echo "== mix compile --warnings-as-errors"

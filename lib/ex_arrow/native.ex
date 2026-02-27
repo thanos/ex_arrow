@@ -4,11 +4,17 @@ defmodule ExArrow.Native do
   version = Mix.Project.config()[:version]
   base_url = "https://github.com/thanos/ex_arrow/releases/download/v#{version}"
 
-  # When base_url still has the placeholder or EX_ARROW_BUILD is set, build from source.
+  # Build from source when: EX_ARROW_BUILD set, base_url placeholder, or developing this project in dev/test.
   # Replace "your-org" with your GitHub org before publishing releases.
   force_build =
     System.get_env("EX_ARROW_BUILD") in ["1", "true"] or
-      String.contains?(base_url, "your-org")
+      String.contains?(base_url, "your-org") or
+      (Mix.env() in [:dev, :test] and
+         try do
+           Mix.Project.get!().project()[:app] == :ex_arrow
+         rescue
+           _ -> false
+         end)
 
   use RustlerPrecompiled,
     otp_app: :ex_arrow,
