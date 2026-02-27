@@ -192,7 +192,7 @@ jobs:
 
       - name: Test coverage and check threshold (70%)
         run: |
-          mix coveralls.html 2>&1 | tee coveralls.log
+          mix coveralls.html  --include adbc_package:true 2>&1 | tee coveralls.log
           COV=$(grep '^\[TOTAL\]' coveralls.log | awk '{gsub(/%/,""); print $2}')
           if [ -z "$COV" ]; then
             echo "::error::Could not parse coverage from coveralls output"
