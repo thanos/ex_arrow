@@ -7,9 +7,6 @@
 
 Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, and ADBC database bindings. Column data lives in Rust buffers; Elixir holds lightweight opaque handles. Precompiled NIFs for Linux, macOS, and Windows — no Rust required to use.
 
-**Author:** Thanos Vassilakis
-**Package:** [hex.pm/packages/ex_arrow](https://hex.pm/packages/ex_arrow) | **Docs:** [hexdocs.pm/ex_arrow](https://hexdocs.pm/ex_arrow) | **Source:** [github.com/thanos/ex_arrow](https://github.com/thanos/ex_arrow)
-
 ---
 
 ## Contents
