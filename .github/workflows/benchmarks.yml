@@ -1,0 +1,164 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      comment:
+        description: "Optional comment to attach to the benchmark run"
+        required: false
+        default: ""
+
+# Prevent concurrent benchmark runs so results are comparable.
+concurrency:
+  group: benchmarks
+  cancel-in-progress: false
+
+jobs:
+  bench:
+    name: Run benchmarks and publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18"
+          otp-version: "27"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/ex_arrow_native/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('native/ex_arrow_native/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Cache Mix build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-bench-${{ hashFiles('mix.lock') }}-${{ hashFiles('native/ex_arrow_native/**') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-bench-
+
+      - name: Install dependencies
+        env:
+          EX_ARROW_BUILD: "1"
+        run: mix deps.get
+
+      - name: Compile
+        env:
+          EX_ARROW_BUILD: "1"
+        run: mix compile --warnings-as-errors
+
+      - name: Create bench output directory
+        run: mkdir -p bench/output
+
+      # Run each benchmark in :dev env (Benchee is a :dev dep).
+      # We use --no-halt so the VM stays alive through multi-script runs.
+      - name: Run IPC read benchmark
+        env:
+          EX_ARROW_BUILD: "1"
+          MIX_ENV: dev
+        run: mix run bench/ipc_read_bench.exs
+
+      - name: Run IPC write benchmark
+        env:
+          EX_ARROW_BUILD: "1"
+          MIX_ENV: dev
+        run: mix run bench/ipc_write_bench.exs
+
+      - name: Run Flight benchmark
+        env:
+          EX_ARROW_BUILD: "1"
+          MIX_ENV: dev
+        run: mix run bench/flight_bench.exs
+
+      - name: Run ADBC stream benchmark
+        env:
+          EX_ARROW_BUILD: "1"
+          MIX_ENV: dev
+        run: mix run bench/adbc_bench.exs
+
+      - name: Run pipeline benchmark
+        env:
+          EX_ARROW_BUILD: "1"
+          MIX_ENV: dev
+        run: mix run bench/pipeline_bench.exs
+
+      # Merge all individual JSON results into one file for the benchmark action.
+      - name: Merge JSON results
+        run: |
+          python3 - <<'EOF'
+          import json, glob, os
+
+          merged = []
+          for path in sorted(glob.glob("bench/output/*.json")):
+              try:
+                  data = json.load(open(path))
+              except Exception as e:
+                  print(f"Skipping {path}: {e}")
+                  continue
+              suite_name = os.path.splitext(os.path.basename(path))[0]
+              # Benchee JSON format: {"suite": {"name": {...}}}
+              for job_name, stats in data.get("suite", {}).items():
+                  ips = stats.get("statistics", {}).get("average", None)
+                  if ips is None:
+                      continue
+                  merged.append({
+                      "name": f"[{suite_name}] {job_name}",
+                      "unit": "ns/op",
+                      # Benchee reports run_time_data in ns; average in ns
+                      "value": round(stats.get("run_time_data", {})
+                                         .get("statistics", {})
+                                         .get("average", 0))
+                  })
+
+          out = "bench/output/merged.json"
+          json.dump(merged, open(out, "w"), indent=2)
+          print(f"Wrote {len(merged)} entries to {out}")
+          EOF
+
+      # Publish benchmark results as a GitHub Pages comment using
+      # benchmark-action/github-action-benchmark.
+      # Results are stored in the gh-pages branch under bench/data.js so they
+      # persist across runs and can be viewed as a trend chart.
+      - name: Store benchmark results
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: ExArrow Benchmark Suite
+          tool: customSmallerIsBetter
+          output-file-path: bench/output/merged.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          # Push results to the gh-pages branch so they are visible at
+          # https://<owner>.github.io/<repo>/dev/bench/
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          # Alert in a PR comment if performance regresses by more than 20%.
+          alert-threshold: "120%"
+          comment-on-alert: true
+          fail-on-alert: false
+          comment-always: false
+
+      # Upload HTML reports as a workflow artifact (7-day retention).
+      - name: Upload HTML reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-html-${{ github.sha }}
+          path: bench/output/*.html
+          retention-days: 7
