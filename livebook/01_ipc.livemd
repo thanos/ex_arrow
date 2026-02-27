@@ -3,8 +3,7 @@
 ```elixir
 Mix.install([
   {:ex_arrow, path: Path.join(__DIR__, "..")},
-  {:explorer, "~> 0.8"},
-
+  {:explorer, "~> 0.8"}
 ])
 ```
 
@@ -154,7 +153,7 @@ if Code.ensure_loaded?(Explorer.DataFrame) do
   batches = Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end) |> Enum.take_while(&is_struct(&1, ExArrow.RecordBatch))
   {:ok, binary} = ExArrow.IPC.Writer.to_binary(schema, batches)
   df = Explorer.DataFrame.load_ipc_stream!(binary)
-    df["id"]
+  df["id"]
 else
   "Explorer not loaded; add {:explorer, \"~> 0.8\"} to deps to try this."
 end

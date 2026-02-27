@@ -1,5 +1,7 @@
 # ExArrow Tutorial 3: ADBC (Arrow Database Connectivity)
 
+## Section
+
 ADBC exposes databases through the Arrow Database Connectivity API. You open a **Database** (driver + options), then a **Connection**, then run **Statement** (SQL) and get an **Arrow stream** of result batches—the same `ExArrow.Stream` you use for IPC and Flight.
 
 This notebook covers: opening a database (with optional `adbc` package), executing SQL, consuming the result stream, and optional metadata APIs.
@@ -8,11 +10,11 @@ This notebook covers: opening a database (with optional `adbc` package), executi
 
 ## 1. Concepts
 
-| Handle | Module | Purpose |
-|--------|--------|---------|
-| Database | `ExArrow.ADBC.Database` | Driver (path or name) + init options (e.g. URI). |
-| Connection | `ExArrow.ADBC.Connection` | Session from a database. |
-| Statement | `ExArrow.ADBC.Statement` | Set SQL, execute → returns `ExArrow.Stream` of record batches. |
+| Handle     | Module                    | Purpose                                                          |
+| ---------- | ------------------------- | ---------------------------------------------------------------- |
+| Database   | `ExArrow.ADBC.Database`   | Driver (path or name) + init options (e.g. URI).                 |
+| Connection | `ExArrow.ADBC.Connection` | Session from a database.                                         |
+| Statement  | `ExArrow.ADBC.Statement`  | Set SQL, execute → returns `ExArrow.Stream` of record batches. |
 
 Flow: **Database.open** → **Connection.open** → **Statement.new(conn, sql)** → **execute** → **Stream** (schema + next).
 
@@ -22,8 +24,8 @@ Flow: **Database.open** → **Connection.open** → **Statement.new(conn, sql)**
 
 ExArrow does not install or download ADBC drivers. You either:
 
-- **By path**: Pass the path to the driver shared library (e.g. `libadbc_driver_sqlite.so`).
-- **By name**: Pass `driver_name: "adbc_driver_sqlite"` and optionally `uri: ":memory:"`. The ADBC driver manager looks up the library by name (environment or system path).
+* **By path**: Pass the path to the driver shared library (e.g. `libadbc_driver_sqlite.so`).
+* **By name**: Pass `driver_name: "adbc_driver_sqlite"` and optionally `uri: ":memory:"`. The ADBC driver manager looks up the library by name (environment or system path).
 
 If the [`adbc`](https://github.com/livebook-dev/adbc) package is available, you can use it to download drivers on demand and then open with ExArrow.
 
@@ -111,9 +113,9 @@ end
 
 When the driver supports them, you can query catalog metadata without SQL.
 
-- **get_table_types/1** — stream of table types (e.g. TABLE, VIEW).
-- **get_table_schema/3** — Arrow schema for a table: `(conn, catalog, db_schema, table_name)`; use `nil` for catalog/db_schema where not applicable.
-- **get_objects/2** — hierarchical view (catalogs, schemas, tables, columns) with optional filters.
+* **get_table_types/1** — stream of table types (e.g. TABLE, VIEW).
+* **get_table_schema/3** — Arrow schema for a table: `(conn, catalog, db_schema, table_name)`; use `nil` for catalog/db_schema where not applicable.
+* **get_objects/2** — hierarchical view (catalogs, schemas, tables, columns) with optional filters.
 
 ```elixir
 if db do
@@ -188,7 +190,7 @@ if db && Code.ensure_loaded?(Explorer.DataFrame) do
 
   {:ok, binary} = ExArrow.IPC.Writer.to_binary(schema, batches)
   df = Explorer.DataFrame.load_ipc_stream!(binary)
-  Explorer.DataFrame.to_series(df, "a")
+  df["a"]
 else
   "Need db and Explorer to run this cell."
 end
@@ -198,9 +200,9 @@ end
 
 ## Summary
 
-- **Database.open**: by path (string) or by `driver_name` + optional `uri`. Use `DriverHelper.ensure_driver_and_open/2` when the `adbc` package is available.
-- **Connection.open** → **Statement.new(conn, sql)** → **execute** → **Stream**: same `schema/1` and `next/1` as IPC and Flight.
-- **Metadata**: get_table_types, get_table_schema, get_objects when the driver supports them.
-- **Statement.bind**: optional; driver-dependent.
+* **Database.open**: by path (string) or by `driver_name` + optional `uri`. Use `DriverHelper.ensure_driver_and_open/2` when the `adbc` package is available.
+* **Connection.open** → **Statement.new(conn, sql)** → **execute** → **Stream**: same `schema/1` and `next/1` as IPC and Flight.
+* **Metadata**: get_table_types, get_table_schema, get_objects when the driver supports them.
+* **Statement.bind**: optional; driver-dependent.
 
 You’ve now seen **IPC**, **Flight**, and **ADBC**. ExArrow keeps Arrow data in native memory and gives you a single stream/batch API across all three—ideal for pipelines, ETL, and interchanging with Explorer or other Arrow consumers.

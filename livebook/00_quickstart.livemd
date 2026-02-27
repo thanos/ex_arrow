@@ -1,37 +1,26 @@
-# Untitled notebook
-
-## ExArrow Quick Start
-
-## Configure adbc to use the SQLite driver (for section 5)
-
-Application.put_env(:adbc, :drivers, [:sqlite])
-
-```
-
-## Section
+# ExArrow Quick Start
 
 Get up and running with ExArrow in a few minutes. This notebook touches all three pillars: **IPC** (read/write Arrow streams), **Arrow Flight** (client/server), and **ADBC** (query databases and get Arrow results).
 
----
+Configure adbc to use the SQLite driver (for section 5):
 
+```elixir
+Application.put_env(:adbc, :drivers, [:sqlite])
 ```
 
+```elixir
 db = Kino.start_child!({Adbc.Database, driver: :sqlite})
 conn = Kino.start_child!({Adbc.Connection, database: db})
 {:ok, result} = Adbc.Connection.query(conn, "SELECT 1 AS n, 'hello' AS msg")
-
 ```
 
 ## 1. Setup
 
 Add `ex_arrow` to your Mix project and start a Livebook (or run in IEx). Here we assume the dependency is already in place.
 
-```
-
-## Verify the NIF loaded
-
+```elixir
+# Verify the NIF loaded
 ExArrow.native_version()
-
 ```
 
 ---
@@ -40,36 +29,27 @@ ExArrow.native_version()
 
 ExArrow can read Arrow IPC from a binary (e.g. from a file, socket, or HTTP body). We'll use a small built-in fixture so you can run this without any external file.
 
-```
-
-## Get a small IPC stream binary (schema: id int64, name utf8; 2 rows)
-
+```elixir
+# Get a small IPC stream binary (schema: id int64, name utf8; 2 rows)
 {:ok, ipc_bytes} = ExArrow.Native.ipc_test_fixture_binary()
 
-## Open a stream from the binary
-
+# Open a stream from the binary
 {:ok, stream} = ExArrow.IPC.Reader.from_binary(ipc_bytes)
 
-## Inspect schema (without consuming the stream)
-
+# Inspect schema (without consuming the stream)
 {:ok, schema} = ExArrow.Stream.schema(stream)
 ExArrow.Schema.fields(schema) |> Enum.map(& &1.name)
-
 ```
 
 Read batches one at a time until the stream is done:
 
-```
-
-## First batch
-
+```elixir
+# First batch
 batch1 = ExArrow.Stream.next(stream)
 if batch1, do: ExArrow.RecordBatch.num_rows(batch1), else: nil
 
-## Second call: no more batches
-
+# Second call: no more batches
 ExArrow.Stream.next(stream)
-
 ```
 
 ---
@@ -78,10 +58,8 @@ ExArrow.Stream.next(stream)
 
 You can write the same schema and batches back to a binary or file, then read again.
 
-```
-
-## Rebuild stream from fixture and collect schema + all batches
-
+```elixir
+# Rebuild stream from fixture and collect schema + all batches
 {:ok, ipc_bytes} = ExArrow.Native.ipc_test_fixture_binary()
 {:ok, stream} = ExArrow.IPC.Reader.from_binary(ipc_bytes)
 {:ok, schema} = ExArrow.Stream.schema(stream)
@@ -90,11 +68,9 @@ batches =
   Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end)
   |> Enum.take_while(&(is_struct(&1, ExArrow.RecordBatch)))
 
-## Write to binary
-
+# Write to binary
 {:ok, out_binary} = ExArrow.IPC.Writer.to_binary(schema, batches)
 byte_size(out_binary)
-
 ```
 
 ---
