@@ -1,9 +1,10 @@
 # ExArrow
 
-[CI](https://github.com/thanos/ex_arrow/actions/workflows/ci.yml)
-[Hex version](https://hex.pm/packages/ex_arrow)
-[Hex docs](https://hexdocs.pm/ex_arrow)
-[License](LICENSE)
+[![CI](https://github.com/thanos/ex_arrow/actions/workflows/ci.yml/badge.svg)](https://github.com/thanos/ex_arrow/actions/workflows/ci.yml)
+[![Hex version](https://img.shields.io/hexpm/v/ex_arrow.svg)](https://hex.pm/packages/ex_arrow)
+[![Hex docs](https://img.shields.io/badge/docs-hexdocs.pm-blue)](https://hexdocs.pm/ex_arrow)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 
 Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, and ADBC database bindings. Column data lives in Rust buffers; Elixir holds lightweight opaque handles. Precompiled NIFs for Linux, macOS, and Windows — no Rust required to use.
 
