@@ -1,9 +1,9 @@
 # ExArrow
 
-[![CI](https://github.com/thanos/ex_arrow/actions/workflows/ci.yml/badge.svg)](https://github.com/thanos/ex_arrow/actions/workflows/ci.yml)
-[![Hex version](https://img.shields.io/hexpm/v/ex_arrow.svg)](https://hex.pm/packages/ex_arrow)
-[![Hex docs](https://img.shields.io/badge/docs-hexdocs.pm-blue)](https://hexdocs.pm/ex_arrow)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[CI](https://github.com/thanos/ex_arrow/actions/workflows/ci.yml)
+[Hex version](https://hex.pm/packages/ex_arrow)
+[Hex docs](https://hexdocs.pm/ex_arrow)
+[License](LICENSE)
 
 Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, and ADBC database bindings. Column data lives in Rust buffers; Elixir holds lightweight opaque handles. Precompiled NIFs for Linux, macOS, and Windows — no Rust required to use.
 
@@ -107,22 +107,32 @@ of Explorer, Nx, or your own application logic.
 ## Where ExArrow fits
 
 ```mermaid
-graph TD
-    App["Your Elixir Application"]
+flowchart TB
+    App("Your Elixir Application")
 
-    App --> Explorer["Explorer\n(dataframes & analysis)"]
-    App --> Nx["Nx\n(tensors & ML)"]
-    App --> ExArrow["ExArrow\n(IPC · Flight · ADBC)"]
-    App --> ExZarr["ExZarr\n(Zarr chunked arrays)"]
+    App --> Explorer("Explorer\ndataframes & analysis")
+    App --> Nx("Nx\ntensors & ML")
+    App --> ExArrow("ExArrow\nIPC · Flight · ADBC")
+    App --> ExZarr("ExZarr\nZarr chunked arrays")
 
-    ExArrow --> IPC["Arrow IPC\n(stream & file)"]
-    ExArrow --> Flight["Arrow Flight\n(gRPC server)"]
-    ExArrow --> ADBC["ADBC\n(driver)"]
+    ExArrow --> IPC("Arrow IPC\nstream & file")
+    ExArrow --> FlightSvr("Arrow Flight\ngRPC server")
+    ExArrow --> ADBCDrv("ADBC\ndriver")
 
-    Flight --> FlightSvcs["Dremio · InfluxDB IOx\nDuckDB · Snowflake"]
-    ADBC --> DBs["PostgreSQL · SQLite\nDuckDB · BigQuery"]
+    IPC -. "interop via IPC binary" .-> Explorer
 
-    IPC -.->|"interop via IPC binary"| Explorer
+    FlightSvr --> FlightSvcs("Dremio · InfluxDB IOx\nDuckDB · Snowflake")
+    ADBCDrv   --> Databases("PostgreSQL · SQLite\nDuckDB · BigQuery")
+
+    classDef app      fill:#1a1a2e,stroke:#4a90d9,color:#e0e0e0,rx:6
+    classDef lib      fill:#16213e,stroke:#4a90d9,color:#e0e0e0,rx:6
+    classDef proto    fill:#0f3460,stroke:#4a90d9,color:#e0e0e0,rx:6
+    classDef external fill:#1a1a2e,stroke:#888,color:#aaa,rx:6,stroke-dasharray:4 4
+
+    class App app
+    class Explorer,Nx,ExArrow,ExZarr lib
+    class IPC,FlightSvr,ADBCDrv proto
+    class FlightSvcs,Databases external
 ```
 
 ExArrow sits at the boundary between the BEAM and the Arrow ecosystem. It
