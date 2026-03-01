@@ -1,5 +1,9 @@
 defmodule ExArrow.ADBCTest do
-  use ExUnit.Case, async: true
+  # This module mutates global Application env (adbc_database_impl, adbc_native,
+  # adbc_statement_impl). Running async: true causes races with concurrent tests
+  # that read those keys. async: false ensures all async modules finish first,
+  # then this module's tests run sequentially with no concurrent competition.
+  use ExUnit.Case, async: false
 
   alias ExArrow.ADBC.{Connection, Database, Statement}
   alias ExArrow.{Schema, Stream}
