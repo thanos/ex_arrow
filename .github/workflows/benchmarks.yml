@@ -20,6 +20,10 @@ jobs:
     name: Run benchmarks and publish
     runs-on: ubuntu-latest
 
+    # Required for github-action-benchmark to push results to gh-pages.
+    permissions:
+      contents: write
+
     steps:
       - uses: actions/checkout@v4
 
