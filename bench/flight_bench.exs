@@ -35,8 +35,9 @@ IO.puts("\n== Flight Benchmark ==\n")
 # A reusable client connection for measuring individual operations.
 {:ok, client} = ExArrow.Flight.Client.connect("localhost", port, tls: false)
 
-# Pre-upload some data so do_get has something to retrieve.
-ticket = "bench_default"
+# Pre-upload data. The built-in echo server stores the last do_put and
+# serves it under the fixed ticket "echo".
+ticket = "echo"
 :ok = ExArrow.Flight.Client.do_put(client, schema, batches)
 
 output_dir = Bench.DataGen.output_dir()

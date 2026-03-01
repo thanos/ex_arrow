@@ -23,10 +23,10 @@ defmodule ExArrow.ADBC.DatabaseImpl do
   end
 
   defp validate_driver_spec(path) when is_binary(path) do
-    if native() == ExArrow.Native and not File.exists?(path) do
-      {:error, "driver file not found: " <> path}
-    else
+    if File.exists?(path) do
       {:ok, path}
+    else
+      {:error, "driver file not found: " <> path}
     end
   end
 

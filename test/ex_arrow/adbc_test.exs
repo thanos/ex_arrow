@@ -184,7 +184,8 @@ defmodule ExArrow.ADBCTest do
       Application.put_env(:ex_arrow, :adbc_native, ExArrow.ADBC.TestNativeError)
       on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_native) end)
 
-      assert {:error, "test error"} = Database.open("/any/path")
+      # Use keyword opts so the string-path file-existence check is not triggered.
+      assert {:error, "test error"} = Database.open(driver_name: "any_driver")
     end
   end
 
