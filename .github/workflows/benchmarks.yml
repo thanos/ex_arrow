@@ -163,10 +163,18 @@ jobs:
               print("WARNING: no benchmark entries found — check bench/output/*.json")
           EOF
 
+      # git-action-benchmark commits to gh-pages; git requires a user identity.
+      - name: Set up git user for benchmark commit
+        run: |
+          git config --global user.name  "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
       # Publish benchmark results as a GitHub Pages comment using
       # benchmark-action/github-action-benchmark.
       # Results are stored in the gh-pages branch under bench/data.js so they
       # persist across runs and can be viewed as a trend chart.
+      # auto-push: true handles the gh-pages push via github-token — no
+      # separate push step or GH_PAGES_TOKEN secret is required.
       - name: Store benchmark results
         uses: benchmark-action/github-action-benchmark@v1
         with:
