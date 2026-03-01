@@ -101,36 +101,66 @@ jobs:
         run: mix run bench/pipeline_bench.exs
 
       # Merge all individual JSON results into one file for the benchmark action.
+      # benchee_json v1.0+ outputs a JSON list of scenario objects; older builds
+      # used {"suite": {"name": {...}}}. Both formats are handled here.
       - name: Merge JSON results
         run: |
           python3 - <<'EOF'
           import json, glob, os
 
+          def extract_scenarios(data, suite_name):
+              """Normalise benchee_json output into a flat list of (name, avg_ns) pairs."""
+              results = []
+
+              # Format A: list of scenario objects (benchee_json >= 1.0)
+              if isinstance(data, list):
+                  for scenario in data:
+                      if not isinstance(scenario, dict):
+                          continue
+                      name = scenario.get("name", "unknown")
+                      avg = (scenario
+                             .get("run_time_data", {})
+                             .get("statistics", {})
+                             .get("average"))
+                      if avg is not None:
+                          results.append((f"[{suite_name}] {name}", avg))
+
+              # Format B: {"suite": {"scenario_name": {"run_time_data": {...}}}}
+              elif isinstance(data, dict):
+                  for name, stats in data.get("suite", {}).items():
+                      if not isinstance(stats, dict):
+                          continue
+                      avg = (stats
+                             .get("run_time_data", {})
+                             .get("statistics", {})
+                             .get("average"))
+                      if avg is not None:
+                          results.append((f"[{suite_name}] {name}", avg))
+
+              return results
+
           merged = []
           for path in sorted(glob.glob("bench/output/*.json")):
+              # Skip the merged output file to avoid processing our own output.
+              if os.path.basename(path) == "merged.json":
+                  continue
               try:
-                  data = json.load(open(path))
+                  with open(path) as f:
+                      data = json.load(f)
               except Exception as e:
                   print(f"Skipping {path}: {e}")
                   continue
+
               suite_name = os.path.splitext(os.path.basename(path))[0]
-              # Benchee JSON format: {"suite": {"name": {...}}}
-              for job_name, stats in data.get("suite", {}).items():
-                  ips = stats.get("statistics", {}).get("average", None)
-                  if ips is None:
-                      continue
-                  merged.append({
-                      "name": f"[{suite_name}] {job_name}",
-                      "unit": "ns/op",
-                      # Benchee reports run_time_data in ns; average in ns
-                      "value": round(stats.get("run_time_data", {})
-                                         .get("statistics", {})
-                                         .get("average", 0))
-                  })
+              for name, avg in extract_scenarios(data, suite_name):
+                  merged.append({"name": name, "unit": "ns/op", "value": round(avg)})
 
           out = "bench/output/merged.json"
-          json.dump(merged, open(out, "w"), indent=2)
+          with open(out, "w") as f:
+              json.dump(merged, f, indent=2)
           print(f"Wrote {len(merged)} entries to {out}")
+          if not merged:
+              print("WARNING: no benchmark entries found — check bench/output/*.json")
           EOF
 
       # Publish benchmark results as a GitHub Pages comment using
