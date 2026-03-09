@@ -56,7 +56,7 @@ defmodule ExArrow.Native do
     do: :erlang.nif_error(:nif_not_loaded)
 
   # Flight server
-  def flight_server_start(_host, _port), do: :erlang.nif_error(:nif_not_loaded)
+  def flight_server_start(_host, _port, _server_tls), do: :erlang.nif_error(:nif_not_loaded)
   def flight_server_port(_server_ref), do: :erlang.nif_error(:nif_not_loaded)
   def flight_server_host(_server_ref), do: :erlang.nif_error(:nif_not_loaded)
   def flight_server_stop(_server_ref), do: :erlang.nif_error(:nif_not_loaded)
@@ -65,7 +65,7 @@ defmodule ExArrow.Native do
   def flight_client_connect(_host, _port, _connect_timeout_ms, _tls_mode),
     do: :erlang.nif_error(:nif_not_loaded)
 
-  def flight_client_do_put(_client_ref, _schema_ref, _batches),
+  def flight_client_do_put(_client_ref, _schema_ref, _batches, _descriptor),
     do: :erlang.nif_error(:nif_not_loaded)
 
   def flight_client_do_get(_client_ref, _ticket_binary), do: :erlang.nif_error(:nif_not_loaded)

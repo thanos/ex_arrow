@@ -29,4 +29,12 @@ defmodule ExArrow.Schema do
     |> Native.schema_fields()
     |> Enum.map(fn {name, type} -> %Field{name: name, type: type} end)
   end
+
+  @doc """
+  Returns just the field names of the schema as a list of strings.
+  """
+  @spec field_names(t()) :: [String.t()]
+  def field_names(%__MODULE__{} = schema) do
+    schema |> fields() |> Enum.map(& &1.name)
+  end
 end

@@ -201,7 +201,7 @@ defmodule ExArrow.Flight.ClientImplTest do
     {:ok, client} = ClientImpl.connect("localhost", port, [])
 
     assert {:error, msg} = ClientImpl.do_get(client, "echo")
-    assert msg =~ "no data"
+    assert msg =~ "NotFound" or msg =~ "unknown ticket" or msg =~ "no data"
 
     ExArrow.Flight.Server.stop(server)
   end
@@ -333,7 +333,7 @@ defmodule ExArrow.Flight.ClientImplTest do
     assert {:ok, []} = ClientImpl.do_action(client, "clear", <<>>)
 
     assert {:error, msg} = ClientImpl.do_get(client, "echo")
-    assert msg =~ "no data"
+    assert msg =~ "NotFound" or msg =~ "unknown ticket" or msg =~ "no data"
 
     ExArrow.Flight.Server.stop(server)
   end

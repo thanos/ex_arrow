@@ -79,10 +79,26 @@ defmodule ExArrow.Flight.Client do
 
   @doc """
   Uploads `batches` to the server under the given `schema`.
+
+  ## Options
+
+  * `:descriptor` — `{:cmd, binary()}` or `{:path, [String.t()]}` to route the
+    dataset to a named ticket on the server.  Defaults to `:none` which causes
+    the server to use the legacy `"echo"` ticket.
+
+  ## Examples
+
+      # Store under ticket "sales_2024"
+      :ok = ExArrow.Flight.Client.do_put(client, schema, batches,
+              descriptor: {:cmd, "sales_2024"})
+
+      # Store under path ["datasets", "metrics"]
+      :ok = ExArrow.Flight.Client.do_put(client, schema, batches,
+              descriptor: {:path, ["datasets", "metrics"]})
   """
-  @spec do_put(t(), ExArrow.Schema.t(), Enumerable.t()) :: :ok | {:error, term()}
-  def do_put(client, schema, batches) do
-    impl().do_put(client, schema, batches)
+  @spec do_put(t(), ExArrow.Schema.t(), Enumerable.t(), keyword()) :: :ok | {:error, term()}
+  def do_put(client, schema, batches, opts \\ []) do
+    impl().do_put(client, schema, batches, opts)
   end
 
   @doc """

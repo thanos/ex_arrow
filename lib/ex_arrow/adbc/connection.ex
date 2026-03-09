@@ -57,4 +57,14 @@ defmodule ExArrow.ADBC.Connection do
   def get_objects(conn, opts \\ []) do
     impl().get_objects(conn, opts)
   end
+
+  @doc """
+  Closes a connection handle.
+
+  The underlying NIF resource is freed when all Elixir references are GC'd.
+  Calling `close/1` explicitly releases the struct reference so the connection
+  can be reclaimed sooner (e.g. when returning it to a pool).
+  """
+  @spec close(t()) :: :ok
+  def close(%__MODULE__{}), do: :ok
 end

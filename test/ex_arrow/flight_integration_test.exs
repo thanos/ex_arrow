@@ -46,7 +46,7 @@ defmodule ExArrow.FlightIntegrationTest do
   @tag :flight
   test "do_get before any do_put returns not-found error", %{client: client} do
     assert {:error, msg} = ExArrow.Flight.Client.do_get(client, "echo")
-    assert msg =~ "no data"
+    assert msg =~ "NotFound" or msg =~ "unknown ticket" or msg =~ "no data"
   end
 
   @tag :flight
@@ -156,7 +156,7 @@ defmodule ExArrow.FlightIntegrationTest do
     assert {:ok, []} = ExArrow.Flight.Client.do_action(client, "clear", <<>>)
 
     assert {:error, msg} = ExArrow.Flight.Client.do_get(client, "echo")
-    assert msg =~ "no data"
+    assert msg =~ "NotFound" or msg =~ "unknown ticket" or msg =~ "no data"
   end
 
   @tag :flight

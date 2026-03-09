@@ -21,7 +21,7 @@ use futures::StreamExt;
 use futures::TryStreamExt;
 use rustler::resource::ResourceArc;
 use rustler::{Encoder, Env, Term};
-use tonic::transport::{Certificate, Channel, ClientTlsConfig, Server};
+use tonic::transport::{Certificate, Channel, ClientTlsConfig, Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status, Streaming};
 use tokio_stream::wrappers::TcpListenerStream;
 
@@ -36,6 +36,9 @@ rustler::atoms! {
     plaintext,
     system_certs,
     custom_ca,
+    // Server TLS mode atoms sent from Elixir via flight_server_start/3
+    tls,
+    mtls,
 }
 
 // ── TLS mode ─────────────────────────────────────────────────────────────────
@@ -101,6 +104,61 @@ fn try_encode_binary<'a>(env: Env<'a>, data: &[u8]) -> Option<Term<'a>> {
     let mut owned = rustler::OwnedBinary::new(data.len())?;
     owned.as_mut_slice().copy_from_slice(data);
     Some(owned.release(env).encode(env))
+}
+
+// ── Server TLS mode ───────────────────────────────────────────────────────────
+
+/// TLS configuration for the Flight server.
+enum ServerTlsMode {
+    /// Plaintext HTTP/2 (no TLS). Current default.
+    Plaintext,
+    /// One-way TLS: server presents a certificate; clients verify it.
+    Tls { cert_pem: Vec<u8>, key_pem: Vec<u8> },
+    /// Mutual TLS: server and client both present certificates.
+    Mtls { cert_pem: Vec<u8>, key_pem: Vec<u8>, ca_pem: Vec<u8> },
+}
+
+/// Decode the `server_tls` term sent from Elixir:
+///   - `:plaintext`                                     → `Plaintext`
+///   - `{:tls, cert_pem, key_pem}`                      → one-way TLS
+///   - `{:mtls, cert_pem, key_pem, ca_pem}`             → mutual TLS
+fn parse_server_tls<'a>(term: Term<'a>) -> Result<ServerTlsMode, String> {
+    if let Ok(atom) = term.decode::<rustler::Atom>() {
+        if atom == plaintext() {
+            return Ok(ServerTlsMode::Plaintext);
+        }
+        return Err("server_tls atom must be :plaintext".to_string());
+    }
+    let tuple = rustler::types::tuple::get_tuple(term)
+        .map_err(|_| "server_tls must be :plaintext, {:tls, cert, key}, or {:mtls, cert, key, ca}".to_string())?;
+
+    if tuple.len() == 3 {
+        if let Ok(tag) = tuple[0].decode::<rustler::Atom>() {
+            if tag == tls() {
+                let cert: rustler::Binary = tuple[1].decode().map_err(|_| "tls cert must be a binary".to_string())?;
+                let key: rustler::Binary  = tuple[2].decode().map_err(|_| "tls key must be a binary".to_string())?;
+                return Ok(ServerTlsMode::Tls {
+                    cert_pem: cert.as_slice().to_vec(),
+                    key_pem:  key.as_slice().to_vec(),
+                });
+            }
+        }
+    }
+    if tuple.len() == 4 {
+        if let Ok(tag) = tuple[0].decode::<rustler::Atom>() {
+            if tag == mtls() {
+                let cert: rustler::Binary = tuple[1].decode().map_err(|_| "mtls cert must be a binary".to_string())?;
+                let key: rustler::Binary  = tuple[2].decode().map_err(|_| "mtls key must be a binary".to_string())?;
+                let ca: rustler::Binary   = tuple[3].decode().map_err(|_| "mtls ca must be a binary".to_string())?;
+                return Ok(ServerTlsMode::Mtls {
+                    cert_pem: cert.as_slice().to_vec(),
+                    key_pem:  key.as_slice().to_vec(),
+                    ca_pem:   ca.as_slice().to_vec(),
+                });
+            }
+        }
+    }
+    Err("invalid server_tls; expected :plaintext, {:tls, cert, key}, or {:mtls, cert, key, ca}".to_string())
 }
 
 const ECHO_TICKET: &[u8] = b"echo";
@@ -230,11 +288,32 @@ fn encode_flight_info<'a>(env: Env<'a>, info: &FlightInfo) -> Option<Term<'a>> {
     ))
 }
 
-// ── Echo server state and service ────────────────────────────────────────────
+// ── Descriptor-to-ticket key helper ──────────────────────────────────────────
 
-/// Shared state for the echo server: the last `do_put` (schema + batches).
+/// Convert a `FlightDescriptor` to a string key used to identify a stored dataset.
+///
+/// | Descriptor type | Key                              |
+/// |-----------------|----------------------------------|
+/// | CMD             | UTF-8 bytes of the cmd field     |
+/// | PATH            | path segments joined with `/`    |
+/// | other / unknown | `None`                           |
+fn descriptor_to_key(desc: &FlightDescriptor) -> Option<String> {
+    if desc.r#type == DESCRIPTOR_CMD {
+        Some(String::from_utf8_lossy(desc.cmd.as_ref()).into_owned())
+    } else if desc.r#type == DESCRIPTOR_PATH {
+        Some(desc.path.join("/"))
+    } else {
+        None
+    }
+}
+
+// ── Router server state and service ──────────────────────────────────────────
+
+/// Shared state for the server: a map of ticket → (schema, batches).
+/// The legacy ticket `"echo"` is always the last uploaded dataset for
+/// backward compatibility when no descriptor is provided.
 struct EchoState {
-    data: Option<(SchemaRef, Vec<RecordBatch>)>,
+    datasets: std::collections::HashMap<String, (SchemaRef, Vec<RecordBatch>)>,
 }
 
 /// Echo Flight service: `do_put` stores data, `do_get` retrieves it.
@@ -265,35 +344,32 @@ impl FlightService for EchoFlightService {
         _request: Request<Criteria>,
     ) -> Result<Response<Self::ListFlightsStream>, Status> {
         let guard = self.state.lock().map_err(|_| Status::internal("lock"))?;
-        let info = match &guard.data {
-            None => {
-                let empty: Vec<Result<FlightInfo, Status>> = vec![];
-                return Ok(Response::new(Box::pin(futures::stream::iter(empty))));
-            }
-            Some((schema, batches)) => {
+        let infos: Vec<Result<FlightInfo, Status>> = guard
+            .datasets
+            .iter()
+            .map(|(ticket_key, (schema, batches))| {
                 let schema_bytes = schema_ipc_bytes(schema)?;
                 let total_rows: i64 = batches.iter().map(|b| b.num_rows() as i64).sum();
-                FlightInfo {
+                let ticket_bytes = Bytes::from(ticket_key.as_bytes().to_vec());
+                Ok(FlightInfo {
                     schema: schema_bytes,
                     flight_descriptor: Some(FlightDescriptor {
                         r#type: DESCRIPTOR_CMD,
-                        cmd: Bytes::from(ECHO_TICKET),
+                        cmd: ticket_bytes.clone(),
                         ..Default::default()
                     }),
                     endpoint: vec![FlightEndpoint {
-                        ticket: Some(Ticket {
-                            ticket: Bytes::from(ECHO_TICKET),
-                        }),
+                        ticket: Some(Ticket { ticket: ticket_bytes }),
                         ..Default::default()
                     }],
                     total_records: total_rows,
                     total_bytes: -1,
                     ordered: false,
                     app_metadata: Bytes::new(),
-                }
-            }
-        };
-        Ok(Response::new(Box::pin(futures::stream::iter([Ok(info)]))))
+                })
+            })
+            .collect();
+        Ok(Response::new(Box::pin(futures::stream::iter(infos))))
     }
 
     async fn get_flight_info(
@@ -301,26 +377,20 @@ impl FlightService for EchoFlightService {
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
         let desc = request.into_inner();
-        if desc.r#type != DESCRIPTOR_CMD || desc.cmd.as_ref() != ECHO_TICKET {
-            return Err(Status::not_found("unknown descriptor"));
-        }
+        let ticket_key = descriptor_to_key(&desc)
+            .ok_or_else(|| Status::invalid_argument("unsupported descriptor type"))?;
         let guard = self.state.lock().map_err(|_| Status::internal("lock"))?;
-        match &guard.data {
-            None => Err(Status::not_found("no data: do_put first")),
+        match guard.datasets.get(&ticket_key) {
+            None => Err(Status::not_found(format!("unknown ticket: {ticket_key}"))),
             Some((schema, batches)) => {
                 let schema_bytes = schema_ipc_bytes(schema)?;
                 let total_rows: i64 = batches.iter().map(|b| b.num_rows() as i64).sum();
+                let ticket_bytes = Bytes::from(ticket_key.into_bytes());
                 Ok(Response::new(FlightInfo {
                     schema: schema_bytes,
-                    flight_descriptor: Some(FlightDescriptor {
-                        r#type: DESCRIPTOR_CMD,
-                        cmd: Bytes::from(ECHO_TICKET),
-                        ..Default::default()
-                    }),
+                    flight_descriptor: Some(desc),
                     endpoint: vec![FlightEndpoint {
-                        ticket: Some(Ticket {
-                            ticket: Bytes::from(ECHO_TICKET),
-                        }),
+                        ticket: Some(Ticket { ticket: ticket_bytes }),
                         ..Default::default()
                     }],
                     total_records: total_rows,
@@ -337,12 +407,11 @@ impl FlightService for EchoFlightService {
         request: Request<FlightDescriptor>,
     ) -> Result<Response<SchemaResult>, Status> {
         let desc = request.into_inner();
-        if desc.r#type != DESCRIPTOR_CMD || desc.cmd.as_ref() != ECHO_TICKET {
-            return Err(Status::not_found("unknown descriptor"));
-        }
+        let ticket_key = descriptor_to_key(&desc)
+            .ok_or_else(|| Status::invalid_argument("unsupported descriptor type"))?;
         let guard = self.state.lock().map_err(|_| Status::internal("lock"))?;
-        match &guard.data {
-            None => Err(Status::not_found("no data: do_put first")),
+        match guard.datasets.get(&ticket_key) {
+            None => Err(Status::not_found(format!("unknown ticket: {ticket_key}"))),
             Some((schema, _)) => Ok(Response::new(SchemaResult {
                 schema: schema_ipc_bytes(schema)?,
             })),
@@ -350,15 +419,12 @@ impl FlightService for EchoFlightService {
     }
 
     async fn do_get(&self, request: Request<Ticket>) -> Result<Response<Self::DoGetStream>, Status> {
-        let ticket = request.into_inner().ticket;
-        if ticket.as_ref() != ECHO_TICKET {
-            return Err(Status::not_found("unknown ticket"));
-        }
+        let ticket_key = String::from_utf8_lossy(request.into_inner().ticket.as_ref()).into_owned();
         let (schema, batches) = {
             let guard = self.state.lock().map_err(|_| Status::internal("lock"))?;
-            match &guard.data {
+            match guard.datasets.get(&ticket_key) {
                 Some((s, b)) => (s.clone(), b.clone()),
-                None => return Err(Status::not_found("no data: do_put first")),
+                None => return Err(Status::not_found(format!("unknown ticket: {ticket_key}"))),
             }
         };
         let stream = futures::stream::iter(
@@ -377,30 +443,41 @@ impl FlightService for EchoFlightService {
         &self,
         request: Request<Streaming<FlightData>>,
     ) -> Result<Response<Self::DoPutStream>, Status> {
-        let stream = request.into_inner();
+        let mut stream = request.into_inner();
+        // Peek at the first FlightData message to extract the descriptor (if any).
+        // The first message in a do_put stream is a schema message and carries the
+        // FlightDescriptor that tells the server where to store the data.
+        let first = stream
+            .message()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::invalid_argument("do_put: empty stream"))?;
+        let ticket_key = first
+            .flight_descriptor
+            .as_ref()
+            .and_then(|d| descriptor_to_key(d))
+            .unwrap_or_else(|| String::from_utf8_lossy(ECHO_TICKET).into_owned());
+
+        // Re-prepend the first message and decode all batches.
+        let combined = futures::stream::iter([Ok(first)]).chain(stream);
         let batch_stream = FlightRecordBatchStream::new_from_flight_data(
-            stream.map_err(|e| arrow_flight::error::FlightError::from(e)),
+            combined.map_err(arrow_flight::error::FlightError::from),
         );
         let batches: Vec<RecordBatch> = batch_stream
             .try_collect()
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
-        // Flight do_put must carry at least one batch; an empty stream has no schema
-        // and nothing useful to store, so we reject it here at the protocol boundary.
         let schema = batches
             .first()
             .map(|b| b.schema())
-            .ok_or_else(|| {
-                Status::invalid_argument(
-                    "do_put rejected: stream contained no record batches (schema cannot be inferred)",
-                )
-            })?;
+            .ok_or_else(|| Status::invalid_argument(
+                "do_put rejected: stream contained no record batches",
+            ))?;
         {
             let mut guard = self.state.lock().map_err(|_| Status::internal("lock"))?;
-            guard.data = Some((schema, batches));
+            guard.datasets.insert(ticket_key, (schema, batches));
         }
-        let result = PutResult::default();
-        Ok(Response::new(Box::pin(futures::stream::iter([Ok(result)]))))
+        Ok(Response::new(Box::pin(futures::stream::iter([Ok(PutResult::default())]))))
     }
 
     async fn do_action(
@@ -410,16 +487,23 @@ impl FlightService for EchoFlightService {
         let action = request.into_inner();
         match action.r#type.as_str() {
             "ping" => {
-                let result = arrow_flight::Result {
-                    body: Bytes::from("pong"),
-                };
+                let result = arrow_flight::Result { body: Bytes::from("pong") };
                 Ok(Response::new(Box::pin(futures::stream::iter([Ok(result)]))))
             }
             "clear" => {
                 let mut guard = self.state.lock().map_err(|_| Status::internal("lock"))?;
-                guard.data = None;
+                guard.datasets.clear();
                 let empty: Vec<Result<arrow_flight::Result, Status>> = vec![];
                 Ok(Response::new(Box::pin(futures::stream::iter(empty))))
+            }
+            "list_tickets" => {
+                let guard = self.state.lock().map_err(|_| Status::internal("lock"))?;
+                let results: Vec<Result<arrow_flight::Result, Status>> = guard
+                    .datasets
+                    .keys()
+                    .map(|k| Ok(arrow_flight::Result { body: Bytes::from(k.as_bytes().to_vec()) }))
+                    .collect();
+                Ok(Response::new(Box::pin(futures::stream::iter(results))))
             }
             other => Err(Status::not_found(format!("unknown action: {other}"))),
         }
@@ -432,12 +516,15 @@ impl FlightService for EchoFlightService {
         let actions = vec![
             Ok(ArrowActionType {
                 r#type: "clear".to_string(),
-                description: "Clear the stored echo data.".to_string(),
+                description: "Clear all stored datasets.".to_string(),
             }),
             Ok(ArrowActionType {
                 r#type: "ping".to_string(),
-                description: "Responds with 'pong'. Used to verify the server is alive."
-                    .to_string(),
+                description: "Responds with 'pong'. Used to verify the server is alive.".to_string(),
+            }),
+            Ok(ArrowActionType {
+                r#type: "list_tickets".to_string(),
+                description: "Return one result per stored dataset, each body is the ticket bytes.".to_string(),
             }),
         ];
         Ok(Response::new(Box::pin(futures::stream::iter(actions))))
@@ -468,72 +555,88 @@ pub struct FlightServerHandle {
     shutdown: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 
-/// Start Flight echo server on the given port (0 = any). Returns handle and actual port.
+/// Start a Flight server on the given port (0 = any available).
+///
+/// `server_tls` controls transport security:
+/// - `:plaintext`                           — unencrypted HTTP/2 (default)
+/// - `{:tls, cert_pem, key_pem}`            — one-way TLS
+/// - `{:mtls, cert_pem, key_pem, ca_pem}`   — mutual TLS
+///
+/// Returns `{:ok, server_ref}` or `{:error, msg}`.
 ///
 /// # Threading model
 ///
-/// Each call to this function spawns **one dedicated OS thread** that owns a
-/// single-server Tokio runtime for the lifetime of the returned handle. This
-/// keeps the BEAM scheduler unblocked (the NIF is `DirtyIo`) and gives each
-/// server complete isolation — a panic or slow handler in one server cannot
-/// stall another.
-///
-/// The trade-off is that N concurrent servers consume N OS threads and N Tokio
-/// thread-pools (each pool defaults to one worker thread per logical CPU). For
-/// typical use — one server per node — this is negligible. If you need to run
-/// many servers in the same OS process, consider sharing a single
-/// `Arc<tokio::runtime::Runtime>` across handles (a future milestone). Until
-/// then, keep the number of simultaneously live `FlightServerHandle` instances
-/// small (single digits) to avoid thread exhaustion.
+/// Each call spawns one dedicated OS thread owning a single-server Tokio
+/// runtime.  This keeps the BEAM scheduler unblocked (`DirtyIo`) and
+/// isolates servers from each other.  Keep the number of simultaneously
+/// live handles small (single digits) to avoid thread exhaustion.
 #[rustler::nif(schedule = "DirtyIo")]
-pub fn flight_server_start<'a>(env: Env<'a>, host: String, port: u16) -> Term<'a> {
-    let state = Arc::new(Mutex::new(EchoState { data: None }));
+pub fn flight_server_start<'a>(env: Env<'a>, host: String, port: u16, server_tls: Term<'a>) -> Term<'a> {
+    let tls_mode = match parse_server_tls(server_tls) {
+        Ok(m) => m,
+        Err(e) => return err_encode(env, &e),
+    };
+    let state = Arc::new(Mutex::new(EchoState {
+        datasets: std::collections::HashMap::new(),
+    }));
     let service = EchoFlightService { state };
     let (tx, rx) = std::sync::mpsc::channel::<Result<(String, u16, tokio::sync::oneshot::Sender<()>), String>>();
     let join = std::thread::spawn(move || {
         let rt = match tokio::runtime::Runtime::new() {
             Ok(r) => r,
-            Err(e) => {
-                let _ = tx.send(Err(e.to_string()));
-                return;
-            }
+            Err(e) => { let _ = tx.send(Err(e.to_string())); return; }
         };
         rt.block_on(async move {
             let addr_str = format!("{}:{}", host, port);
             let addr: std::net::SocketAddr = match addr_str.parse() {
                 Ok(a) => a,
-                Err(e) => {
-                    let _ = tx.send(Err(e.to_string()));
-                    return;
-                }
+                Err(e) => { let _ = tx.send(Err(e.to_string())); return; }
             };
             let listener = match tokio::net::TcpListener::bind(addr).await {
                 Ok(l) => l,
-                Err(e) => {
-                    let _ = tx.send(Err(e.to_string()));
-                    return;
-                }
+                Err(e) => { let _ = tx.send(Err(e.to_string())); return; }
             };
             let local = listener.local_addr().unwrap_or_else(|_| addr);
             let actual_port = local.port();
             let actual_host = local.ip().to_string();
             let incoming = TcpListenerStream::new(listener);
             let svc = FlightServiceServer::new(service);
-            // Wire the shutdown signal into tonic's accept loop so that when
-            // flight_server_stop fires shutdown_tx, the server stops accepting
-            // new connections and waits for all in-flight RPCs to complete
-            // before the future resolves.
             let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-            let server_fut = Server::builder()
-                .add_service(svc)
-                .serve_with_incoming_shutdown(incoming, async {
-                    let _ = shutdown_rx.await;
-                });
+            let shutdown_fut = async { let _ = shutdown_rx.await; };
+
+            // Build the tonic Server, optionally with TLS config.
+            let mut builder = Server::builder();
+            let server_fut_result = match tls_mode {
+                ServerTlsMode::Plaintext => {
+                    Ok(builder
+                        .add_service(svc)
+                        .serve_with_incoming_shutdown(incoming, shutdown_fut))
+                }
+                ServerTlsMode::Tls { cert_pem, key_pem } => {
+                    let identity = Identity::from_pem(&cert_pem, &key_pem);
+                    let tls_cfg = ServerTlsConfig::new().identity(identity);
+                    builder
+                        .tls_config(tls_cfg)
+                        .map(|mut b| b.add_service(svc).serve_with_incoming_shutdown(incoming, shutdown_fut))
+                        .map_err(|e| e.to_string())
+                }
+                ServerTlsMode::Mtls { cert_pem, key_pem, ca_pem } => {
+                    let identity = Identity::from_pem(&cert_pem, &key_pem);
+                    let ca_cert = Certificate::from_pem(&ca_pem);
+                    let tls_cfg = ServerTlsConfig::new()
+                        .identity(identity)
+                        .client_ca_root(ca_cert);
+                    builder
+                        .tls_config(tls_cfg)
+                        .map(|mut b| b.add_service(svc).serve_with_incoming_shutdown(incoming, shutdown_fut))
+                        .map_err(|e| e.to_string())
+                }
+            };
+            let server_fut = match server_fut_result {
+                Ok(f) => f,
+                Err(e) => { let _ = tx.send(Err(e)); return; }
+            };
             let server_handle = tokio::spawn(server_fut);
-            // Probe the bound port until the server is actually accepting connections
-            // rather than sleeping for a fixed interval (which is fragile on slow systems
-            // and wasteful on fast ones). We poll up to 80 times with 25 ms back-off,
-            // giving a maximum wait of 2 s before reporting a timeout.
             let probe_ip = if actual_host == "0.0.0.0" || actual_host == "::" {
                 "127.0.0.1".to_string()
             } else {
@@ -550,8 +653,7 @@ pub fn flight_server_start<'a>(env: Env<'a>, host: String, port: u16) -> Term<'a
             }
             if !ready {
                 let _ = tx.send(Err(format!(
-                    "server on {}:{} did not become ready within 2s",
-                    actual_host, actual_port
+                    "server on {}:{} did not become ready within 2s", actual_host, actual_port
                 )));
                 return;
             }
@@ -712,13 +814,21 @@ pub fn flight_client_connect<'a>(
     ok_encode(env, ResourceArc::new(handle))
 }
 
-/// do_put: upload schema and batches. Returns `:ok` or `{:error, msg}`.
+/// do_put: upload schema and batches, with optional descriptor for routing.
+///
+/// `descriptor` tells the server under which ticket to store the data:
+/// - `:none`                    → server defaults to `"echo"` (backward compat)
+/// - `{:cmd, binary()}`         → cmd bytes become the ticket
+/// - `{:path, [String.t()]}`    → path segments joined with `/` become the ticket
+///
+/// Returns `:ok` or `{:error, msg}`.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn flight_client_do_put<'a>(
     env: Env<'a>,
     client: ResourceArc<FlightClientHandle>,
     schema: ResourceArc<ExArrowSchema>,
     batches: Vec<ResourceArc<ExArrowRecordBatch>>,
+    descriptor: Term<'a>,
 ) -> Term<'a> {
     let batches_owned: Vec<RecordBatch> = batches.iter().map(|b| b.batch.clone()).collect();
     let stream = futures::stream::iter(
@@ -726,9 +836,16 @@ pub fn flight_client_do_put<'a>(
             .into_iter()
             .map(Ok::<_, arrow_flight::error::FlightError>),
     );
-    let flight_data = FlightDataEncoderBuilder::new()
-        .with_schema(schema.schema.clone())
-        .build(stream);
+    let none_atom = rustler::types::atom::Atom::from_str(env, "none").unwrap();
+    let mut encoder = FlightDataEncoderBuilder::new().with_schema(schema.schema.clone());
+    // Attach descriptor only when one was provided (not :none).
+    if descriptor.decode::<rustler::Atom>().ok() != Some(none_atom) {
+        match decode_descriptor(descriptor) {
+            Ok(d) => encoder = encoder.with_flight_descriptor(Some(d)),
+            Err(e) => return err_encode(env, &e),
+        }
+    }
+    let flight_data = encoder.build(stream);
     let mut guard = match client.client.lock() {
         Ok(g) => g,
         Err(_) => return err_encode(env, "client lock"),

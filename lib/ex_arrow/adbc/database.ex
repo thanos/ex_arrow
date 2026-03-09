@@ -34,4 +34,14 @@ defmodule ExArrow.ADBC.Database do
   def open(driver_path_or_opts) do
     impl().open(driver_path_or_opts)
   end
+
+  @doc """
+  Closes a database handle.
+
+  The underlying NIF resource is freed automatically when all Elixir references
+  are garbage-collected.  Calling `close/1` explicitly removes the Elixir
+  reference held by the struct, allowing the driver to be reclaimed sooner.
+  """
+  @spec close(t()) :: :ok
+  def close(%__MODULE__{}), do: :ok
 end

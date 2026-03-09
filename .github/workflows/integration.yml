@@ -1,0 +1,167 @@
+name: Integration Tests
+
+# Run against live database services (PostgreSQL, DuckDB).
+# Triggered manually or on pushes/PRs to main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ── PostgreSQL ────────────────────────────────────────────────────────────────
+  postgresql:
+    name: ADBC / PostgreSQL ${{ matrix.pg }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: ["14", "15", "16"]
+
+    services:
+      postgres:
+        image: postgres:${{ matrix.pg }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PG_HOST: localhost
+      PG_PORT: 5432
+      PG_USER: postgres
+      PG_PASSWORD: postgres
+      PG_DATABASE: postgres
+      EX_ARROW_BUILD: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18"
+          otp-version: "27"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Restore Mix dependencies cache
+        uses: actions/cache@v4
+        with:
+          path: deps
+          key: mix-deps-integration-27-1.18-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            mix-deps-integration-27-1.18-
+
+      - name: Restore Rust target cache
+        uses: actions/cache@v4
+        with:
+          path: native/ex_arrow_native/target
+          key: rust-target-integration-${{ hashFiles('native/ex_arrow_native/Cargo.lock', 'native/ex_arrow_native/Cargo.toml', 'native/ex_arrow_native/src/**') }}
+          restore-keys: |
+            rust-target-integration-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Compile
+        run: mix compile --warnings-as-errors
+
+      # The ADBC PostgreSQL driver is provided by the adbc Hex package (livebook-dev/adbc).
+      # We download the driver binary at test time via ADBC package manager.
+      - name: Download ADBC PostgreSQL driver
+        run: |
+          mix run -e '
+            {:ok, _} = Application.ensure_all_started(:adbc)
+            {:ok, path} = Adbc.download_driver(:postgresql)
+            IO.puts("PG driver: #{path}")
+            System.put_env("PG_ADBC_DRIVER", path)
+          ' || true
+          # Fallback: try system libadbc_driver_postgresql
+          if [ -z "$PG_ADBC_DRIVER" ]; then
+            echo "PG_ADBC_DRIVER not set from adbc package; using driver_name fallback"
+          fi
+
+      - name: Run PostgreSQL integration tests
+        run: mix test --include adbc_integration test/ex_arrow/adbc_integration_test.exs
+
+  # ── DuckDB ────────────────────────────────────────────────────────────────────
+  duckdb:
+    name: ADBC / DuckDB ${{ matrix.duckdb }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        duckdb: ["1.1.3", "1.2.0"]
+
+    env:
+      EX_ARROW_BUILD: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18"
+          otp-version: "27"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Restore Mix dependencies cache
+        uses: actions/cache@v4
+        with:
+          path: deps
+          key: mix-deps-integration-duckdb-27-1.18-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            mix-deps-integration-duckdb-27-1.18-
+
+      - name: Restore Rust target cache
+        uses: actions/cache@v4
+        with:
+          path: native/ex_arrow_native/target
+          key: rust-target-integration-duckdb-${{ hashFiles('native/ex_arrow_native/Cargo.lock', 'native/ex_arrow_native/Cargo.toml', 'native/ex_arrow_native/src/**') }}
+          restore-keys: |
+            rust-target-integration-duckdb-
+
+      - name: Download DuckDB ADBC driver
+        run: |
+          DUCKDB_VERSION="${{ matrix.duckdb }}"
+          DRIVER_URL="https://github.com/duckdb/duckdb-adbc/releases/download/v${DUCKDB_VERSION}/libduckdb-adbc-linux-amd64.tar.gz"
+          mkdir -p /tmp/duckdb_adbc
+          curl -L "$DRIVER_URL" -o /tmp/duckdb_adbc.tar.gz
+          tar -xzf /tmp/duckdb_adbc.tar.gz -C /tmp/duckdb_adbc
+          # Find the .so file
+          DRIVER_PATH=$(find /tmp/duckdb_adbc -name "libduckdb_adbc.so" | head -1)
+          if [ -z "$DRIVER_PATH" ]; then
+            echo "::error::Could not find libduckdb_adbc.so in downloaded archive"
+            ls -la /tmp/duckdb_adbc/
+            exit 1
+          fi
+          echo "DUCKDB_DRIVER=$DRIVER_PATH" >> "$GITHUB_ENV"
+          echo "Found DuckDB ADBC driver at: $DRIVER_PATH"
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Compile
+        run: mix compile --warnings-as-errors
+
+      - name: Run DuckDB integration tests
+        run: mix test --include adbc_integration test/ex_arrow/adbc_integration_test.exs

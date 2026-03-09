@@ -15,7 +15,8 @@ defmodule ExArrow.Flight.ClientBehaviour do
   @callback do_put(
               client :: ExArrow.Flight.Client.t(),
               schema :: ExArrow.Schema.t(),
-              batches :: Enumerable.t()
+              batches :: Enumerable.t(),
+              opts :: keyword()
             ) ::
               :ok | {:error, term()}
 

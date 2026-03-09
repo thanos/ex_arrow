@@ -67,14 +67,16 @@ defmodule ExArrow.Flight.ClientTest do
       assert {:ok, ^fake_stream} = Client.do_get(fake_client, "ticket")
     end
 
-    test "do_put/3 uses mock when configured" do
+    test "do_put/3,4 uses mock when configured" do
       Application.put_env(:ex_arrow, :flight_client_impl, ExArrow.Flight.ClientMock)
       on_exit(fn -> Application.delete_env(:ex_arrow, :flight_client_impl) end)
 
       fake_client = %Client{resource: make_ref()}
       schema = %ExArrow.Schema{resource: make_ref()}
 
-      Mox.expect(ExArrow.Flight.ClientMock, :do_put, fn ^fake_client, ^schema, [] -> :ok end)
+      Mox.expect(ExArrow.Flight.ClientMock, :do_put, fn ^fake_client, ^schema, [], _opts ->
+        :ok
+      end)
 
       assert :ok = Client.do_put(fake_client, schema, [])
     end

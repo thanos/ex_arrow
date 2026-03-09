@@ -54,4 +54,23 @@ defmodule ExArrow.Stream do
       {:error, msg} -> {:error, msg}
     end
   end
+
+  @doc """
+  Collects all remaining batches from the stream into a list.
+
+  Stops at the first error and raises.  Returns an empty list for an
+  already-exhausted stream.
+  """
+  @spec to_list(t()) :: [RecordBatch.t()]
+  def to_list(%__MODULE__{} = stream) do
+    do_collect(stream, [])
+  end
+
+  defp do_collect(stream, acc) do
+    case next(stream) do
+      nil -> Enum.reverse(acc)
+      {:error, msg} -> raise "ExArrow.Stream.to_list/1 failed: #{msg}"
+      batch -> do_collect(stream, [batch | acc])
+    end
+  end
 end

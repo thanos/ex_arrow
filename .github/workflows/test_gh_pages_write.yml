@@ -1,0 +1,45 @@
+name: Test gh-pages write
+
+# Manually triggered only — use this to debug gh-pages push permissions
+# without running the full benchmark suite.
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: "Test commit message to write to gh-pages"
+        required: false
+        default: "test: gh-pages write probe"
+
+jobs:
+  probe:
+    name: Probe gh-pages write access
+    runs-on: ubuntu-latest
+
+    # Explicitly grant write permission to contents (needed for gh-pages push).
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          # Use the built-in GITHUB_TOKEN; no extra secret required.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up git user
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Write probe file
+        run: |
+          echo "gh-pages write probe — ${{ github.sha }} — $(date -u)" >> probe.txt
+          cat probe.txt
+
+      - name: Commit and push
+        run: |
+          git add probe.txt
+          git commit -m "${{ github.event.inputs.message }} (${{ github.sha }})"
+          git push origin gh-pages
+          echo "Push succeeded."

@@ -63,13 +63,15 @@ defmodule ExArrow.Flight.ClientImpl do
   end
 
   @impl true
-  def do_put(client, schema, batches) do
+  def do_put(client, schema, batches, opts \\ []) do
     batch_refs = Enum.map(batches, &ExArrow.RecordBatch.resource_ref/1)
+    descriptor = Keyword.get(opts, :descriptor, :none)
 
     case Native.flight_client_do_put(
            client.resource,
            Schema.resource_ref(schema),
-           batch_refs
+           batch_refs,
+           descriptor
          ) do
       :ok -> :ok
       {:error, msg} -> {:error, msg}
