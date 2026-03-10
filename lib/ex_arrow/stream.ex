@@ -12,7 +12,7 @@ defmodule ExArrow.Stream do
   alias ExArrow.RecordBatch
   alias ExArrow.Schema
 
-  @opaque t :: %__MODULE__{resource: reference(), backend: :ipc | :adbc}
+  @opaque t :: %__MODULE__{resource: reference(), backend: :ipc | :adbc | :parquet}
   defstruct [:resource, backend: :ipc]
 
   @doc """
@@ -34,6 +34,11 @@ defmodule ExArrow.Stream do
     end
   end
 
+  def schema(%__MODULE__{resource: ref, backend: :parquet}) do
+    schema_ref = Native.parquet_stream_schema(ref)
+    {:ok, Schema.from_ref(schema_ref)}
+  end
+
   @doc """
   Returns the next record batch from the stream, or nil when done.
   Returns `{:error, message}` on read error.
@@ -49,6 +54,14 @@ defmodule ExArrow.Stream do
 
   def next(%__MODULE__{resource: ref, backend: :ipc}) do
     case Native.ipc_stream_next(ref) do
+      :done -> nil
+      {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
+      {:error, msg} -> {:error, msg}
+    end
+  end
+
+  def next(%__MODULE__{resource: ref, backend: :parquet}) do
+    case Native.parquet_stream_next(ref) do
       :done -> nil
       {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
       {:error, msg} -> {:error, msg}

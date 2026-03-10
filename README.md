@@ -24,7 +24,10 @@ Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, and ADBC database
 - [IPC: stream and file](#ipc-stream-and-file)
 - [Arrow Flight: client and server](#arrow-flight-client-and-server)
 - [ADBC: database to Arrow streams](#adbc-database-to-arrow-streams)
+- [Parquet: read and write](#parquet-read-and-write)
+- [Arrow compute kernels](#arrow-compute-kernels)
 - [Using ExArrow with Explorer](#using-exarrow-with-explorer)
+- [Using ExArrow with Nx](#using-exarrow-with-nx)
 - [Use case examples](#use-case-examples)
 - [Benchmarks](#benchmarks)
 - [Documentation](#documentation)
@@ -444,6 +447,67 @@ package is available: `ExArrow.ADBC.DriverHelper.ensure_driver_and_open/2`.
 
 ---
 
+## Parquet: read and write
+
+**Read from file:**
+
+```elixir
+{:ok, stream}  = ExArrow.Parquet.Reader.from_file("/data/events.parquet")
+{:ok, schema}  = ExArrow.Stream.schema(stream)
+batches = ExArrow.Stream.to_list(stream)
+```
+
+**Read from binary (e.g. downloaded from S3):**
+
+```elixir
+{:ok, stream} = ExArrow.Parquet.Reader.from_binary(parquet_bytes)
+batch = ExArrow.Stream.next(stream)
+```
+
+**Write to file:**
+
+```elixir
+:ok = ExArrow.Parquet.Writer.to_file("/out/result.parquet", schema, batches)
+```
+
+**Write to binary (e.g. upload to object storage):**
+
+```elixir
+{:ok, parquet_bytes} = ExArrow.Parquet.Writer.to_binary(schema, batches)
+```
+
+Parquet streams share the same `ExArrow.Stream` interface as IPC and ADBC
+streams — `schema/1`, `next/1`, and `to_list/1` all work identically.
+
+---
+
+## Arrow compute kernels
+
+All operations run entirely in native memory. Results are new
+`ExArrow.RecordBatch` handles — no data is copied into BEAM terms.
+
+**Filter rows** using a boolean column as a predicate:
+
+```elixir
+# Build a predicate batch where the first column is a boolean mask
+{:ok, filtered} = ExArrow.Compute.filter(batch, predicate_batch)
+```
+
+**Project (select) columns:**
+
+```elixir
+{:ok, slim} = ExArrow.Compute.project(batch, ["id", "name", "score"])
+```
+
+**Sort by column:**
+
+```elixir
+{:ok, sorted_asc}  = ExArrow.Compute.sort(batch, "score")
+{:ok, sorted_desc} = ExArrow.Compute.sort(batch, "score", ascending: false)
+```
+
+---
+
 ## Using ExArrow with Explorer
 
 [Explorer](https://hex.pm/packages/explorer) handles in-memory analysis.
@@ -469,6 +533,40 @@ binary = Explorer.DataFrame.dump_ipc_stream!(df)
 {:ok, stream} = ExArrow.IPC.Reader.from_binary(binary)
 batch = ExArrow.Stream.next(stream)
 ```
+
+---
+
+## Using ExArrow with Nx
+
+[Nx](https://hex.pm/packages/nx) provides numerical computing and tensor
+operations.  ExArrow bridges Arrow columns to Nx tensors by sharing raw byte
+buffers — no list materialisation occurs.
+
+Add `{:nx, "~> 0.7"}` to your `mix.exs` to enable this module.
+
+**Column to tensor:**
+
+```elixir
+{:ok, tensor} = ExArrow.Nx.column_to_tensor(batch, "price")
+mean = tensor |> Nx.mean() |> Nx.to_number()
+```
+
+**All numeric columns to a map of tensors:**
+
+```elixir
+{:ok, tensors} = ExArrow.Nx.to_tensors(batch)
+sorted_scores = tensors["score"] |> Nx.sort()
+```
+
+**Tensor back to a single-column RecordBatch:**
+
+```elixir
+weights = Nx.tensor([0.1, 0.2, 0.7], type: {:f, 64})
+{:ok, batch} = ExArrow.Nx.from_tensor(weights, "weights")
+```
+
+Non-numeric columns (strings, booleans, timestamps) are silently skipped by
+`to_tensors/1`. Unsupported Nx dtypes (e.g. `:bf16`) return `{:error, ...}`.
 
 ---
 
@@ -627,24 +725,28 @@ welcome for any of them.
 - **ADBC connection pool** — `ConnectionPool` and `DatabaseServer` backed by NimblePool.
 - **Broader integration test matrix** — PostgreSQL 14/15/16 and DuckDB 1.1.3/1.2.0 tested in CI.
 
-### Near-term (v0.3)
+### Shipped (v0.3)
 
-- **Arrow compute kernels** — thin NIF bindings to `arrow-compute` for
-filter/project/sort on native buffers without materialising into BEAM.
-- **Parquet support** — read and write Parquet files via the Arrow Rust
-`parquet` crate; complement Explorer's Parquet support with a streaming API.
-- **Explorer bridge module** — `ExArrow.Explorer` for direct conversion between
-`ExArrow.Stream` / `ExArrow.RecordBatch` and `Explorer.DataFrame` without
-the IPC round-trip.
-- **Nx bridge module** — `ExArrow.Nx` for converting a record batch column
-into an `Nx.Tensor` without copying through BEAM binary.
+- **Arrow compute kernels** — `ExArrow.Compute.filter/2`, `project/2`, `sort/3`: filter, select columns, and sort record batches entirely in native Arrow buffers without materialising data into BEAM terms.
+- **Parquet support** — `ExArrow.Parquet.Reader` and `ExArrow.Parquet.Writer`: read and write Parquet files and in-memory binaries via the Arrow Rust `parquet` crate; streaming API compatible with IPC and ADBC streams.
+- **Explorer bridge module** — `ExArrow.Explorer`: direct conversion between `ExArrow.Stream` / `ExArrow.RecordBatch` and `Explorer.DataFrame` without writing manual IPC code. Add `{:explorer, "~> 0.8"}` to enable.
+- **Nx bridge module** — `ExArrow.Nx`: convert Arrow columns to `Nx.Tensor` values and back by sharing raw byte buffers. No list materialisation. Add `{:nx, "~> 0.7"}` to enable.
+
+### Near-term (v0.4)
+
+- **Explorer bridge — direct C Data Interface** — bypass the IPC round-trip by
+  using the Arrow C Data Interface to transfer record batches between ExArrow
+  and Explorer/Polars with zero copies.
+- **Nx bridge — multi-column batch from tensors** — `ExArrow.Nx.from_tensors/1`
+  to produce a multi-column RecordBatch from a map of tensors in one call.
+- **Parquet row-group streaming** — lazy row-group iteration for very large
+  Parquet files instead of eager full-file load.
 
 ### Longer-term
 
 - **Flight SQL** — the Flight SQL protocol for databases that expose it
 (DuckDB, CockroachDB, Dremio).
-- **Streaming writes to Parquet and Delta Lake** — sink for data pipeline
-nodes.
+- **Streaming writes to Delta Lake** — sink for data pipeline nodes.
 - **OTel / telemetry integration** — `:telemetry` events for IPC read/write
 throughput, Flight request latency, and ADBC query duration.
 - **Windows aarch64 precompiled NIF** — once GitHub-hosted Windows arm64

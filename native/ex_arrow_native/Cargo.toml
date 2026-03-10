@@ -16,6 +16,11 @@ arrow = { version = "56", default-features = false, features = ["ipc"] }
 arrow-ipc = "56"
 arrow-schema = { version = "56", default-features = false }
 arrow-array = { version = "56", default-features = false }
+arrow-buffer = { version = "56", default-features = false }
+arrow-data = { version = "56", default-features = false }
+arrow-select = { version = "56", default-features = false }
+arrow-ord = { version = "56", default-features = false }
+parquet = { version = "56", default-features = false, features = ["arrow"] }
 arrow-flight = "56"
 futures = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros"] }

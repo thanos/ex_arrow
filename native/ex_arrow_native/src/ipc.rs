@@ -1,10 +1,17 @@
-//! IPC stream read/write NIFs.
+//! IPC stream read/write NIFs, plus record-batch column buffer helpers for Nx.
 
 use std::io::Cursor;
 use std::sync::Arc;
 
 use arrow::array::{Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
+use arrow_array::types::{
+    Float32Type, Float64Type, Int16Type, Int32Type, Int64Type, Int8Type, UInt16Type, UInt32Type,
+    UInt64Type, UInt8Type,
+};
+use arrow_array::{Array, ArrayRef, PrimitiveArray};
+use arrow_buffer::Buffer;
+use arrow_data::ArrayData;
 use arrow_schema::{DataType, Field, Schema};
 
 use arrow_ipc::reader::{FileReader, StreamReader};
@@ -388,6 +395,182 @@ pub fn ipc_writer_to_file<'a>(
         return err_encode(env, &e.to_string());
     }
     rustler::types::atom::Atom::from_str(env, "ok").unwrap().encode(env)
+}
+
+// ── Nx support NIFs ──────────────────────────────────────────────────────────
+
+/// Extract a numeric column from a record batch as raw little-endian bytes for `Nx.from_binary/2`.
+///
+/// Returns `{:ok, {binary, type_string, num_rows}}` or `{:error, msg}`.
+///
+/// `type_string` is one of `"s8"`, `"s16"`, `"s32"`, `"s64"`, `"u8"`, `"u16"`,
+/// `"u32"`, `"u64"`, `"f32"`, `"f64"`.  Float columns use IEEE 754 native byte order.
+///
+/// Null/validity bitmaps are ignored — null positions are returned as zero bytes.
+#[rustler::nif]
+pub fn record_batch_column_buffer<'a>(
+    env: Env<'a>,
+    batch: ResourceArc<ExArrowRecordBatch>,
+    col_name: String,
+) -> Term<'a> {
+    let schema = batch.batch.schema();
+    let col_idx = match schema.index_of(&col_name) {
+        Ok(i) => i,
+        Err(_) => return err_encode(env, &format!("column '{}' not found", col_name)),
+    };
+    let array = batch.batch.column(col_idx);
+    extract_primitive_buffer(env, array)
+}
+
+macro_rules! primitive_buffer {
+    ($env:expr, $array:expr, $ArrowType:ty, $dtype_str:expr) => {{
+        let arr: &PrimitiveArray<$ArrowType> = match $array.as_any().downcast_ref() {
+            Some(a) => a,
+            None => return err_encode($env, "internal: type downcast failed"),
+        };
+        let offset = arr.offset();
+        let len = arr.len();
+        let values = arr.values();
+        let slice = &values[offset..offset + len];
+        let byte_size =
+            std::mem::size_of::<<$ArrowType as arrow_array::types::ArrowPrimitiveType>::Native>();
+        // SAFETY: slice is a valid aligned slice of a numeric primitive type whose
+        // in-memory representation is exactly `len * byte_size` bytes.
+        let bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(slice.as_ptr() as *const u8, len * byte_size)
+        };
+        let mut owned = match rustler::OwnedBinary::new(bytes.len()) {
+            Some(b) => b,
+            None => return err_encode($env, "binary alloc"),
+        };
+        owned.as_mut_slice().copy_from_slice(bytes);
+        let binary = rustler::Binary::from_owned(owned, $env);
+        ok_encode($env, (binary, $dtype_str, len as u64))
+    }};
+}
+
+fn extract_primitive_buffer<'a>(env: Env<'a>, array: &ArrayRef) -> Term<'a> {
+    match array.data_type() {
+        DataType::Int8 => primitive_buffer!(env, array, Int8Type, "s8"),
+        DataType::Int16 => primitive_buffer!(env, array, Int16Type, "s16"),
+        DataType::Int32 => primitive_buffer!(env, array, Int32Type, "s32"),
+        DataType::Int64 => primitive_buffer!(env, array, Int64Type, "s64"),
+        DataType::UInt8 => primitive_buffer!(env, array, UInt8Type, "u8"),
+        DataType::UInt16 => primitive_buffer!(env, array, UInt16Type, "u16"),
+        DataType::UInt32 => primitive_buffer!(env, array, UInt32Type, "u32"),
+        DataType::UInt64 => primitive_buffer!(env, array, UInt64Type, "u64"),
+        DataType::Float32 => primitive_buffer!(env, array, Float32Type, "f32"),
+        DataType::Float64 => primitive_buffer!(env, array, Float64Type, "f64"),
+        dt => err_encode(env, &format!("unsupported column type for Nx: {:?}", dt)),
+    }
+}
+
+/// Create a single-column `RecordBatch` from raw bytes (the reverse of `record_batch_column_buffer`).
+///
+/// `dtype_str` must be one of `"s8"`, `"s16"`, `"s32"`, `"s64"`, `"u8"`, `"u16"`,
+/// `"u32"`, `"u64"`, `"f32"`, `"f64"`.
+///
+/// Returns `{:ok, batch_ref}` or `{:error, msg}`.
+#[rustler::nif]
+pub fn record_batch_from_column_binary<'a>(
+    env: Env<'a>,
+    col_name: String,
+    binary: rustler::Binary,
+    dtype_str: String,
+    length: u64,
+) -> Term<'a> {
+    let length = length as usize;
+    let bytes = binary.as_slice();
+
+    macro_rules! build_primitive_batch {
+        ($NativeType:ty, $ArrowDType:expr) => {{
+            let elem_size = std::mem::size_of::<$NativeType>();
+            if bytes.len() != length * elem_size {
+                return err_encode(
+                    env,
+                    &format!(
+                        "binary length mismatch: expected {} bytes ({} * {}), got {}",
+                        length * elem_size,
+                        length,
+                        elem_size,
+                        bytes.len()
+                    ),
+                );
+            }
+            let buf = Buffer::from_slice_ref(bytes);
+            let array_data = match ArrayData::builder($ArrowDType)
+                .len(length)
+                .add_buffer(buf)
+                .build()
+            {
+                Ok(d) => d,
+                Err(e) => return err_encode(env, &e.to_string()),
+            };
+            let array: ArrayRef = Arc::new(PrimitiveArray::<
+                <$NativeType as NativeTypeAlias>::ArrowType,
+            >::from(array_data));
+            array
+        }};
+    }
+
+    let array: ArrayRef = match dtype_str.as_str() {
+        "s8" => build_primitive_batch!(i8, DataType::Int8),
+        "s16" => build_primitive_batch!(i16, DataType::Int16),
+        "s32" => build_primitive_batch!(i32, DataType::Int32),
+        "s64" => build_primitive_batch!(i64, DataType::Int64),
+        "u8" => build_primitive_batch!(u8, DataType::UInt8),
+        "u16" => build_primitive_batch!(u16, DataType::UInt16),
+        "u32" => build_primitive_batch!(u32, DataType::UInt32),
+        "u64" => build_primitive_batch!(u64, DataType::UInt64),
+        "f32" => build_primitive_batch!(f32, DataType::Float32),
+        "f64" => build_primitive_batch!(f64, DataType::Float64),
+        other => return err_encode(env, &format!("unknown dtype '{}' for column creation", other)),
+    };
+
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        &col_name,
+        array.data_type().clone(),
+        false,
+    )]));
+    match RecordBatch::try_new(schema, vec![array]) {
+        Ok(batch) => ok_encode(env, ResourceArc::new(ExArrowRecordBatch { batch })),
+        Err(e) => err_encode(env, &e.to_string()),
+    }
+}
+
+// Helper trait to associate Rust native types with Arrow type markers.
+trait NativeTypeAlias {
+    type ArrowType: arrow_array::types::ArrowPrimitiveType;
+}
+impl NativeTypeAlias for i8 {
+    type ArrowType = Int8Type;
+}
+impl NativeTypeAlias for i16 {
+    type ArrowType = Int16Type;
+}
+impl NativeTypeAlias for i32 {
+    type ArrowType = Int32Type;
+}
+impl NativeTypeAlias for i64 {
+    type ArrowType = Int64Type;
+}
+impl NativeTypeAlias for u8 {
+    type ArrowType = UInt8Type;
+}
+impl NativeTypeAlias for u16 {
+    type ArrowType = UInt16Type;
+}
+impl NativeTypeAlias for u32 {
+    type ArrowType = UInt32Type;
+}
+impl NativeTypeAlias for u64 {
+    type ArrowType = UInt64Type;
+}
+impl NativeTypeAlias for f32 {
+    type ArrowType = Float32Type;
+}
+impl NativeTypeAlias for f64 {
+    type ArrowType = Float64Type;
 }
 
 /// Write schema and record batches in IPC file format (random-access footer). Returns :ok or {:error, msg}.
