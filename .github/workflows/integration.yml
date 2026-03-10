@@ -18,8 +18,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pg: ["14"]
-        # pg: ["14", "15", "16"]   # re-enable when PG 14 is stable
+        # pg: ["14"]
+        pg: ["14", "15", "16"]   # re-enable when PG 14 is stable
 
     services:
       postgres:
