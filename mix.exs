@@ -110,7 +110,7 @@ defmodule ExArrow.MixProject do
       ],
       groups_for_modules: [
         IPC: [ExArrow.IPC.Reader, ExArrow.IPC.Writer, ExArrow.IPC.File],
-        "Parquet": [ExArrow.Parquet.Reader, ExArrow.Parquet.Writer],
+        Parquet: [ExArrow.Parquet.Reader, ExArrow.Parquet.Writer],
         "Compute kernels": [ExArrow.Compute],
         Flight: [
           ExArrow.Flight.Client,
