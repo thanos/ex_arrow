@@ -57,10 +57,12 @@ defmodule ExArrow.ADBCIntegrationTest do
   # Open a connection and run `fun.(conn)`, closing everything afterwards.
   defp with_connection(db_opts, fun) do
     db_result = Database.open(db_opts)
+
     assert {:ok, db} = db_result,
            "Database.open failed with: #{inspect(db_result)}\n  opts: #{inspect(db_opts)}"
 
     conn_result = Connection.open(db)
+
     assert {:ok, conn} = conn_result,
            "Connection.open failed with: #{inspect(conn_result)}"
 
