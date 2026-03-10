@@ -215,5 +215,19 @@ jobs:
       - name: Compile
         run: mix compile --warnings-as-errors
 
+      - name: Verify DuckDB driver loads
+        run: |
+          mix run -e '
+            driver = System.fetch_env!("DUCKDB_DRIVER")
+            IO.puts("Driver path: #{driver}")
+            case ExArrow.ADBC.Database.open([driver_path: driver, uri: ":memory:"]) do
+              {:ok, _db} ->
+                IO.puts("DuckDB driver loaded OK")
+              {:error, msg} ->
+                IO.puts("DuckDB driver FAILED: #{msg}")
+                System.halt(1)
+            end
+          '
+
       - name: Run DuckDB integration tests
         run: mix test --include adbc_integration test/ex_arrow/adbc_integration_test.exs

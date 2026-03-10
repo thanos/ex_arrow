@@ -56,8 +56,14 @@ defmodule ExArrow.ADBCIntegrationTest do
 
   # Open a connection and run `fun.(conn)`, closing everything afterwards.
   defp with_connection(db_opts, fun) do
-    assert {:ok, db} = Database.open(db_opts)
-    assert {:ok, conn} = Connection.open(db)
+    db_result = Database.open(db_opts)
+    assert {:ok, db} = db_result,
+           "Database.open failed with: #{inspect(db_result)}\n  opts: #{inspect(db_opts)}"
+
+    conn_result = Connection.open(db)
+    assert {:ok, conn} = conn_result,
+           "Connection.open failed with: #{inspect(conn_result)}"
+
     result = fun.(conn)
     Connection.close(conn)
     Database.close(db)
@@ -153,7 +159,9 @@ defmodule ExArrow.ADBCIntegrationTest do
     defp duckdb_opts do
       [
         driver_path: env("DUCKDB_DRIVER"),
-        path: env("DUCKDB_DATABASE", ":memory:")
+        # DuckDB accepts "uri" as the option key for the database path.
+        # ":memory:" creates an in-memory database (no file on disk).
+        uri: env("DUCKDB_DATABASE", ":memory:")
       ]
     end
 
