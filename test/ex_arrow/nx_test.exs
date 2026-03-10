@@ -1,11 +1,11 @@
 defmodule ExArrow.NxTest do
   use ExUnit.Case, async: true
 
-  @moduletag :nx
-
   alias ExArrow.IPC
   alias ExArrow.Nx, as: ExArrowNx
   alias ExArrow.Stream
+
+  @moduletag :nx
 
   defp float64_batch do
     # Use the standard IPC fixture (id: int64, name: utf8)

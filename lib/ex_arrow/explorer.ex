@@ -49,7 +49,7 @@ defmodule ExArrow.Explorer do
         #=> 1_000_000
     """
     @spec from_stream(Stream.t()) :: {:ok, Explorer.DataFrame.t()} | {:error, String.t()}
-    def from_stream(%Stream{} = stream) do
+    def from_stream(stream) do
       with {:ok, schema} <- Stream.schema(stream),
            batches = Stream.to_list(stream),
            {:ok, binary} <- IPC.Writer.to_binary(schema, batches) do
@@ -74,7 +74,7 @@ defmodule ExArrow.Explorer do
     """
     @spec from_record_batch(RecordBatch.t()) ::
             {:ok, Explorer.DataFrame.t()} | {:error, String.t()}
-    def from_record_batch(%RecordBatch{} = batch) do
+    def from_record_batch(batch) do
       schema = RecordBatch.schema(batch)
 
       case IPC.Writer.to_binary(schema, [batch]) do

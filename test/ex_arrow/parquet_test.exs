@@ -11,7 +11,8 @@ defmodule ExArrow.ParquetTest do
     {:ok, ipc_bin} = ExArrow.Native.ipc_test_fixture_binary()
     {:ok, stream} = IPC.Reader.from_binary(ipc_bin)
     batch = Stream.next(stream)
-    {:ok, schema} = IPC.Reader.from_binary(ipc_bin) |> then(fn {:ok, s} -> Stream.schema(s) end)
+    {:ok, stream2} = IPC.Reader.from_binary(ipc_bin)
+    {:ok, schema} = Stream.schema(stream2)
     {schema, batch}
   end
 

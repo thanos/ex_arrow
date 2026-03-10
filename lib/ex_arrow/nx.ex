@@ -109,7 +109,7 @@ defmodule ExArrow.Nx do
     """
     @spec to_tensors(RecordBatch.t()) ::
             {:ok, %{String.t() => Nx.Tensor.t()}} | {:error, String.t()}
-    def to_tensors(%RecordBatch{} = batch) do
+    def to_tensors(batch) do
       schema = RecordBatch.schema(batch)
       fields = Schema.fields(schema)
 

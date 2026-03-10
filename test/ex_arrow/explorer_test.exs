@@ -1,12 +1,12 @@
 defmodule ExArrow.ExplorerTest do
   use ExUnit.Case, async: true
 
-  @moduletag :explorer
-
   alias ExArrow.Explorer, as: ExArrowExplorer
   alias ExArrow.IPC
   alias ExArrow.Schema
   alias ExArrow.Stream
+
+  @moduletag :explorer
 
   defp source_stream do
     {:ok, ipc_bin} = ExArrow.Native.ipc_test_fixture_binary()
@@ -64,7 +64,7 @@ defmodule ExArrow.ExplorerTest do
         df = Explorer.DataFrame.new(x: [10, 20], y: ["hello", "world"])
         assert {:ok, batches} = ExArrowExplorer.to_record_batches(df)
         assert is_list(batches)
-        assert length(batches) >= 1
+        assert batches != []
         total = Enum.sum(Enum.map(batches, &ExArrow.RecordBatch.num_rows/1))
         assert total == 2
       end
