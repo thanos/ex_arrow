@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773144792917,
+  "lastUpdate": 1773150157291,
   "repoUrl": "https://github.com/thanos/ex_arrow",
   "entries": {
     "ExArrow Benchmark Suite": [
@@ -535,6 +535,140 @@ window.BENCHMARK_DATA = {
           {
             "name": "[pipeline] file → Flight (zero-copy, 20 batches)",
             "value": 1554499,
+            "unit": "ns/op"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "thanosv@gmail.com",
+            "name": "thanos",
+            "username": "thanos"
+          },
+          "committer": {
+            "email": "thanosv@gmail.com",
+            "name": "thanos",
+            "username": "thanos"
+          },
+          "distinct": true,
+          "id": "d0749b68be5fa6ada0509f7cbd3b9c6318e1a6d7",
+          "message": "adbc_integration_test.exs\n+13\n-5\n    defp pg_opts do\n      [\n        driver_name: \"adbc_driver_postgresql\",\n        uri:\n          \"postgresql://#{env(\"PG_USER\", \"postgres\")}:#{env(\"PG_PASSWORD\", \"postgres\")}@#{env(\"PG_HOST\", \"localhost\")}:#{env(\"PG_PORT\", \"5432\")}/#{env(\"PG_DATABASE\", \"postgres\")}\"\n      ]\n    end\n    defp pg_opts do      [        driver_name: \"adbc_driver_postgresql\",        uri:          \"postgresql://#{env(\"PG_USER\", \"postgres\")}:#{env(\"PG_PASSWORD\", \"postgres\")}@#{env(\"PG_HOST\", \"localhost\")}:#{env(\"PG_PORT\", \"5432\")}/#{env(\"PG_DATABASE\", \"postgres\")}\"\n    defp pg_opts do\n      uri =\n        \"postgresql://#{env(\"PG_USER\", \"postgres\")}:#{env(\"PG_PASSWORD\", \"postgres\")}\" <>\n          \"@#{env(\"PG_HOST\", \"localhost\")}:#{env(\"PG_PORT\", \"5432\")}/#{env(\"PG_DATABASE\", \"postgres\")}\"\n\n      # Prefer an explicit driver path (set by CI); fall back to driver_name so\n      # the ADBC driver manager searches LD_LIBRARY_PATH / system paths.\n      driver_opt =\n        case env(\"PG_ADBC_DRIVER\") do\n          nil -> {:driver_name, \"adbc_driver_postgresql\"}\n          path -> {:driver_path, path}\n        end\n\n      [driver_opt, uri: uri]\n    end\n      [        driver_name: \"adbc_driver_postgresql\",        uri:          \"postgresql://#{env(\"PG_USER\", \"postgres\")}:#{env(\"PG_PASSWORD\", \"postgres\")}@#{env(\"PG_HOST\", \"localhost\")}:#{env(\"PG_PORT\", \"5432\")}/#{env(\"PG_DATABASE\", \"postgres\")}\"      ]    defp pg_opts do\nAlso update the module doc to reflect the new env var:\n\nadbc_integration_test.exs\n+16\n-11\n\n  | Variable       | Default         | Description            |\n  |----------------|-----------------|------------------------|\n  | `PG_HOST`      | `localhost`     | PostgreSQL host        |\n  | `PG_PORT`      | `5432`          | PostgreSQL port        |\n  | `PG_USER`      | `postgres`      | Username               |\n  | `PG_PASSWORD`  | `postgres`      | Password               |\n  | `PG_DATABASE`  | `postgres`      | Database name          |\n\n  ### DuckDB\n\n  | Variable           | Default      | Description                    |\n  |--------------------|--------------|--------------------------------|\n  | `DUCKDB_DRIVER`    | *(required)* | Path to `libduckdb_adbc.so`    |\n  | `DUCKDB_DATABASE`  | `:memory:`   | Database path (`\":memory:\"` ok)|\n\n  | Variable       | Default         | Description            |  |----------------|-----------------|------------------------|  | `PG_HOST`      | `localhost`     | PostgreSQL host        |  | `PG_PORT`      | `5432`          | PostgreSQL port        |\n\n  | Variable          | Default         | Description                          |\n  |-------------------|-----------------|--------------------------------------|\n  | `PG_HOST`         | `localhost`     | PostgreSQL host                      |\n  | `PG_PORT`         | `5432`          | PostgreSQL port                      |\n  | `PG_USER`         | `postgres`      | Username                             |\n  | `PG_PASSWORD`     | `postgres`      | Password                             |\n  | `PG_DATABASE`     | `postgres`      | Database name                        |\n  | `PG_ADBC_DRIVER`  | *(optional)*    | Explicit path to ADBC PG driver `.so`|\n\n  When `PG_ADBC_DRIVER` is not set the driver is looked up by name\n  (`adbc_driver_postgresql`) via the system library search path.\n  CI sets this variable by installing `adbc-driver-postgresql` via pip.\n\n  ### DuckDB\n\n  | Variable           | Default      | Description                         |\n  |--------------------|--------------|-------------------------------------|\n  | `DUCKDB_DRIVER`    | *(required)* | Path to `libduckdb.so`              |\n  | `DUCKDB_DATABASE`  | `:memory:`   | Database path (`\":memory:\"` ok)     |\n\n  | Variable       | Default         | Description            |  |----------------|-----------------|------------------------|  | `PG_HOST`      | `localhost`     | PostgreSQL host        |  | `PG_PORT`      | `5432`          | PostgreSQL port        |  | `PG_USER`      | `postgres`      | Username               |  | `PG_PASSWORD`  | `postgres`      | Password               |  | `PG_DATABASE`  | `postgres`      | Database name          |\nNow rewrite the PostgreSQL driver download step in the CI workflow:\n\nintegration.yml\n+16\n-12\n\n      # The ADBC PostgreSQL driver is provided by the adbc Hex package (livebook-dev/adbc).\n      # We download the driver binary at test time via ADBC package manager.\n      - name: Download ADBC PostgreSQL driver\n        run: |\n          mix run -e '\n            {:ok, _} = Application.ensure_all_started(:adbc)\n            {:ok, path} = Adbc.download_driver(:postgresql)\n            IO.puts(\"PG driver: #{path}\")\n            System.put_env(\"PG_ADBC_DRIVER\", path)\n          ' || true\n          # Fallback: try system libadbc_driver_postgresql\n          if [ -z \"$PG_ADBC_DRIVER\" ]; then\n            echo \"PG_ADBC_DRIVER not set from adbc package; using driver_name fallback\"\n          fi\n\n      # The ADBC PostgreSQL driver is provided by the adbc Hex package (livebook-dev/adbc).      # We download the driver binary at test time via ADBC package manager.\n\n      # Install the official Apache ADBC PostgreSQL driver via pip.\n      # The Python wheel ships a precompiled libadbc_driver_postgresql.so that\n      # we can pass directly as driver_path — no system-wide install needed.\n      - name: Download ADBC PostgreSQL driver\n        run: |\n          pip3 install --quiet \"adbc-driver-postgresql\"\n          DRIVER_PATH=$(python3 - <<'PYEOF'\nimport adbc_driver_postgresql, pathlib, sys\npkg = pathlib.Path(adbc_driver_postgresql.__file__).parent\ncandidates = list(pkg.glob(\"*.so*\")) + list(pkg.glob(\"lib/*.so*\"))\nif not candidates:\n    sys.exit(\"Could not find libadbc_driver_postgresql.so in pip package\")\nprint(candates[0])\nPYEOF\n          )\n          echo \"Found PG ADBC driver: $DRIVER_PATH\"\n          echo \"PG_ADBC_DRIVER=$DRIVER_PATH\" >> \"$GITHUB_ENV\"\n\n      # The ADBC PostgreSQL driver is provided by the adbc Hex package (livebook-dev/adbc).      # We download the driver binary at test time via ADBC package manager.      # Install the official Apache ADBC PostgreSQL driver via pip.      # The Python wheel ships a precompiled libadbc_driver_postgresql.so that\nLet me verify the final state of both files:\n\nClean. Here's a summary of what changed and why:\n\nBug 1 — ExUnit.SkipError.exception/1 is undefined (broke every test)\n\nThe root cause is how Elixir's raise/2 macro works:\n\nraise ExUnit.SkipError, \"some message\"\nExUnit.SkipError is defined withefexception [:message], so exception/1 only accepts a keyword list ([message: ...]), not a bare string. The fix is to raise the struct directly, bypassing exception/1:\n\nraise %ExUnit.SkipError{message: \"...\"}\nThis also explains why the DuckDB tests were failing in the PostgreSQL CI job — when the DuckDB setup tried to skip (because DUCKDB_DRIVER wasn't t), the crash propagated and failed the whole suite instead of skipping.\n\nBug 2 — PostgreSQL driver not found\n\nThe old step ran System.put_env(\"PG_ADBC_DRIVE, path) inside a short-lived mix run process. That call only mutates the environment of that process, which exits immediately. The subsequent mix test step never sees the variable.\n\nThe new approach:\n\nInstalls adbc-driver-postgresql via pip — the official Apache ADBC Python wheel that ships libadbc_driver_postgresql.so for Linux x86_64\nFinds the .so with a short Python snippet and writes it to $GITHUB_ENV, which is GitHub Actions' mechanism for persisting env vars across steps\nThe test's pg_opts/0 now reads PG_ADBC_DRIVER and uses driver_path: when it's set, falling back to driver_name: for local dev where the driver may already be on the library path",
+          "timestamp": "2026-03-10T09:37:20-04:00",
+          "tree_id": "77e523ad86326ff9d8ae20e23ce1e2b2110e898b",
+          "url": "https://github.com/thanos/ex_arrow/commit/d0749b68be5fa6ada0509f7cbd3b9c6318e1a6d7"
+        },
+        "date": 1773150156796,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "[adbc] Enum.map (comparable row-oriented)",
+            "value": 456,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[adbc] open ipc stream (20 batches)",
+            "value": 2265,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[adbc] stream schema peek (20 batches)",
+            "value": 2517,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[adbc] stream collect all batches (20 batches)",
+            "value": 37378,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[flight] list_flights",
+            "value": 204841,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[flight] do_put (10 batches)",
+            "value": 692574,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[flight] do_get stream_handle only (10 batches)",
+            "value": 40656943,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[flight] do_get + collect (10 batches)",
+            "value": 40990736,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[flight] roundtrip put→get (10 batches)",
+            "value": 41999868,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] stream_handle (10 batches)",
+            "value": 1949,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] stream_handle (50 batches)",
+            "value": 3882,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] from_file handle (50 batches)",
+            "value": 6374,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] materialise (10 batches)",
+            "value": 20054,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] materialise (50 batches)",
+            "value": 89298,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] from_file + materialise (50 batches)",
+            "value": 103666,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_write] term_to_binary (100 rows, 3 fields)",
+            "value": 9845,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_write] ipc to_binary (10 batches)",
+            "value": 16413,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_write] ipc to_binary (50 batches)",
+            "value": 75012,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_write] ipc to_file (50 batches)",
+            "value": 622415,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[pipeline] materialise → Flight (20 batches)",
+            "value": 1490072,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[pipeline] binary → Flight (20 batches)",
+            "value": 1553829,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[pipeline] file → Flight (zero-copy, 20 batches)",
+            "value": 1609174,
             "unit": "ns/op"
           }
         ]
