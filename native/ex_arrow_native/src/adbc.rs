@@ -51,7 +51,7 @@ pub struct AdbcResultStream {
 
 fn decode_driver_spec<'a>(term: Term<'a>) -> Result<DriverSpec, String> {
     if let Ok(path) = term.decode::<String>() {
-        return Ok(DriverSpec::Path(path));
+        return Ok(DriverSpec::Path { path, uri: None });
     }
     let list: rustler::types::list::ListIterator = term.decode().map_err(|_| "opts must be a list")?;
     let mut driver_path_val = None;
@@ -72,7 +72,7 @@ fn decode_driver_spec<'a>(term: Term<'a>) -> Result<DriverSpec, String> {
         }
     }
     if let Some(p) = driver_path_val {
-        Ok(DriverSpec::Path(p))
+        Ok(DriverSpec::Path { path: p, uri: uri_val })
     } else if let Some(n) = driver_name_val {
         Ok(DriverSpec::Name {
             name: n,
@@ -84,7 +84,8 @@ fn decode_driver_spec<'a>(term: Term<'a>) -> Result<DriverSpec, String> {
 }
 
 enum DriverSpec {
-    Path(String),
+    /// path to .so; optional uri passed to new_database_with_opts when present.
+    Path { path: String, uri: Option<String> },
     /// name: driver library name; uri: only set when caller provides :uri (no default).
     Name {
         name: String,
@@ -102,14 +103,23 @@ pub fn adbc_database_open<'a>(env: Env<'a>, driver_path_or_opts: Term<'a>) -> Te
     };
     let version = AdbcVersion::V100;
     let (driver, database) = match spec {
-        DriverSpec::Path(path) => {
+        DriverSpec::Path { path, uri } => {
             let mut d = match ManagedDriver::load_dynamic_from_filename(path, None, version) {
                 Ok(d) => d,
                 Err(e) => return err_encode(env, &e.to_string()),
             };
-            let db = match d.new_database() {
-                Ok(db) => db,
-                Err(e) => return err_encode(env, &e.to_string()),
+            let db = match uri {
+                Some(u) => {
+                    let opts = vec![(OptionDatabase::Uri, OptionValue::String(u))];
+                    match d.new_database_with_opts(opts) {
+                        Ok(db) => db,
+                        Err(e) => return err_encode(env, &e.to_string()),
+                    }
+                }
+                None => match d.new_database() {
+                    Ok(db) => db,
+                    Err(e) => return err_encode(env, &e.to_string()),
+                },
             };
             (d, db)
         }

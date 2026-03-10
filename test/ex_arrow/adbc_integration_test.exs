@@ -54,12 +54,13 @@ defmodule ExArrow.ADBCIntegrationTest do
 
   defp env(key, default \\ nil), do: System.get_env(key, default)
 
-  defp skip_unless_env!(key, label) do
-    unless System.get_env(key) do
-      # raise/2 calls ExUnit.SkipError.exception(opts).
-      # Must pass a keyword list — a bare string causes a runtime crash.
-      # This is identical to what the ExUnit.Case.skip/1 macro does internally.
-      raise ExUnit.SkipError, message: "#{label}: set #{key} env var to enable this test"
+  # Returns {:skip, message} when the env var is absent so the setup callback
+  # can propagate it straight to ExUnit — no internal exception module needed.
+  defp maybe_skip(key, label) do
+    if System.get_env(key) do
+      :ok
+    else
+      {:skip, "#{label}: set #{key} env var to enable this test"}
     end
   end
 
@@ -77,8 +78,7 @@ defmodule ExArrow.ADBCIntegrationTest do
 
   describe "PostgreSQL ADBC" do
     setup do
-      skip_unless_env!("PG_HOST", "PostgreSQL integration")
-      :ok
+      maybe_skip("PG_HOST", "PostgreSQL integration")
     end
 
     defp pg_opts do
@@ -151,8 +151,7 @@ defmodule ExArrow.ADBCIntegrationTest do
 
   describe "DuckDB ADBC" do
     setup do
-      skip_unless_env!("DUCKDB_DRIVER", "DuckDB integration")
-      :ok
+      maybe_skip("DUCKDB_DRIVER", "DuckDB integration")
     end
 
     defp duckdb_opts do
