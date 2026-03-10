@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773156212139,
+  "lastUpdate": 1773159004510,
   "repoUrl": "https://github.com/thanos/ex_arrow",
   "entries": {
     "ExArrow Benchmark Suite": [
@@ -1473,6 +1473,140 @@ window.BENCHMARK_DATA = {
           {
             "name": "[pipeline] materialise → Flight (20 batches)",
             "value": 1475607,
+            "unit": "ns/op"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "thanosv@gmail.com",
+            "name": "thanos",
+            "username": "thanos"
+          },
+          "committer": {
+            "email": "thanosv@gmail.com",
+            "name": "thanos",
+            "username": "thanos"
+          },
+          "distinct": true,
+          "id": "de63b684797bc8da3321f2bc32255210976cbf68",
+          "message": "fixing the duckdb tests",
+          "timestamp": "2026-03-10T12:03:45-04:00",
+          "tree_id": "ec59a0f3c314f8a4532f600bf90ecf0ad282b9ea",
+          "url": "https://github.com/thanos/ex_arrow/commit/de63b684797bc8da3321f2bc32255210976cbf68"
+        },
+        "date": 1773159003487,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "[adbc] Enum.map (comparable row-oriented)",
+            "value": 462,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[adbc] open ipc stream (20 batches)",
+            "value": 2260,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[adbc] stream schema peek (20 batches)",
+            "value": 2480,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[adbc] stream collect all batches (20 batches)",
+            "value": 37699,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[flight] list_flights",
+            "value": 203499,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[flight] do_put (10 batches)",
+            "value": 380703,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[flight] do_get stream_handle only (10 batches)",
+            "value": 40659047,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[flight] do_get + collect (10 batches)",
+            "value": 41001739,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[flight] roundtrip put→get (10 batches)",
+            "value": 41521475,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] stream_handle (10 batches)",
+            "value": 1917,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] stream_handle (50 batches)",
+            "value": 4321,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] from_file handle (50 batches)",
+            "value": 6304,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] materialise (10 batches)",
+            "value": 19621,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] materialise (50 batches)",
+            "value": 94483,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] from_file + materialise (50 batches)",
+            "value": 103596,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_write] term_to_binary (100 rows, 3 fields)",
+            "value": 10029,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_write] ipc to_binary (10 batches)",
+            "value": 15910,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_write] ipc to_binary (50 batches)",
+            "value": 72981,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_write] ipc to_file (50 batches)",
+            "value": 670653,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[pipeline] file → Flight (zero-copy, 20 batches)",
+            "value": 1484322,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[pipeline] materialise → Flight (20 batches)",
+            "value": 1484442,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[pipeline] binary → Flight (20 batches)",
+            "value": 1505129,
             "unit": "ns/op"
           }
         ]
