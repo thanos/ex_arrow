@@ -6,12 +6,11 @@
 name: Precompiled NIFs
 
 on:
-  # Tag push: full pipeline — build all NIFs, create GitHub release, publish to Hex.pm.
   push:
+    # Tag push  → full pipeline: build NIFs, create GitHub release, publish to Hex.pm.
+    # Branch push → build NIFs only (release/publish jobs are skipped; no tag ref).
     tags:
       - "v*"
-  # Branch push: build NIFs only (no release/publish) when native code changes.
-  push:
     branches:
       - main
     paths:
