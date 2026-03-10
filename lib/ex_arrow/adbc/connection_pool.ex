@@ -50,7 +50,7 @@ if Code.ensure_loaded?(NimblePool) do
 
     @behaviour NimblePool
 
-    alias ExArrow.ADBC.{Connection, Database, DatabaseServer, Statement}
+    alias ExArrow.ADBC.{Connection, DatabaseServer, Statement}
     alias ExArrow.Stream
 
     # Pool worker state: the open Database handle (shared) and the per-worker Connection.
@@ -151,11 +151,10 @@ if Code.ensure_loaded?(NimblePool) do
 
     @impl NimblePool
     def init_worker(db_or_name) do
-      db =
-        case db_or_name do
-          %Database{} = d -> d
-          name when is_atom(name) -> DatabaseServer.get(name)
-        end
+      # Resolve atom names to a Database handle without pattern-matching on the
+      # opaque struct internals (which would break the @opaque type contract and
+      # cause a Dialyzer call_without_opaque warning).
+      db = if is_atom(db_or_name), do: DatabaseServer.get(db_or_name), else: db_or_name
 
       case Connection.open(db) do
         {:ok, conn} -> {:ok, %Worker{db: db, conn: conn}, db_or_name}

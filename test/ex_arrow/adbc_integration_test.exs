@@ -51,7 +51,7 @@ defmodule ExArrow.ADBCIntegrationTest do
 
   defp skip_unless_env!(key, label) do
     unless System.get_env(key) do
-      ExUnit.skip("#{label}: set #{key} env var to enable this test")
+      raise ExUnit.SkipError, "#{label}: set #{key} env var to enable this test"
     end
   end
 

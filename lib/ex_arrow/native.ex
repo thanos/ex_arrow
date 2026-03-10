@@ -2,26 +2,27 @@ defmodule ExArrow.Native do
   @moduledoc false
 
   version = Mix.Project.config()[:version]
-  base_url = "https://github.com/thanos/ex_arrow/releases/download/v#{version}"
-
-  # Build from source when: EX_ARROW_BUILD set, base_url placeholder, or developing this project in dev/test.
-  # Replace "your-org" with your GitHub org before publishing releases.
-  force_build =
-    System.get_env("EX_ARROW_BUILD") in ["1", "true"] or
-      String.contains?(base_url, "your-org") or
-      (Mix.env() in [:dev, :test] and
-         try do
-           Mix.Project.get!().project()[:app] == :ex_arrow
-         rescue
-           _ -> false
-         end)
 
   use RustlerPrecompiled,
     otp_app: :ex_arrow,
     crate: "ex_arrow_native",
-    base_url: base_url,
-    force_build: force_build,
-    version: version
+    base_url: "https://github.com/thanos/ex_arrow/releases/download/v#{version}",
+    force_build: System.get_env("EX_ARROW_BUILD") in ["1", "true"],
+    version: version,
+    nif_versions: ["2.15", "2.16"],
+    targets: [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "aarch64-unknown-linux-gnu",
+      "aarch64-unknown-linux-musl",
+      "arm-unknown-linux-gnueabihf",
+      "riscv64gc-unknown-linux-gnu",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "x86_64-unknown-freebsd",
+      "x86_64-pc-windows-gnu",
+      "x86_64-pc-windows-msvc"
+    ]
 
   @doc false
   @spec nif_loaded?() :: boolean()

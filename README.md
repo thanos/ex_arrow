@@ -550,18 +550,7 @@ script/ci
 The items below represent the planned direction for ExArrow. Contributions are
 welcome for any of them.
 
-### Near-term (v0.2)
-
-- **TLS for Arrow Flight** — encrypted connections for non-loopback Flight
-endpoints (mTLS and system CA store).
-- **Flight server routing** — configurable ticket-to-dataset mapping so the
-built-in server can serve multiple named datasets, not just the last upload.
-- **Larger test matrix** — integration tests against PostgreSQL, DuckDB, and
-BigQuery ADBC drivers in CI.
-- **ADBC connection pooling** — first-class NimblePool-backed pool exposed
-through the public API.
-
-### Medium-term (v0.3)
+### Near-term (v0.3)
 
 - **Arrow compute kernels** — thin NIF bindings to `arrow-compute` for
 filter/project/sort on native buffers without materialising into BEAM.
@@ -613,8 +602,10 @@ platform or an unreleased version, the download fails. Set `EX_ARROW_BUILD=1`,
 install Rust, and run `mix compile` to build from source.
 
 **Is Arrow Flight over TLS supported?**
-Not yet. Flight in this release is plaintext only. Use on localhost or trusted
-networks. TLS is on the roadmap for v0.2.
+Yes, as of v0.2. Pass `tls: [cert_pem: ..., key_pem: ...]` to
+`Server.start_link/2` for one-way TLS, or add `ca_cert_pem:` for mutual TLS.
+The client automatically selects TLS for non-loopback hosts; use
+`tls: [ca_cert_pem: pem]` for a custom CA.
 
 **Which ADBC drivers are supported?**
 Any ADBC driver that provides a shared library — for example

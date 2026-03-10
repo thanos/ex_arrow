@@ -1,10 +1,13 @@
 defmodule ExArrow.MixProject do
   use Mix.Project
 
+  @version "0.2.0"
+  @source_url "https://github.com/thanos/ex_arrow"
+
   def project do
     [
       app: :ex_arrow,
-      version: "0.1.0",
+      version: @version,
       # Same as Explorer: support OTP 25 (NIF 2.15) and OTP 26 (NIF 2.16) users
       elixir: "~> 1.14",
       start_permanent: Mix.env() == :prod,
@@ -32,8 +35,9 @@ defmodule ExArrow.MixProject do
       licenses: ["MIT"],
       maintainers: ["Thanos Vassilakis"],
       links: %{
-        "GitHub" => "https://github.com/thanos/ex_arrow",
-        "Docs" => "https://hexdocs.pm/ex_arrow"
+        "GitHub" => @source_url,
+        "Docs" => "https://hexdocs.pm/ex_arrow",
+        "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
       },
       files: [
         "lib",
@@ -91,8 +95,8 @@ defmodule ExArrow.MixProject do
     [
       main: "overview",
       formatters: ["html"],
-      source_url: "https://github.com/thanos/ex_arrow",
-      source_ref: "main",
+      source_url: @source_url,
+      source_ref: "v#{@version}",
       extras: [
         "docs/overview.md",
         "docs/memory_model.md",
