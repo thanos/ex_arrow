@@ -15,20 +15,25 @@ defmodule ExArrow.ADBCIntegrationTest do
 
   ### PostgreSQL
 
-  | Variable       | Default         | Description            |
-  |----------------|-----------------|------------------------|
-  | `PG_HOST`      | `localhost`     | PostgreSQL host        |
-  | `PG_PORT`      | `5432`          | PostgreSQL port        |
-  | `PG_USER`      | `postgres`      | Username               |
-  | `PG_PASSWORD`  | `postgres`      | Password               |
-  | `PG_DATABASE`  | `postgres`      | Database name          |
+  | Variable          | Default         | Description                          |
+  |-------------------|-----------------|--------------------------------------|
+  | `PG_HOST`         | `localhost`     | PostgreSQL host                      |
+  | `PG_PORT`         | `5432`          | PostgreSQL port                      |
+  | `PG_USER`         | `postgres`      | Username                             |
+  | `PG_PASSWORD`     | `postgres`      | Password                             |
+  | `PG_DATABASE`     | `postgres`      | Database name                        |
+  | `PG_ADBC_DRIVER`  | *(optional)*    | Explicit path to ADBC PG driver `.so`|
+
+  When `PG_ADBC_DRIVER` is not set the driver is looked up by name
+  (`adbc_driver_postgresql`) via the system library search path.
+  CI sets this variable by installing `adbc-driver-postgresql` via pip.
 
   ### DuckDB
 
-  | Variable           | Default      | Description                    |
-  |--------------------|--------------|--------------------------------|
-  | `DUCKDB_DRIVER`    | *(required)* | Path to `libduckdb_adbc.so`    |
-  | `DUCKDB_DATABASE`  | `:memory:`   | Database path (`":memory:"` ok)|
+  | Variable           | Default      | Description                         |
+  |--------------------|--------------|-------------------------------------|
+  | `DUCKDB_DRIVER`    | *(required)* | Path to `libduckdb.so`              |
+  | `DUCKDB_DATABASE`  | `:memory:`   | Database path (`":memory:"` ok)     |
 
   ## Running locally
 
@@ -51,7 +56,12 @@ defmodule ExArrow.ADBCIntegrationTest do
 
   defp skip_unless_env!(key, label) do
     unless System.get_env(key) do
-      raise ExUnit.SkipError, "#{label}: set #{key} env var to enable this test"
+      # raise/2 calls ExUnit.SkipError.exception(arg) which requires a keyword
+      # list; a bare string causes UndefinedFunctionError.  Use the struct
+      # directly instead.
+      raise %ExUnit.SkipError{
+        message: "#{label}: set #{key} env var to enable this test"
+      }
     end
   end
 
@@ -74,11 +84,19 @@ defmodule ExArrow.ADBCIntegrationTest do
     end
 
     defp pg_opts do
-      [
-        driver_name: "adbc_driver_postgresql",
-        uri:
-          "postgresql://#{env("PG_USER", "postgres")}:#{env("PG_PASSWORD", "postgres")}@#{env("PG_HOST", "localhost")}:#{env("PG_PORT", "5432")}/#{env("PG_DATABASE", "postgres")}"
-      ]
+      uri =
+        "postgresql://#{env("PG_USER", "postgres")}:#{env("PG_PASSWORD", "postgres")}" <>
+          "@#{env("PG_HOST", "localhost")}:#{env("PG_PORT", "5432")}/#{env("PG_DATABASE", "postgres")}"
+
+      # Prefer an explicit driver path (set by CI); fall back to driver_name so
+      # the ADBC driver manager searches LD_LIBRARY_PATH / system paths.
+      driver_opt =
+        case env("PG_ADBC_DRIVER") do
+          nil -> {:driver_name, "adbc_driver_postgresql"}
+          path -> {:driver_path, path}
+        end
+
+      [driver_opt, uri: uri]
     end
 
     test "connect, create table, insert and query rows" do

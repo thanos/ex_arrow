@@ -79,20 +79,24 @@ jobs:
       - name: Compile
         run: mix compile --warnings-as-errors
 
-      # The ADBC PostgreSQL driver is provided by the adbc Hex package (livebook-dev/adbc).
-      # We download the driver binary at test time via ADBC package manager.
+      # Install the official Apache ADBC PostgreSQL driver via pip.
+      # The Python wheel ships a precompiled libadbc_driver_postgresql.so that
+      # we can pass directly as driver_path — no system-wide install needed.
       - name: Download ADBC PostgreSQL driver
         run: |
-          mix run -e '
-            {:ok, _} = Application.ensure_all_started(:adbc)
-            {:ok, path} = Adbc.download_driver(:postgresql)
-            IO.puts("PG driver: #{path}")
-            System.put_env("PG_ADBC_DRIVER", path)
-          ' || true
-          # Fallback: try system libadbc_driver_postgresql
-          if [ -z "$PG_ADBC_DRIVER" ]; then
-            echo "PG_ADBC_DRIVER not set from adbc package; using driver_name fallback"
-          fi
+          pip3 install --quiet "adbc-driver-postgresql"
+          DRIVER_PATH=$(python3 - <<'PYEOF'
+import adbc_driver_postgresql, pathlib, sys
+pkg = pathlib.Path(adbc_driver_postgresql.__file__).parent
+# The .so may be directly in the package dir or under lib/
+candidates = list(pkg.glob("*.so*")) + list(pkg.glob("lib/*.so*"))
+if not candidates:
+    sys.exit("Could not find libadbc_driver_postgresql.so in pip package")
+print(candidates[0])
+PYEOF
+          )
+          echo "Found PG ADBC driver: $DRIVER_PATH"
+          echo "PG_ADBC_DRIVER=$DRIVER_PATH" >> "$GITHUB_ENV"
 
       - name: Run PostgreSQL integration tests
         run: mix test --include adbc_integration test/ex_arrow/adbc_integration_test.exs
