@@ -20,6 +20,7 @@ rustler::atoms! {
     driver_name,
     uri,
     entrypoint,
+    path,
 }
 
 // ── Resources ───────────────────────────────────────────────────────────────
@@ -52,12 +53,13 @@ pub struct AdbcResultStream {
 
 fn decode_driver_spec<'a>(term: Term<'a>) -> Result<DriverSpec, String> {
     if let Ok(path) = term.decode::<String>() {
-        return Ok(DriverSpec::Path { path, uri: None, entrypoint: None });
+        return Ok(DriverSpec::Path { path, uri: None, db_path: None, entrypoint: None });
     }
     let list: rustler::types::list::ListIterator = term.decode().map_err(|_| "opts must be a list")?;
     let mut driver_path_val = None;
     let mut driver_name_val = None;
     let mut uri_val = None;
+    let mut db_path_val: Option<String> = None;
     let mut entrypoint_val: Option<String> = None;
     for item in list {
         let tuple = rustler::types::tuple::get_tuple(item).map_err(|_| "opt must be {key, value}")?;
@@ -71,12 +73,15 @@ fn decode_driver_spec<'a>(term: Term<'a>) -> Result<DriverSpec, String> {
             driver_name_val = Some(tuple[1].decode::<String>().map_err(|_| "driver_name must be string")?);
         } else if key == uri() {
             uri_val = Some(tuple[1].decode::<String>().map_err(|_| "uri must be string")?);
+        } else if key == path() {
+            // Driver-specific database path (e.g. DuckDB uses "path", not "uri").
+            db_path_val = Some(tuple[1].decode::<String>().map_err(|_| "path must be string")?);
         } else if key == entrypoint() {
             entrypoint_val = Some(tuple[1].decode::<String>().map_err(|_| "entrypoint must be string")?);
         }
     }
     if let Some(p) = driver_path_val {
-        Ok(DriverSpec::Path { path: p, uri: uri_val, entrypoint: entrypoint_val })
+        Ok(DriverSpec::Path { path: p, uri: uri_val, db_path: db_path_val, entrypoint: entrypoint_val })
     } else if let Some(n) = driver_name_val {
         Ok(DriverSpec::Name { name: n, uri: uri_val })
     } else {
@@ -85,8 +90,8 @@ fn decode_driver_spec<'a>(term: Term<'a>) -> Result<DriverSpec, String> {
 }
 
 enum DriverSpec {
-    /// path to .so; optional entrypoint (default: "AdbcDriverInit"); optional uri.
-    Path { path: String, uri: Option<String>, entrypoint: Option<String> },
+    /// path to .so; optional entrypoint (default: "AdbcDriverInit"); optional uri or db_path.
+    Path { path: String, uri: Option<String>, db_path: Option<String>, entrypoint: Option<String> },
     /// name: driver library name; uri: only set when caller provides :uri (no default).
     Name {
         name: String,
@@ -104,24 +109,30 @@ pub fn adbc_database_open<'a>(env: Env<'a>, driver_path_or_opts: Term<'a>) -> Te
     };
     let version = AdbcVersion::V100;
     let (driver, database) = match spec {
-        DriverSpec::Path { path, uri, entrypoint } => {
+        DriverSpec::Path { path, uri, db_path, entrypoint } => {
             let ep: Option<&[u8]> = entrypoint.as_deref().map(|s| s.as_bytes());
             let mut d = match ManagedDriver::load_dynamic_from_filename(path, ep, version) {
                 Ok(d) => d,
                 Err(e) => return err_encode(env, &e.to_string()),
             };
-            let db = match uri {
-                Some(u) => {
-                    let opts = vec![(OptionDatabase::Uri, OptionValue::String(u))];
-                    match d.new_database_with_opts(opts) {
-                        Ok(db) => db,
-                        Err(e) => return err_encode(env, &e.to_string()),
-                    }
-                }
-                None => match d.new_database() {
+            // Build database options: uri (ADBC standard) and/or path (driver-specific, e.g. DuckDB).
+            let mut db_opts: Vec<(OptionDatabase, OptionValue)> = Vec::new();
+            if let Some(u) = uri {
+                db_opts.push((OptionDatabase::Uri, OptionValue::String(u)));
+            }
+            if let Some(p) = db_path {
+                db_opts.push((OptionDatabase::Other("path".to_string()), OptionValue::String(p)));
+            }
+            let db = if db_opts.is_empty() {
+                match d.new_database() {
                     Ok(db) => db,
                     Err(e) => return err_encode(env, &e.to_string()),
-                },
+                }
+            } else {
+                match d.new_database_with_opts(db_opts) {
+                    Ok(db) => db,
+                    Err(e) => return err_encode(env, &e.to_string()),
+                }
             };
             (d, db)
         }

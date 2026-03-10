@@ -163,8 +163,8 @@ defmodule ExArrow.ADBCIntegrationTest do
         driver_path: env("DUCKDB_DRIVER"),
         # DuckDB's ADBC entry point differs from the ADBC standard "AdbcDriverInit".
         entrypoint: "duckdb_adbc_init",
-        # DuckDB accepts "uri" as the option key for the database path.
-        uri: env("DUCKDB_DATABASE", ":memory:")
+        # DuckDB uses "path" (not "uri") for the database location.
+        path: env("DUCKDB_DATABASE", ":memory:")
       ]
     end
 

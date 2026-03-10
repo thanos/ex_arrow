@@ -229,7 +229,7 @@ jobs:
           mix run -e '
             driver = System.fetch_env!("DUCKDB_DRIVER")
             IO.puts("Driver path: #{driver}")
-            case ExArrow.ADBC.Database.open([driver_path: driver, entrypoint: "duckdb_adbc_init", uri: ":memory:"]) do
+            case ExArrow.ADBC.Database.open([driver_path: driver, entrypoint: "duckdb_adbc_init", path: ":memory:"]) do
               {:ok, _db} ->
                 IO.puts("DuckDB driver loaded OK")
               {:error, msg} ->
