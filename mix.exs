@@ -102,9 +102,33 @@ defmodule ExArrow.MixProject do
         "docs/overview.md",
         "docs/memory_model.md",
         "docs/ipc_guide.md",
+        "docs/parquet_guide.md",
+        "docs/compute_guide.md",
         "docs/flight_guide.md",
         "docs/adbc_guide.md",
         "docs/benchmarks.md"
+      ],
+      groups_for_modules: [
+        IPC: [ExArrow.IPC.Reader, ExArrow.IPC.Writer, ExArrow.IPC.File],
+        "Parquet": [ExArrow.Parquet.Reader, ExArrow.Parquet.Writer],
+        "Compute kernels": [ExArrow.Compute],
+        Flight: [
+          ExArrow.Flight.Client,
+          ExArrow.Flight.Server,
+          ExArrow.Flight.FlightInfo,
+          ExArrow.Flight.ActionType
+        ],
+        ADBC: [
+          ExArrow.ADBC.Database,
+          ExArrow.ADBC.Connection,
+          ExArrow.ADBC.Statement,
+          ExArrow.ADBC.ConnectionPool,
+          ExArrow.ADBC.DatabaseServer,
+          ExArrow.ADBC.DriverHelper,
+          ExArrow.ADBC.Error
+        ],
+        "Optional bridges": [ExArrow.Explorer, ExArrow.Nx],
+        "Core types": [ExArrow.Stream, ExArrow.RecordBatch, ExArrow.Schema, ExArrow.Field]
       ]
     ]
   end

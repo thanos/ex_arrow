@@ -2,29 +2,46 @@ defmodule ExArrow.Nx do
   @moduledoc """
   Bridge between ExArrow and Nx tensors.
 
-  Converts numeric Arrow columns to `Nx.Tensor` values (and back) by sharing
-  the raw byte buffer.  The buffer is copied once from native Arrow memory into
-  an Elixir binary, then handed directly to `Nx.from_binary/2` — no row-by-row
-  conversion or intermediate list materialisation.
+  Converts numeric Arrow columns to `Nx.Tensor` values (and back) by copying
+  the raw byte buffer once from native Arrow memory into an Elixir binary, then
+  handing it directly to `Nx.from_binary/2`.  No intermediate list
+  materialisation occurs.
 
-  Supported Arrow column types: `int8`, `int16`, `int32`, `int64`, `uint8`,
-  `uint16`, `uint32`, `uint64`, `float32`, `float64`.
+  Requires `{:nx, "~> 0.7"}` in your `mix.exs` dependencies.  When Nx is
+  absent every function returns `{:error, "Nx is not available..."}`.
 
-  Requires `{:nx, "~> 0.7"}` in your `mix.exs` dependencies.
+  ### Supported column types
 
-  ## Examples
+  | Arrow type        | Nx dtype     |
+  |-------------------|--------------|
+  | Int8              | `{:s, 8}`    |
+  | Int16             | `{:s, 16}`   |
+  | Int32             | `{:s, 32}`   |
+  | Int64             | `{:s, 64}`   |
+  | UInt8             | `{:u, 8}`    |
+  | UInt16            | `{:u, 16}`   |
+  | UInt32            | `{:u, 32}`   |
+  | UInt64            | `{:u, 64}`   |
+  | Float32           | `{:f, 32}`   |
+  | Float64           | `{:f, 64}`   |
 
-      # Arrow column → Nx tensor
-      {:ok, tensor} = ExArrow.Nx.column_to_tensor(batch, "price")
-      tensor |> Nx.mean() |> Nx.to_number()
+  Columns of other types (Utf8, Boolean, Timestamp, …) are not supported for
+  direct buffer extraction and return `{:error, "unsupported column type…"}`.
+  `to_tensors/1` silently skips non-numeric columns.
 
-      # All numeric columns → map of tensors
-      {:ok, tensors} = ExArrow.Nx.to_tensors(batch)
-      tensors["score"] |> Nx.sort()
+  ### Null handling
 
-      # Nx tensor → single-column RecordBatch
-      tensor = Nx.tensor([1.0, 2.0, 3.0], type: {:f, 64})
-      {:ok, batch} = ExArrow.Nx.from_tensor(tensor, "values")
+  Arrow null positions are treated as zero bytes in the extracted buffer.  If
+  your column contains nulls and you need to distinguish them, inspect the
+  original batch (null support may be added in a future release).
+
+  ## Quick example
+
+      # Read a batch, extract the "price" column as a float64 tensor
+      {:ok, stream}  = ExArrow.Parquet.Reader.from_file("/data/trades.parquet")
+      batch          = ExArrow.Stream.next(stream)
+      {:ok, tensor}  = ExArrow.Nx.column_to_tensor(batch, "price")
+      mean_price     = tensor |> Nx.mean() |> Nx.to_number()
   """
 
   alias ExArrow.Native
@@ -35,12 +52,31 @@ defmodule ExArrow.Nx do
 
   if @nx_available do
     @doc """
-    Convert a named numeric column from a `RecordBatch` to an `Nx.Tensor`.
+    Convert a named numeric column from `batch` to an `Nx.Tensor`.
 
-    The column buffer is copied once from native Arrow memory to an Elixir
-    binary, then passed to `Nx.from_binary/2`.  No list materialisation occurs.
+    The column's raw byte buffer is copied once from native Arrow memory into an
+    Elixir binary, then passed to `Nx.from_binary/2`.  No list materialisation
+    occurs.
 
     Returns `{:ok, tensor}` or `{:error, message}`.
+
+    ## Examples
+
+        # Extract an int64 column
+        {:ok, ids} = ExArrow.Nx.column_to_tensor(batch, "id")
+        Nx.type(ids)   #=> {:s, 64}
+        Nx.shape(ids)  #=> {1000}
+
+        # Extract a float64 column and compute the mean
+        {:ok, prices} = ExArrow.Nx.column_to_tensor(batch, "price")
+        Nx.mean(prices) |> Nx.to_number()
+
+        # Non-numeric column returns an error
+        {:error, msg} = ExArrow.Nx.column_to_tensor(batch, "name")
+        msg #=> "unsupported column type for Nx: Utf8"
+
+        # Unknown column returns an error
+        {:error, msg} = ExArrow.Nx.column_to_tensor(batch, "no_such_col")
     """
     @spec column_to_tensor(RecordBatch.t(), String.t()) ::
             {:ok, Nx.Tensor.t()} | {:error, String.t()}
@@ -58,10 +94,18 @@ defmodule ExArrow.Nx do
     end
 
     @doc """
-    Convert all numeric columns from a `RecordBatch` to a map of `Nx.Tensor` values.
+    Convert all numeric columns from `batch` to a map of `Nx.Tensor` values.
 
-    Non-numeric columns (strings, booleans, timestamps, etc.) are silently
-    skipped.  Returns `{:ok, %{column_name => tensor}}` or `{:error, message}`.
+    Non-numeric columns (Utf8, Boolean, Timestamp, etc.) are silently skipped.
+
+    Returns `{:ok, %{column_name => tensor}}` or `{:error, message}`.
+
+    ## Example
+
+        {:ok, tensors} = ExArrow.Nx.to_tensors(batch)
+        # tensors is a map: %{"price" => #Nx.Tensor<...>, "qty" => #Nx.Tensor<...>}
+        tensors["price"] |> Nx.sort()
+        Map.keys(tensors)  # only numeric columns are present
     """
     @spec to_tensors(RecordBatch.t()) ::
             {:ok, %{String.t() => Nx.Tensor.t()}} | {:error, String.t()}
@@ -69,33 +113,48 @@ defmodule ExArrow.Nx do
       schema = RecordBatch.schema(batch)
       fields = Schema.fields(schema)
 
-      result =
-        Enum.reduce_while(fields, {:ok, %{}}, fn field, {:ok, acc} ->
-          case column_to_tensor(batch, field.name) do
-            {:ok, tensor} ->
-              {:cont, {:ok, Map.put(acc, field.name, tensor)}}
+      Enum.reduce_while(fields, {:ok, %{}}, fn field, {:ok, acc} ->
+        case column_to_tensor(batch, field.name) do
+          {:ok, tensor} ->
+            {:cont, {:ok, Map.put(acc, field.name, tensor)}}
 
-            {:error, "unsupported column type" <> _} ->
-              # Skip non-numeric columns silently
-              {:cont, {:ok, acc}}
+          {:error, "unsupported column type" <> _} ->
+            {:cont, {:ok, acc}}
 
-            {:error, msg} ->
-              {:halt, {:error, msg}}
-          end
-        end)
-
-      result
+          {:error, msg} ->
+            {:halt, {:error, msg}}
+        end
+      end)
     end
 
     @doc """
-    Convert an `Nx.Tensor` (rank-1 or rank-2) to an `ExArrow.RecordBatch` with
-    a single column named `column_name`.
+    Convert an `Nx.Tensor` to a single-column `ExArrow.RecordBatch`.
 
-    The tensor's raw bytes are extracted via `Nx.to_binary/1` and passed to the
-    Arrow NIF.  For rank-2 tensors, all elements are written into a single flat
-    column (rows × columns flattened).
+    The tensor's raw bytes are extracted via `Nx.to_binary/1` and written into
+    a native Arrow array.  For rank-2 or higher-rank tensors, all elements are
+    flattened into a single 1-D column (`Nx.size(tensor)` elements).
+
+    Supported Nx dtypes: `{:s, 8|16|32|64}`, `{:u, 8|16|32|64}`,
+    `{:f, 32|64}`.  Other dtypes (e.g. `{:bf, 16}`, `{:c, 64}`) return
+    `{:error, "unsupported Nx dtype…"}`.
 
     Returns `{:ok, batch}` or `{:error, message}`.
+
+    ## Examples
+
+        # Float64 tensor → RecordBatch
+        tensor = Nx.tensor([1.0, 2.0, 3.0], type: {:f, 64})
+        {:ok, batch} = ExArrow.Nx.from_tensor(tensor, "weights")
+        ExArrow.RecordBatch.num_rows(batch)  #=> 3
+
+        # Round-trip: tensor → batch → tensor
+        original = Nx.tensor([10, 20, 30], type: {:s, 64})
+        {:ok, batch}     = ExArrow.Nx.from_tensor(original, "vals")
+        {:ok, recovered} = ExArrow.Nx.column_to_tensor(batch, "vals")
+        Nx.to_list(recovered)  #=> [10, 20, 30]
+
+        # Unsupported dtype
+        {:error, msg} = ExArrow.Nx.from_tensor(Nx.tensor([1, 2], type: {:bf, 16}), "x")
     """
     @spec from_tensor(Nx.Tensor.t(), String.t()) ::
             {:ok, RecordBatch.t()} | {:error, String.t()}
