@@ -143,6 +143,16 @@ jobs:
           restore-keys: |
             mix-build-test-${{ matrix.otp }}-${{ matrix.elixir }}-
 
+      - name: Restore Cargo registry cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ hashFiles('native/ex_arrow_native/Cargo.lock') }}
+          restore-keys: |
+            cargo-registry-
+
       - name: Restore Rust target cache
         uses: actions/cache@v4
         with:
