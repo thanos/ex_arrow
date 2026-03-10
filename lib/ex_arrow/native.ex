@@ -1,28 +1,33 @@
 defmodule ExArrow.Native do
   @moduledoc false
 
-  version = Mix.Project.config()[:version]
+  # Setting EX_ARROW_SKIP_NIF=1 disables RustlerPrecompiled entirely — no download
+  # attempted, all functions fall through to the :nif_not_loaded stubs below.
+  # ex_arrow's CI uses this for the lint/format/dialyzer/docs jobs that don't need the NIF.
+  unless System.get_env("EX_ARROW_SKIP_NIF") in ["1", "true"] do
+    version = Mix.Project.config()[:version]
 
-  use RustlerPrecompiled,
-    otp_app: :ex_arrow,
-    crate: "ex_arrow_native",
-    base_url: "https://github.com/thanos/ex_arrow/releases/download/v#{version}",
-    force_build: System.get_env("EX_ARROW_BUILD") in ["1", "true"],
-    version: version,
-    nif_versions: ["2.15", "2.16"],
-    targets: [
-      "aarch64-apple-darwin",
-      "x86_64-apple-darwin",
-      "aarch64-unknown-linux-gnu",
-      "aarch64-unknown-linux-musl",
-      "arm-unknown-linux-gnueabihf",
-      "riscv64gc-unknown-linux-gnu",
-      "x86_64-unknown-linux-gnu",
-      "x86_64-unknown-linux-musl",
-      "x86_64-unknown-freebsd",
-      "x86_64-pc-windows-gnu",
-      "x86_64-pc-windows-msvc"
-    ]
+    use RustlerPrecompiled,
+      otp_app: :ex_arrow,
+      crate: "ex_arrow_native",
+      base_url: "https://github.com/thanos/ex_arrow/releases/download/v#{version}",
+      force_build: System.get_env("EX_ARROW_BUILD") in ["1", "true"],
+      version: version,
+      nif_versions: ["2.15", "2.16"],
+      targets: [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-unknown-linux-musl",
+        "arm-unknown-linux-gnueabihf",
+        "riscv64gc-unknown-linux-gnu",
+        "x86_64-unknown-linux-gnu",
+        "x86_64-unknown-linux-musl",
+        "x86_64-unknown-freebsd",
+        "x86_64-pc-windows-gnu",
+        "x86_64-pc-windows-msvc"
+      ]
+  end
 
   @doc false
   @spec nif_loaded?() :: boolean()
