@@ -54,16 +54,6 @@ defmodule ExArrow.ADBCIntegrationTest do
 
   defp env(key, default \\ nil), do: System.get_env(key, default)
 
-  # Returns {:skip, message} when the env var is absent so the setup callback
-  # can propagate it straight to ExUnit — no internal exception module needed.
-  defp maybe_skip(key, label) do
-    if System.get_env(key) do
-      :ok
-    else
-      {:skip, "#{label}: set #{key} env var to enable this test"}
-    end
-  end
-
   # Open a connection and run `fun.(conn)`, closing everything afterwards.
   defp with_connection(db_opts, fun) do
     assert {:ok, db} = Database.open(db_opts)
@@ -77,8 +67,11 @@ defmodule ExArrow.ADBCIntegrationTest do
   # ── PostgreSQL ────────────────────────────────────────────────────────────────
 
   describe "PostgreSQL ADBC" do
-    setup do
-      maybe_skip("PG_HOST", "PostgreSQL integration")
+    # Evaluated at compile time: skip the whole describe block when PG_HOST is
+    # not set.  Runtime skip helpers (raise/throw) are unreliable in setup
+    # callbacks across ExUnit versions; @describetag is guaranteed to work.
+    unless System.get_env("PG_HOST") do
+      @describetag skip: "set PG_HOST env var to enable PostgreSQL integration tests"
     end
 
     defp pg_opts do
@@ -138,11 +131,14 @@ defmodule ExArrow.ADBCIntegrationTest do
       end)
     end
 
-    test "get_table_types returns supported type strings" do
+    test "get_table_types returns a non-empty Arrow stream" do
       with_connection(pg_opts(), fn conn ->
-        assert {:ok, types} = Connection.get_table_types(conn)
-        assert is_list(types)
-        assert types != []
+        # get_table_types/1 returns {:ok, Stream.t()} per the ADBC spec.
+        assert {:ok, stream} = Connection.get_table_types(conn)
+        batches = ExArrow.Stream.to_list(stream)
+        assert batches != []
+        total_rows = Enum.sum(Enum.map(batches, &ExArrow.RecordBatch.num_rows/1))
+        assert total_rows > 0
       end)
     end
   end
@@ -150,8 +146,8 @@ defmodule ExArrow.ADBCIntegrationTest do
   # ── DuckDB ────────────────────────────────────────────────────────────────────
 
   describe "DuckDB ADBC" do
-    setup do
-      maybe_skip("DUCKDB_DRIVER", "DuckDB integration")
+    unless System.get_env("DUCKDB_DRIVER") do
+      @describetag skip: "set DUCKDB_DRIVER env var to enable DuckDB integration tests"
     end
 
     defp duckdb_opts do
