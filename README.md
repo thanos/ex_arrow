@@ -30,6 +30,7 @@ Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, and ADBC database
 - [Documentation](#documentation)
 - [Development](#development)
 - [Roadmap](#roadmap)
+  - [Shipped (v0.2.0)](#shipped-v020)
 - [FAQ](#faq)
 - [License](#license)
 
@@ -173,7 +174,7 @@ Add the dependency:
 
 ```elixir
 def deps do
-  [{:ex_arrow, "~> 0.1.0"}]
+  [{:ex_arrow, "~> 0.2.0"}]
 end
 ```
 
@@ -206,7 +207,7 @@ Mix.install([
 ```
 
 Alternatively, use the published Hex package so the precompiled NIF is used
-and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.1.0"}])`.
+and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.2.0"}])`.
 
 ---
 
@@ -308,9 +309,14 @@ n = ExArrow.IPC.File.batch_count(file)
 ```elixir
 {:ok, client} = ExArrow.Flight.Client.connect("localhost", 9999, [])
 
+# Put under a named ticket (multi-dataset routing, added in v0.2)
+:ok = ExArrow.Flight.Client.do_put(client, schema, [batch1, batch2],
+        descriptor: {:cmd, "sales_2024"})
+
+# Default ticket "echo" when no descriptor is given
 :ok = ExArrow.Flight.Client.do_put(client, schema, [batch1, batch2])
 
-{:ok, stream} = ExArrow.Flight.Client.do_get(client, "echo")
+{:ok, stream} = ExArrow.Flight.Client.do_get(client, "sales_2024")
 batch = ExArrow.Stream.next(stream)
 ```
 
@@ -322,9 +328,27 @@ batch = ExArrow.Stream.next(stream)
 {:ok, schema}  = ExArrow.Flight.Client.get_schema(client, {:cmd, "echo"})
 {:ok, actions} = ExArrow.Flight.Client.list_actions(client)
 {:ok, ["pong"]} = ExArrow.Flight.Client.do_action(client, "ping", <<>>)
+# List all stored datasets (v0.2+)
+{:ok, tickets} = ExArrow.Flight.Client.do_action(client, "list_tickets", <<>>)
 ```
 
-Flight is plaintext only in this release. Products that speak Arrow Flight
+**TLS (v0.2+):**
+
+```elixir
+# One-way TLS — server presents a certificate
+{:ok, server} = ExArrow.Flight.Server.start_link(9999,
+  tls: [cert_pem: File.read!("server.crt"), key_pem: File.read!("server.key")])
+
+# Mutual TLS — both sides present certificates
+{:ok, server} = ExArrow.Flight.Server.start_link(9999,
+  tls: [cert_pem: cert, key_pem: key, ca_cert_pem: File.read!("ca.crt")])
+
+# Client with custom CA
+{:ok, client} = ExArrow.Flight.Client.connect("host", 9999,
+  tls: [ca_cert_pem: File.read!("ca.crt")])
+```
+
+Plaintext continues to work as before. Products that speak Arrow Flight
 include Dremio, InfluxDB IOx, and custom analytics servers.
 
 ---
@@ -353,6 +377,52 @@ batch = ExArrow.Stream.next(stream)
 {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 ```
 
+**DuckDB:**
+
+DuckDB's ADBC driver uses `path` (not `uri`) for the database location, and
+requires an explicit `entrypoint`:
+
+```elixir
+{:ok, db} = ExArrow.ADBC.Database.open(
+  driver_path: "/usr/local/lib/libduckdb.so",
+  entrypoint: "duckdb_adbc_init",
+  path: ":memory:"                             # or a file path
+)
+{:ok, conn}   = ExArrow.ADBC.Connection.open(db)
+{:ok, stmt}   = ExArrow.ADBC.Statement.new(conn, "SELECT 42 AS answer")
+{:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
+batches = ExArrow.Stream.to_list(stream)
+```
+
+**Connection pool (v0.2+):**
+
+`ExArrow.ADBC.ConnectionPool` is a NimblePool-backed pool that reuses open
+connections. Start it under a supervisor with a named `DatabaseServer`:
+
+```elixir
+children = [
+  {ExArrow.ADBC.DatabaseServer,
+    name: :mydb,
+    driver_name: "adbc_driver_postgresql",
+    uri: "postgresql://localhost/mydb"},
+  {ExArrow.ADBC.ConnectionPool,
+    name: :mypool, database: :mydb, pool_size: 4}
+]
+Supervisor.start_link(children, strategy: :one_for_one)
+
+# Query from anywhere in the application:
+{:ok, stream} = ExArrow.ADBC.ConnectionPool.query(:mypool,
+                  "SELECT * FROM events WHERE day = today()")
+
+# Multi-statement checkout:
+ExArrow.ADBC.ConnectionPool.with_connection(:mypool, fn conn ->
+  {:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT count(*) FROM users")
+  ExArrow.ADBC.Statement.execute(stmt)
+end)
+```
+
+Requires `{:nimble_pool, "~> 1.1"}` in your `mix.exs`.
+
 **Metadata:**
 
 ```elixir
@@ -364,7 +434,7 @@ batch = ExArrow.Stream.next(stream)
 **Optional driver download via the `adbc` package:**
 
 ```elixir
-# Add {:adbc, "~> 0.7"} to deps, then:
+# Add {:adbc, "~> 0.9"} to deps, then:
 Adbc.download_driver!(:sqlite)
 {:ok, db} = ExArrow.ADBC.Database.open(driver_name: "adbc_driver_sqlite", uri: ":memory:")
 ```
@@ -550,6 +620,13 @@ script/ci
 The items below represent the planned direction for ExArrow. Contributions are
 welcome for any of them.
 
+### Shipped (v0.2.0)
+
+- **TLS for Arrow Flight** — one-way and mutual TLS on `Server.start_link/2`.
+- **Multi-dataset Flight server** — datasets stored by ticket; `do_put` accepts a `:descriptor` option.
+- **ADBC connection pool** — `ConnectionPool` and `DatabaseServer` backed by NimblePool.
+- **Broader integration test matrix** — PostgreSQL 14/15/16 and DuckDB 1.1.3/1.2.0 tested in CI.
+
 ### Near-term (v0.3)
 
 - **Arrow compute kernels** — thin NIF bindings to `arrow-compute` for
@@ -610,8 +687,11 @@ The client automatically selects TLS for non-loopback hosts; use
 **Which ADBC drivers are supported?**
 Any ADBC driver that provides a shared library — for example
 `adbc_driver_sqlite`, `adbc_driver_postgresql`, or the DuckDB ADBC driver. You
-must install the driver and pass its path, or ensure the driver manager can find
-it. Metadata and binding support depend on the individual driver.
+must install the driver and pass its path (`:driver_path`), or ensure the driver
+manager can find it by name (`:driver_name`). Some drivers require extra options:
+DuckDB expects `entrypoint: "duckdb_adbc_init"` and uses `path:` rather than
+`uri:` for the database location. Metadata and binding support depend on the
+individual driver.
 
 ---
 
