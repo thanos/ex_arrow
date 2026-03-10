@@ -215,12 +215,21 @@ jobs:
       - name: Compile
         run: mix compile --warnings-as-errors
 
+      - name: Inspect DuckDB driver symbols
+        run: |
+          echo "Driver: $DUCKDB_DRIVER"
+          ls -lh "$DUCKDB_DRIVER"
+          echo "--- ADBC entry points in libduckdb.so ---"
+          nm -D "$DUCKDB_DRIVER" 2>/dev/null | grep -iE "adbc|AdbcDriver" || echo "(no ADBC symbols found)"
+          echo "--- ctypes symbol check ---"
+          python3 -c "import ctypes; lib=ctypes.CDLL('$DUCKDB_DRIVER'); [print(s+': '+('found' if hasattr(lib,s) else 'NOT FOUND')) for s in ('AdbcDriverInit','duckdb_adbc_init')]" || echo "ctypes load failed"
+
       - name: Verify DuckDB driver loads
         run: |
           mix run -e '
             driver = System.fetch_env!("DUCKDB_DRIVER")
             IO.puts("Driver path: #{driver}")
-            case ExArrow.ADBC.Database.open([driver_path: driver, uri: ":memory:"]) do
+            case ExArrow.ADBC.Database.open([driver_path: driver, entrypoint: "duckdb_adbc_init", uri: ":memory:"]) do
               {:ok, _db} ->
                 IO.puts("DuckDB driver loaded OK")
               {:error, msg} ->

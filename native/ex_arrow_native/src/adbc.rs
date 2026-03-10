@@ -19,6 +19,7 @@ rustler::atoms! {
     driver_path,
     driver_name,
     uri,
+    entrypoint,
 }
 
 // ── Resources ───────────────────────────────────────────────────────────────
@@ -51,12 +52,13 @@ pub struct AdbcResultStream {
 
 fn decode_driver_spec<'a>(term: Term<'a>) -> Result<DriverSpec, String> {
     if let Ok(path) = term.decode::<String>() {
-        return Ok(DriverSpec::Path { path, uri: None });
+        return Ok(DriverSpec::Path { path, uri: None, entrypoint: None });
     }
     let list: rustler::types::list::ListIterator = term.decode().map_err(|_| "opts must be a list")?;
     let mut driver_path_val = None;
     let mut driver_name_val = None;
     let mut uri_val = None;
+    let mut entrypoint_val: Option<String> = None;
     for item in list {
         let tuple = rustler::types::tuple::get_tuple(item).map_err(|_| "opt must be {key, value}")?;
         if tuple.len() != 2 {
@@ -69,23 +71,22 @@ fn decode_driver_spec<'a>(term: Term<'a>) -> Result<DriverSpec, String> {
             driver_name_val = Some(tuple[1].decode::<String>().map_err(|_| "driver_name must be string")?);
         } else if key == uri() {
             uri_val = Some(tuple[1].decode::<String>().map_err(|_| "uri must be string")?);
+        } else if key == entrypoint() {
+            entrypoint_val = Some(tuple[1].decode::<String>().map_err(|_| "entrypoint must be string")?);
         }
     }
     if let Some(p) = driver_path_val {
-        Ok(DriverSpec::Path { path: p, uri: uri_val })
+        Ok(DriverSpec::Path { path: p, uri: uri_val, entrypoint: entrypoint_val })
     } else if let Some(n) = driver_name_val {
-        Ok(DriverSpec::Name {
-            name: n,
-            uri: uri_val,
-        })
+        Ok(DriverSpec::Name { name: n, uri: uri_val })
     } else {
         Err("opts must include driver_path or driver_name".to_string())
     }
 }
 
 enum DriverSpec {
-    /// path to .so; optional uri passed to new_database_with_opts when present.
-    Path { path: String, uri: Option<String> },
+    /// path to .so; optional entrypoint (default: "AdbcDriverInit"); optional uri.
+    Path { path: String, uri: Option<String>, entrypoint: Option<String> },
     /// name: driver library name; uri: only set when caller provides :uri (no default).
     Name {
         name: String,
@@ -103,8 +104,9 @@ pub fn adbc_database_open<'a>(env: Env<'a>, driver_path_or_opts: Term<'a>) -> Te
     };
     let version = AdbcVersion::V100;
     let (driver, database) = match spec {
-        DriverSpec::Path { path, uri } => {
-            let mut d = match ManagedDriver::load_dynamic_from_filename(path, None, version) {
+        DriverSpec::Path { path, uri, entrypoint } => {
+            let ep: Option<&[u8]> = entrypoint.as_deref().map(|s| s.as_bytes());
+            let mut d = match ManagedDriver::load_dynamic_from_filename(path, ep, version) {
                 Ok(d) => d,
                 Err(e) => return err_encode(env, &e.to_string()),
             };
