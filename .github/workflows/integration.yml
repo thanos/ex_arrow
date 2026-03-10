@@ -85,16 +85,7 @@ jobs:
       - name: Download ADBC PostgreSQL driver
         run: |
           pip3 install --quiet "adbc-driver-postgresql"
-          DRIVER_PATH=$(python3 - <<'PYEOF'
-import adbc_driver_postgresql, pathlib, sys
-pkg = pathlib.Path(adbc_driver_postgresql.__file__).parent
-# The .so may be directly in the package dir or under lib/
-candidates = list(pkg.glob("*.so*")) + list(pkg.glob("lib/*.so*"))
-if not candidates:
-    sys.exit("Could not find libadbc_driver_postgresql.so in pip package")
-print(candidates[0])
-PYEOF
-          )
+          DRIVER_PATH=$(python3 -c "import adbc_driver_postgresql, pathlib; p=pathlib.Path(adbc_driver_postgresql.__file__).parent; c=sorted(p.glob('*.so*'))+sorted(p.glob('lib/*.so*')); print(c[0]) if c else exit('no .so found in adbc-driver-postgresql')")
           echo "Found PG ADBC driver: $DRIVER_PATH"
           echo "PG_ADBC_DRIVER=$DRIVER_PATH" >> "$GITHUB_ENV"
 
