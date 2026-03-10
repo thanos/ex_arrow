@@ -34,6 +34,7 @@ Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, and ADBC database
 - [Development](#development)
 - [Roadmap](#roadmap)
   - [Shipped (v0.2.0)](#shipped-v020)
+  - [Shipped (v0.3.0)](#shipped-v030)
 - [FAQ](#faq)
 - [License](#license)
 
@@ -94,7 +95,7 @@ These libraries are complementary, not competing. Each has a distinct role.
 | Library                 | Role                                                                                                    | Overlap with ExArrow                                                                                                                                             |
 | ----------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Explorer**            | In-memory dataframe analysis (filter, group, sort, plot). Backed by Polars/Arrow internally.            | Explorer can load/dump Arrow IPC streams. ExArrow is the transport; Explorer is the analysis layer.                                                              |
-| **Nx**                  | Numerical computing and tensor operations (multi-dimensional arrays, GPU support, ML).                  | Nx tensors and Arrow columns are both typed flat arrays. There is currently no direct bridge, but ExArrow IPC can produce data for downstream tensor conversion. |
+| **Nx**                  | Numerical computing and tensor operations (multi-dimensional arrays, GPU support, ML).                  | `ExArrow.Nx` (v0.3+) converts Arrow numeric columns to `Nx.Tensor` values by sharing the raw byte buffer — no list materialisation. Add `{:nx, "~> 0.7"}` to enable. |
 | **adbc** (livebook-dev) | Elixir wrapper around the ADBC C library for driver management — downloading and configuring drivers.   | ExArrow uses `adbc` optionally for driver download; `adbc`'s core purpose is driver lifecycle, not Arrow streaming or Flight.                                    |
 | **ExZarr**              | Read/write Zarr v2/v3 chunked array format (used in climate science, genomics, cloud-native ND arrays). | Zarr and Arrow are complementary storage formats. ExZarr addresses ND chunk storage; ExArrow addresses columnar interchange and network transport.               |
 
@@ -177,7 +178,7 @@ Add the dependency:
 
 ```elixir
 def deps do
-  [{:ex_arrow, "~> 0.2.0"}]
+  [{:ex_arrow, "~> 0.3.0"}]
 end
 ```
 
@@ -210,7 +211,7 @@ Mix.install([
 ```
 
 Alternatively, use the published Hex package so the precompiled NIF is used
-and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.2.0"}])`.
+and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.3.0"}])`.
 
 ---
 
@@ -511,24 +512,37 @@ All operations run entirely in native memory. Results are new
 ## Using ExArrow with Explorer
 
 [Explorer](https://hex.pm/packages/explorer) handles in-memory analysis.
-ExArrow handles streaming and transport. They connect via Arrow IPC.
+ExArrow handles streaming and transport. Add `{:explorer, "~> 0.8"}` to your
+`mix.exs` to enable the bridge.
 
-**ExArrow to Explorer:**
+**ExArrow → Explorer** (one call, no boilerplate):
 
 ```elixir
 {:ok, stream} = ExArrow.IPC.Reader.from_file("/data/source.arrow")
-{:ok, schema} = ExArrow.Stream.schema(stream)
-batches =
-  Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end)
-  |> Enum.take_while(fn nil -> false; {:error, _} -> false; _ -> true end)
-{:ok, binary} = ExArrow.IPC.Writer.to_binary(schema, batches)
-df = Explorer.DataFrame.load_ipc_stream!(binary)
+{:ok, df}     = ExArrow.Explorer.from_stream(stream)
+Explorer.DataFrame.filter(df, score > 0.9)
 ```
 
-**Explorer to ExArrow:**
+**Single batch → DataFrame:**
+
+```elixir
+batch = ExArrow.Stream.next(stream)
+{:ok, df} = ExArrow.Explorer.from_record_batch(batch)
+```
+
+**Explorer → ExArrow** (e.g. to write to Parquet or send via Flight):
 
 ```elixir
 df = Explorer.DataFrame.new(x: [1, 2, 3], y: ["a", "b", "c"])
+{:ok, stream} = ExArrow.Explorer.to_stream(df)
+:ok = ExArrow.Parquet.Writer.to_file("/out/result.parquet",
+        ExArrow.Stream.schema(stream) |> elem(1),
+        ExArrow.Stream.to_list(stream))
+```
+
+**Manual path** (IPC round-trip, still works):
+
+```elixir
 binary = Explorer.DataFrame.dump_ipc_stream!(df)
 {:ok, stream} = ExArrow.IPC.Reader.from_binary(binary)
 batch = ExArrow.Stream.next(stream)
@@ -687,6 +701,8 @@ The CI workflow posts a PR alert comment when any scenario regresses more than
 
 - [Memory model](docs/memory_model.md) — handles, copying rules, NIF scheduling
 - [IPC guide](docs/ipc_guide.md) — stream vs file, types, limitations
+- [Parquet guide](docs/parquet_guide.md) — read/write Parquet, streaming, comparison with IPC
+- [Compute guide](docs/compute_guide.md) — filter, project, sort, chaining kernels
 - [Flight guide](docs/flight_guide.md) — server, client, timeouts, security
 - [ADBC guide](docs/adbc_guide.md) — driver loading, metadata, binding
 - [Benchmarks guide](docs/benchmarks.md) — suites, CI publishing, interpreting results
@@ -725,7 +741,7 @@ welcome for any of them.
 - **ADBC connection pool** — `ConnectionPool` and `DatabaseServer` backed by NimblePool.
 - **Broader integration test matrix** — PostgreSQL 14/15/16 and DuckDB 1.1.3/1.2.0 tested in CI.
 
-### Shipped (v0.3)
+### Shipped (v0.3.0)
 
 - **Arrow compute kernels** — `ExArrow.Compute.filter/2`, `project/2`, `sort/3`: filter, select columns, and sort record batches entirely in native Arrow buffers without materialising data into BEAM terms.
 - **Parquet support** — `ExArrow.Parquet.Reader` and `ExArrow.Parquet.Writer`: read and write Parquet files and in-memory binaries via the Arrow Rust `parquet` crate; streaming API compatible with IPC and ADBC streams.
@@ -769,11 +785,11 @@ when you only need normal SQL results. For Parquet-only workflows with no
 Flight/ADBC, consider Explorer's Parquet support first.
 
 **Can I use ExArrow and Explorer together?**
-Yes. ExArrow handles transport and protocol layers. Use
-`ExArrow.IPC.Writer.to_binary/2` to produce IPC, then
-`Explorer.DataFrame.load_ipc_stream!/1` to load it. In the other direction,
-`Explorer.DataFrame.dump_ipc_stream!/1` produces bytes that
-`ExArrow.IPC.Reader.from_binary/1` can read.
+Yes. Add `{:explorer, "~> 0.8"}` to your `mix.exs` and use `ExArrow.Explorer`
+(v0.3+) for one-call conversion: `ExArrow.Explorer.from_stream/1`,
+`from_record_batch/1`, `to_stream/1`. The bridge uses Arrow IPC internally;
+you can also do the round-trip manually with `ExArrow.IPC.Writer.to_binary/2`
+and `Explorer.DataFrame.load_ipc_stream!/1`.
 
 **Why do I get a 404 or "couldn't fetch NIF" on compile?**
 Precompiled NIFs are hosted on GitHub releases. If you are on an unsupported
