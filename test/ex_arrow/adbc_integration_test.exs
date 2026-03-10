@@ -56,12 +56,10 @@ defmodule ExArrow.ADBCIntegrationTest do
 
   defp skip_unless_env!(key, label) do
     unless System.get_env(key) do
-      # raise/2 calls ExUnit.SkipError.exception(arg) which requires a keyword
-      # list; a bare string causes UndefinedFunctionError.  Use the struct
-      # directly instead.
-      raise %ExUnit.SkipError{
-        message: "#{label}: set #{key} env var to enable this test"
-      }
+      # raise/2 calls ExUnit.SkipError.exception(opts).
+      # Must pass a keyword list — a bare string causes a runtime crash.
+      # This is identical to what the ExUnit.Case.skip/1 macro does internally.
+      raise ExUnit.SkipError, message: "#{label}: set #{key} env var to enable this test"
     end
   end
 
