@@ -56,9 +56,12 @@ defmodule ExArrow.Compute do
       {:ok, filtered} = ExArrow.Compute.filter(batch, mask)
       # filtered has the same columns as batch but only the rows where is_active = true
   """
-  @spec filter(RecordBatch.t(), RecordBatch.t()) ::
-          {:ok, RecordBatch.t()} | {:error, String.t()}
-  def filter(%RecordBatch{resource: b}, %RecordBatch{resource: p}) do
+
+  @spec filter(RecordBatch.t(), RecordBatch.t()) :: {:ok, RecordBatch.t()} | {:error, String.t()}
+  def filter(batch, predicate_batch) do
+    b = RecordBatch.resource_ref(batch)
+    p = RecordBatch.resource_ref(predicate_batch)
+
     case Native.compute_filter(b, p) do
       {:ok, ref} -> {:ok, RecordBatch.from_ref(ref)}
       {:error, msg} -> {:error, msg}
@@ -87,7 +90,9 @@ defmodule ExArrow.Compute do
   """
   @spec project(RecordBatch.t(), [String.t()]) ::
           {:ok, RecordBatch.t()} | {:error, String.t()}
-  def project(%RecordBatch{resource: b}, column_names) when is_list(column_names) do
+  def project(batch, column_names) when is_list(column_names) do
+    b = RecordBatch.resource_ref(batch)
+
     case Native.compute_project(b, column_names) do
       {:ok, ref} -> {:ok, RecordBatch.from_ref(ref)}
       {:error, msg} -> {:error, msg}
@@ -124,7 +129,8 @@ defmodule ExArrow.Compute do
   """
   @spec sort(RecordBatch.t(), String.t(), keyword()) ::
           {:ok, RecordBatch.t()} | {:error, String.t()}
-  def sort(%RecordBatch{resource: b}, column_name, opts \\ []) when is_binary(column_name) do
+  def sort(batch, column_name, opts \\ []) when is_binary(column_name) do
+    b = RecordBatch.resource_ref(batch)
     ascending = Keyword.get(opts, :ascending, true)
 
     case Native.compute_sort(b, column_name, ascending) do

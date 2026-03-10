@@ -44,8 +44,9 @@ defmodule ExArrow.Parquet.Writer do
       :ok = ExArrow.Parquet.Writer.to_file("/data/output.parquet", schema, batches)
   """
   @spec to_file(Path.t(), Schema.t(), [RecordBatch.t()]) :: :ok | {:error, String.t()}
-  def to_file(path, %Schema{resource: s}, batches)
+  def to_file(path, schema, batches)
       when is_binary(path) and is_list(batches) do
+    s = Schema.resource_ref(schema)
     batch_refs = Enum.map(batches, &RecordBatch.resource_ref/1)
 
     case Native.parquet_writer_to_file(path, s, batch_refs) do
@@ -71,7 +72,8 @@ defmodule ExArrow.Parquet.Writer do
       byte_size(bytes)  #=> e.g. 2048
   """
   @spec to_binary(Schema.t(), [RecordBatch.t()]) :: {:ok, binary()} | {:error, String.t()}
-  def to_binary(%Schema{resource: s}, batches) when is_list(batches) do
+  def to_binary(schema, batches) when is_list(batches) do
+    s = Schema.resource_ref(schema)
     batch_refs = Enum.map(batches, &RecordBatch.resource_ref/1)
 
     case Native.parquet_writer_to_binary(s, batch_refs) do

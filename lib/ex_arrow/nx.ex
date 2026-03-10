@@ -80,7 +80,9 @@ defmodule ExArrow.Nx do
     """
     @spec column_to_tensor(RecordBatch.t(), String.t()) ::
             {:ok, Nx.Tensor.t()} | {:error, String.t()}
-    def column_to_tensor(%RecordBatch{resource: ref}, col_name) when is_binary(col_name) do
+    def column_to_tensor(batch, col_name) when is_binary(col_name) do
+      ref = RecordBatch.resource_ref(batch)
+
       case Native.record_batch_column_buffer(ref, col_name) do
         {:ok, {binary, dtype_str, _length}} ->
           case parse_nx_dtype(dtype_str) do
