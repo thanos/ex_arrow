@@ -38,9 +38,9 @@ defmodule ExArrow.CDI do
   ## Explorer integration
 
   ExArrow's CDI layer provides the foundation for a future zero-copy Explorer
-  bridge.  When Explorer exposes a CDI import API (e.g.
-  `Explorer.DataFrame.from_arrow_cdi/2`), `ExArrow.Explorer` will automatically
-  use it instead of the current IPC round-trip.
+  bridge.  When Explorer exposes a CDI import API (e.g. a `from_arrow_cdi/2` function on
+  `Explorer.DataFrame`), `ExArrow.Explorer` will automatically use it instead of
+  the current IPC round-trip.
   """
 
   alias ExArrow.Native
