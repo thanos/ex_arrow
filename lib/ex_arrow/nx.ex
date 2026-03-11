@@ -7,7 +7,7 @@ defmodule ExArrow.Nx do
   handing it directly to `Nx.from_binary/2`.  No intermediate list
   materialisation occurs.
 
-  Requires `{:nx, "~> 0.7"}` in your `mix.exs` dependencies.  When Nx is
+  Requires `{:nx, "~> 0.9"}` in your `mix.exs` dependencies.  When Nx is
   absent every function returns `{:error, "Nx is not available..."}`.
 
   ### Supported column types
@@ -306,7 +306,7 @@ defmodule ExArrow.Nx do
     def from_tensors(_tensors), do: {:error, nx_missing_message()}
 
     defp nx_missing_message do
-      "Nx is not available. Add {:nx, \"~> 0.7\"} to your mix.exs dependencies."
+      "Nx is not available. Add {:nx, \"~> 0.9\"} to your mix.exs dependencies."
     end
   end
 end

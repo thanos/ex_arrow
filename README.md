@@ -95,7 +95,7 @@ These libraries are complementary, not competing. Each has a distinct role.
 | Library                 | Role                                                                                                    | Overlap with ExArrow                                                                                                                                             |
 | ----------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Explorer**            | In-memory dataframe analysis (filter, group, sort, plot). Backed by Polars/Arrow internally.            | Explorer can load/dump Arrow IPC streams. ExArrow is the transport; Explorer is the analysis layer.                                                              |
-| **Nx**                  | Numerical computing and tensor operations (multi-dimensional arrays, GPU support, ML).                  | `ExArrow.Nx` (v0.3+) converts Arrow numeric columns to `Nx.Tensor` values by sharing the raw byte buffer — no list materialisation. Add `{:nx, "~> 0.7"}` to enable. |
+| **Nx**                  | Numerical computing and tensor operations (multi-dimensional arrays, GPU support, ML).                  | `ExArrow.Nx` (v0.3+) converts Arrow numeric columns to `Nx.Tensor` values by sharing the raw byte buffer — no list materialisation. Add `{:nx, "~> 0.9"}` to enable. |
 | **adbc** (livebook-dev) | Elixir wrapper around the ADBC C library for driver management — downloading and configuring drivers.   | ExArrow uses `adbc` optionally for driver download; `adbc`'s core purpose is driver lifecycle, not Arrow streaming or Flight.                                    |
 | **ExZarr**              | Read/write Zarr v2/v3 chunked array format (used in climate science, genomics, cloud-native ND arrays). | Zarr and Arrow are complementary storage formats. ExZarr addresses ND chunk storage; ExArrow addresses columnar interchange and network transport.               |
 
@@ -556,7 +556,7 @@ batch = ExArrow.Stream.next(stream)
 operations.  ExArrow bridges Arrow columns to Nx tensors by sharing raw byte
 buffers — no list materialisation occurs.
 
-Add `{:nx, "~> 0.7"}` to your `mix.exs` to enable this module.
+Add `{:nx, "~> 0.9"}` to your `mix.exs` to enable this module.
 
 **Column to tensor:**
 
@@ -746,7 +746,7 @@ welcome for any of them.
 - **Arrow compute kernels** — `ExArrow.Compute.filter/2`, `project/2`, `sort/3`: filter, select columns, and sort record batches entirely in native Arrow buffers without materialising data into BEAM terms.
 - **Parquet support** — `ExArrow.Parquet.Reader` and `ExArrow.Parquet.Writer`: read and write Parquet files and in-memory binaries via the Arrow Rust `parquet` crate; streaming API compatible with IPC and ADBC streams.
 - **Explorer bridge module** — `ExArrow.Explorer`: direct conversion between `ExArrow.Stream` / `ExArrow.RecordBatch` and `Explorer.DataFrame` without writing manual IPC code. Add `{:explorer, "~> 0.8"}` to enable.
-- **Nx bridge module** — `ExArrow.Nx`: convert Arrow columns to `Nx.Tensor` values and back by sharing raw byte buffers. No list materialisation. Add `{:nx, "~> 0.7"}` to enable.
+- **Nx bridge module** — `ExArrow.Nx`: convert Arrow columns to `Nx.Tensor` values and back by sharing raw byte buffers. No list materialisation. Add `{:nx, "~> 0.9"}` to enable.
 
 ### Shipped (v0.4.0)
 

@@ -2,6 +2,24 @@ defmodule ExArrowTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
+  # Set :adbc_database_impl once for the whole module so no per-test setup/on_exit
+  # pair can delete the key while a concurrent sibling test still needs it.
+  # The previous value is captured and restored (rather than unconditionally
+  # deleted) to keep the surrounding suite state intact.
+  setup_all do
+    prev = Application.get_env(:ex_arrow, :adbc_database_impl)
+    Application.put_env(:ex_arrow, :adbc_database_impl, ExArrow.ADBC.DatabaseImpl)
+
+    on_exit(fn ->
+      case prev do
+        nil -> Application.delete_env(:ex_arrow, :adbc_database_impl)
+        val -> Application.put_env(:ex_arrow, :adbc_database_impl, val)
+      end
+    end)
+
+    :ok
+  end
+
   describe "native NIF" do
     @tag :nif
     test "nif_version returns a string" do
@@ -148,11 +166,6 @@ defmodule ExArrowTest do
   end
 
   describe "stubs (Flight, ADBC)" do
-    setup do
-      Application.put_env(:ex_arrow, :adbc_database_impl, ExArrow.ADBC.DatabaseImpl)
-      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_database_impl) end)
-      :ok
-    end
 
     test "Flight.Client.connect to non-existent server returns error" do
       assert {:error, _} = ExArrow.Flight.Client.connect("localhost", 39_283, [])

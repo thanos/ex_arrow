@@ -471,7 +471,7 @@ fn extract_primitive_buffer<'a>(env: Env<'a>, array: &ArrayRef) -> Term<'a> {
 /// `"u32"`, `"u64"`, `"f32"`, `"f64"`.
 ///
 /// Returns `{:ok, batch_ref}` or `{:error, msg}`.
-#[rustler::nif]
+#[rustler::nif(schedule = "DirtyCpu")]
 pub fn record_batch_from_column_binary<'a>(
     env: Env<'a>,
     col_name: String,

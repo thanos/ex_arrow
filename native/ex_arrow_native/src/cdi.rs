@@ -172,15 +172,44 @@ pub fn cdi_pointers(handle: ResourceArc<ExArrowCdiHandle>) -> (u64, u64) {
     )
 }
 
-/// Mark the handle as consumed by an external CDI consumer.
+/// Mark the handle as consumed by an external CDI consumer and free the
+/// C-struct heap allocations.
 ///
-/// Atomically nulls both pointers so the BEAM GC will not call release again
-/// when the handle is garbage-collected.  Call this after an external CDI
-/// consumer (e.g. Polars) has imported and taken ownership of the data.
+/// Call this after the external consumer has finished importing the data and
+/// has invoked the CDI `release` callback (which frees the underlying Arrow
+/// buffers and, per the CDI spec, nulls the `release` function pointer).
+///
+/// **What this does:**
+/// - Atomically swaps both struct pointers to 0 so the `Drop` impl becomes a
+///   no-op, preventing any attempt to free already-freed memory.
+/// - Drops the `Box<FFI_ArrowArray>` and `Box<FFI_ArrowSchema>` heap
+///   allocations created in `cdi_export`.  `FFI_ArrowArray/Schema::drop`
+///   checks whether `release` is non-null before invoking it; a conformant
+///   consumer will have already nulled it, so the drops only reclaim the
+///   struct allocation itself — no second release of the Arrow buffers.
+///
+/// **Do not** call this before the consumer's `release` callback has been
+/// invoked.  If `release` is still non-null when the boxes are dropped, the
+/// callback will fire again, which is a double-release of the Arrow buffers.
 #[rustler::nif]
 pub fn cdi_mark_consumed<'a>(env: Env<'a>, handle: ResourceArc<ExArrowCdiHandle>) -> Term<'a> {
-    handle.schema_ptr.store(0, Ordering::SeqCst);
-    handle.array_ptr.store(0, Ordering::SeqCst);
+    let schema_raw = handle.schema_ptr.swap(0, Ordering::SeqCst) as *mut FFI_ArrowSchema;
+    let array_raw = handle.array_ptr.swap(0, Ordering::SeqCst) as *mut FFI_ArrowArray;
+
+    // SAFETY: both pointers were allocated by Box::new in cdi_export and are
+    // exclusively owned by this handle (the atomic swap ensures they are taken
+    // exactly once).  FFI_ArrowArray/Schema::drop checks release != null before
+    // invoking it; if the consumer has already called release (nulling the
+    // pointer per the CDI spec) these drops only free the struct heap allocation.
+    unsafe {
+        if !array_raw.is_null() {
+            drop(Box::from_raw(array_raw));
+        }
+        if !schema_raw.is_null() {
+            drop(Box::from_raw(schema_raw));
+        }
+    }
+
     rustler::types::atom::Atom::from_str(env, "ok").unwrap().encode(env)
 }
 

@@ -105,11 +105,24 @@ defmodule ExArrow.CDI do
   end
 
   @doc """
-  Mark a CDI handle as consumed by an external library.
+  Free the CDI struct allocations after an external consumer has finished.
 
-  Nulls the internal pointers so the BEAM GC will not call the Arrow release
-  callback when the handle is eventually garbage-collected.  Call this after
-  the external CDI consumer has taken ownership of the data.
+  Call this **after** the external CDI consumer has called the Arrow `release`
+  callback on the exported array (which frees the underlying Arrow buffer data
+  and nulls the release pointer per the CDI spec).
+
+  What happens internally:
+  - Both C-struct pointers are atomically swapped to null so the BEAM GC's
+    `Drop` becomes a no-op.
+  - The `Box<FFI_ArrowArray>` and `Box<FFI_ArrowSchema>` heap allocations
+    created by `export/1` are freed.  Because the consumer has already nulled
+    the `release` pointer, dropping the boxes reclaims only the struct memory
+    — no second invocation of the Arrow release callback occurs.
+
+  > #### Warning {: .warning}
+  > Do **not** call this before the consumer has invoked `release`.  If the
+  > release pointer is still non-null when the boxes are dropped, the callback
+  > fires again, causing a double-release of the Arrow buffer data.
 
   Returns `:ok`.
   """
