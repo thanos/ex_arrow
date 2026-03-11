@@ -178,7 +178,7 @@ Add the dependency:
 
 ```elixir
 def deps do
-  [{:ex_arrow, "~> 0.3.0"}]
+  [{:ex_arrow, "~> 0.4.0"}]
 end
 ```
 
@@ -211,7 +211,7 @@ Mix.install([
 ```
 
 Alternatively, use the published Hex package so the precompiled NIF is used
-and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.3.0"}])`.
+and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.4.0"}])`.
 
 ---
 
@@ -748,15 +748,22 @@ welcome for any of them.
 - **Explorer bridge module** — `ExArrow.Explorer`: direct conversion between `ExArrow.Stream` / `ExArrow.RecordBatch` and `Explorer.DataFrame` without writing manual IPC code. Add `{:explorer, "~> 0.8"}` to enable.
 - **Nx bridge module** — `ExArrow.Nx`: convert Arrow columns to `Nx.Tensor` values and back by sharing raw byte buffers. No list materialisation. Add `{:nx, "~> 0.7"}` to enable.
 
-### Near-term (v0.4)
+### Shipped (v0.4.0)
 
-- **Explorer bridge — direct C Data Interface** — bypass the IPC round-trip by
-  using the Arrow C Data Interface to transfer record batches between ExArrow
-  and Explorer/Polars with zero copies.
+- **Arrow C Data Interface** — `ExArrow.CDI`: export a RecordBatch to
+  `FFI_ArrowArray` + `FFI_ArrowSchema` C structs and import them back.
+  Pointer addresses are exposed for interop with any CDI-compatible runtime
+  (Polars, DuckDB, etc.) running in the same process.  Provides the foundation
+  for a future zero-copy Explorer bridge that bypasses IPC entirely.
 - **Nx bridge — multi-column batch from tensors** — `ExArrow.Nx.from_tensors/1`
-  to produce a multi-column RecordBatch from a map of tensors in one call.
-- **Parquet row-group streaming** — lazy row-group iteration for very large
-  Parquet files instead of eager full-file load.
+  builds a multi-column RecordBatch from a `%{col_name => Nx.Tensor}` map in a
+  single NIF call, complementing the existing per-column `from_tensor/2`.
+- **Parquet row-group streaming** — `ExArrow.Parquet.Reader.from_file/1` and
+  `from_binary/1` now decode row groups **lazily** via `Stream.next/1` instead
+  of eagerly loading the entire file, dramatically reducing peak memory for
+  large Parquet files.
+
+### Near-term (v0.5)
 
 ### Longer-term
 

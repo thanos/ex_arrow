@@ -1,7 +1,9 @@
 //! ExArrow NIFs: IPC stream read/write, Schema and RecordBatch handles, Flight client/server,
-//! ADBC database connectivity, Arrow compute kernels, Parquet read/write, and Nx column buffers.
+//! ADBC database connectivity, Arrow compute kernels, Parquet read/write, Nx column buffers,
+//! and the Arrow C Data Interface (CDI).
 
 mod adbc;
+mod cdi;
 mod compute;
 mod flight;
 mod ipc;
@@ -102,6 +104,9 @@ fn on_load(env: Env, _: rustler::Term) -> bool {
     if !parquet::parquet_register_resources(env) {
         return false;
     }
+    if !cdi::cdi_register_resources(env) {
+        return false;
+    }
     true
 }
 
@@ -130,6 +135,7 @@ rustler::init!(
         // Nx buffer helpers
         ipc::record_batch_column_buffer,
         ipc::record_batch_from_column_binary,
+        ipc::record_batch_from_column_binaries,
         // Compute kernels
         compute::compute_filter,
         compute::compute_project,
@@ -141,6 +147,11 @@ rustler::init!(
         parquet::parquet_stream_next,
         parquet::parquet_writer_to_file,
         parquet::parquet_writer_to_binary,
+        // CDI
+        cdi::cdi_export,
+        cdi::cdi_import,
+        cdi::cdi_pointers,
+        cdi::cdi_mark_consumed,
         // Flight server
         flight::flight_server_start,
         flight::flight_server_port,
