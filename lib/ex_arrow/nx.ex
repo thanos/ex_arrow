@@ -210,8 +210,12 @@ defmodule ExArrow.Nx do
             {:ok, RecordBatch.t()} | {:error, String.t()}
     def from_tensors(tensors) when is_map(tensors) do
       case collect_tensor_columns(Map.to_list(tensors)) do
-        {:error, _} = err -> err
-        {:ok, [], [], [], []} -> {:error, "from_tensors requires at least one column"}
+        {:error, _} = err ->
+          err
+
+        {:ok, [], [], [], []} ->
+          {:error, "from_tensors requires at least one column"}
+
         {:ok, names_rev, dtypes_rev, binaries_rev, lengths_rev} ->
           build_from_columns(names_rev, dtypes_rev, binaries_rev, lengths_rev)
       end

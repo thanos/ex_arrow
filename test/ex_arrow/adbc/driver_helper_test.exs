@@ -1,5 +1,8 @@
 defmodule ExArrow.ADBC.DriverHelperTest do
-  use ExUnit.Case, async: true
+  # Application.put_env/delete_env are global state — async: false prevents
+  # on_exit callbacks from one test deleting env keys that another concurrent
+  # test is still relying on (which caused the `:postgresql` dlopen failure).
+  use ExUnit.Case, async: false
 
   alias ExArrow.ADBC.{Database, DriverHelper}
 
