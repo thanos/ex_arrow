@@ -166,7 +166,6 @@ defmodule ExArrowTest do
   end
 
   describe "stubs (Flight, ADBC)" do
-
     test "Flight.Client.connect to non-existent server returns error" do
       assert {:error, _} = ExArrow.Flight.Client.connect("localhost", 39_283, [])
     end
