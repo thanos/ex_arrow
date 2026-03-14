@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-03-11
+
+### Added
+
+- **Arrow C Data Interface (`ExArrow.CDI`)** — zero-copy record batch transfer
+  using the standardised Arrow CDI ABI.  `export/1` serialises a RecordBatch
+  into heap-allocated `FFI_ArrowSchema` + `FFI_ArrowArray` C structs wrapped in
+  a BEAM-managed resource handle.  `import/1` reconstructs a RecordBatch from
+  the handle without any intermediate IPC bytes.  `pointers/1` exposes the raw
+  C struct addresses as `{schema_ptr, array_ptr}` integers for interop with any
+  CDI-compatible runtime (Polars, DuckDB, etc.) running in the same process.
+  `mark_consumed/1` safely nulls the handle so the BEAM GC skips the Arrow
+  release callback after an external consumer has taken ownership.
+- **`ExArrow.Nx.from_tensors/1`** — builds a multi-column `RecordBatch` from a
+  `%{col_name => Nx.Tensor}` map in a single NIF call (new
+  `record_batch_from_column_binaries` NIF).  Column order follows
+  `Map.to_list/1` (sorted by key).  All tensors must have the same number of
+  elements; mismatched sizes return `{:error, "all tensors must have the same
+  size…"}`.
+- **Parquet lazy row-group streaming** — `ExArrow.Parquet.Reader.from_file/1`
+  and `from_binary/1` now decode row groups lazily on demand via
+  `ExArrow.Stream.next/1` instead of eagerly collecting all batches on open.
+  Peak memory scales with the largest single row group rather than the full
+  file.  The Elixir API is unchanged.
+- **`docs/cdi_guide.md`** — new guide covering CDI concepts, round-trip usage,
+  interop with external consumers, memory safety guarantees, and the roadmap
+  for the zero-copy Explorer bridge.
+
+### Changed
+
+- **`ExArrow.Explorer` module documentation** updated to describe the current
+  IPC path and the planned CDI zero-copy path for a future Explorer release.
+- **`ExArrow.Nx` module documentation** updated with `from_tensors/1` examples.
+- **Cargo.toml** — `arrow` crate updated to include the `ffi` feature;
+  `ex_arrow_native` version bumped to `0.4.0`.
+
+### Fixed
+
+- `ExArrow.Parquet` stream lock now propagates `ArrowError` from lazy iterator
+  (previously impossible with eager loading; now correctly returned as
+  `{:error, msg}`).
+
+---
+
 ## [0.3.0] - 2026-03-10
 
 ### Added

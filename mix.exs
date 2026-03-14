@@ -1,7 +1,7 @@
 defmodule ExArrow.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.4.0"
   @source_url "https://github.com/thanos/ex_arrow"
 
   def project do
@@ -76,7 +76,7 @@ defmodule ExArrow.MixProject do
       {:rustler_precompiled, "~> 0.8"},
       {:adbc, "~> 0.7", optional: true},
       {:explorer, "~> 0.8", optional: true},
-      {:nx, "~> 0.7", optional: true},
+      {:nx, "~> 0.9", optional: true},
       {:nimble_pool, "~> 1.1", optional: true},
       {:rustler, "~>  0.32.0", optional: true},
       {:ex_doc, "~> 0.34", only: :dev},
@@ -106,6 +106,7 @@ defmodule ExArrow.MixProject do
         "docs/compute_guide.md",
         "docs/flight_guide.md",
         "docs/adbc_guide.md",
+        "docs/cdi_guide.md",
         "docs/benchmarks.md"
       ],
       groups_for_modules: [
@@ -127,6 +128,7 @@ defmodule ExArrow.MixProject do
           ExArrow.ADBC.DriverHelper,
           ExArrow.ADBC.Error
         ],
+        "C Data Interface": [ExArrow.CDI],
         "Optional bridges": [ExArrow.Explorer, ExArrow.Nx],
         "Core types": [ExArrow.Stream, ExArrow.RecordBatch, ExArrow.Schema, ExArrow.Field]
       ]

@@ -3,8 +3,8 @@ defmodule ExArrow.Explorer do
   Bridge between ExArrow and Explorer DataFrames.
 
   Converts between `ExArrow.Stream` / `ExArrow.RecordBatch` and
-  `Explorer.DataFrame` via an in-memory IPC round-trip.  No CSV or row-by-row
-  conversion is performed — the path is always columnar binary.
+  `Explorer.DataFrame` via an in-memory Arrow IPC round-trip.  No CSV or
+  row-by-row conversion is performed — the path is always columnar binary.
 
   Requires `{:explorer, "~> 0.8"}` in your `mix.exs` dependencies.  When
   Explorer is absent every function returns `{:error, "Explorer is not
@@ -24,6 +24,14 @@ defmodule ExArrow.Explorer do
       {:ok, stream} = ExArrow.Explorer.to_stream(df)
       :ok = ExArrow.Flight.Client.do_put(client, stream_schema, batches,
               descriptor: {:cmd, "enriched"})
+
+  ## C Data Interface (CDI) — future zero-copy path
+
+  The current implementation serialises through an IPC binary.  `ExArrow.CDI`
+  provides CDI export/import that completely bypasses serialisation.  When
+  Explorer exposes a CDI import API the bridge here will use it automatically,
+  making `from_record_batch/1` and `from_stream/1` truly zero-copy.  See
+  `ExArrow.CDI` for the low-level interface.
   """
 
   alias ExArrow.IPC

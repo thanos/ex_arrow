@@ -471,7 +471,7 @@ fn extract_primitive_buffer<'a>(env: Env<'a>, array: &ArrayRef) -> Term<'a> {
 /// `"u32"`, `"u64"`, `"f32"`, `"f64"`.
 ///
 /// Returns `{:ok, batch_ref}` or `{:error, msg}`.
-#[rustler::nif]
+#[rustler::nif(schedule = "DirtyCpu")]
 pub fn record_batch_from_column_binary<'a>(
     env: Env<'a>,
     col_name: String,
@@ -479,63 +479,103 @@ pub fn record_batch_from_column_binary<'a>(
     dtype_str: String,
     length: u64,
 ) -> Term<'a> {
-    let length = length as usize;
-    let bytes = binary.as_slice();
-
-    macro_rules! build_primitive_batch {
-        ($NativeType:ty, $ArrowDType:expr) => {{
-            let elem_size = std::mem::size_of::<$NativeType>();
-            if bytes.len() != length * elem_size {
-                return err_encode(
-                    env,
-                    &format!(
-                        "binary length mismatch: expected {} bytes ({} * {}), got {}",
-                        length * elem_size,
-                        length,
-                        elem_size,
-                        bytes.len()
-                    ),
-                );
+    match build_column_array(binary.as_slice(), &dtype_str, length as usize) {
+        Err(e) => err_encode(env, &e),
+        Ok((data_type, array)) => {
+            let schema = Arc::new(Schema::new(vec![Field::new(&col_name, data_type, false)]));
+            match RecordBatch::try_new(schema, vec![array]) {
+                Ok(batch) => ok_encode(env, ResourceArc::new(ExArrowRecordBatch { batch })),
+                Err(e) => err_encode(env, &e.to_string()),
             }
-            let buf = Buffer::from_slice_ref(bytes);
-            let array_data = match ArrayData::builder($ArrowDType)
-                .len(length)
-                .add_buffer(buf)
-                .build()
-            {
-                Ok(d) => d,
-                Err(e) => return err_encode(env, &e.to_string()),
-            };
-            let array: ArrayRef = Arc::new(PrimitiveArray::<
-                <$NativeType as NativeTypeAlias>::ArrowType,
-            >::from(array_data));
-            array
-        }};
+        }
+    }
+}
+
+/// Create a multi-column `RecordBatch` from parallel lists of column names, raw byte
+/// buffers, dtype strings, and a shared row count.  This is the bulk counterpart to
+/// `record_batch_from_column_binary` and is used by `ExArrow.Nx.from_tensors/1`.
+///
+/// `names`, `binaries`, and `dtypes` must all be the same length.
+/// `length` is the number of rows (elements per column).
+///
+/// Returns `{:ok, batch_ref}` or `{:error, msg}`.
+#[rustler::nif(schedule = "DirtyCpu")]
+pub fn record_batch_from_column_binaries<'a>(
+    env: Env<'a>,
+    names: Vec<String>,
+    binaries: Vec<rustler::Binary<'a>>,
+    dtypes: Vec<String>,
+    length: u64,
+) -> Term<'a> {
+    if names.len() != binaries.len() || names.len() != dtypes.len() {
+        return err_encode(env, "names, binaries, and dtypes must have the same length");
+    }
+    if names.is_empty() {
+        return err_encode(env, "at least one column is required");
+    }
+    let length = length as usize;
+    let mut fields: Vec<Field> = Vec::with_capacity(names.len());
+    let mut arrays: Vec<ArrayRef> = Vec::with_capacity(names.len());
+
+    for ((name, binary), dtype_str) in names.iter().zip(binaries.iter()).zip(dtypes.iter()) {
+        match build_column_array(binary.as_slice(), dtype_str, length) {
+            Err(e) => return err_encode(env, &e),
+            Ok((data_type, array)) => {
+                fields.push(Field::new(name, data_type, false));
+                arrays.push(array);
+            }
+        }
     }
 
-    let array: ArrayRef = match dtype_str.as_str() {
-        "s8" => build_primitive_batch!(i8, DataType::Int8),
-        "s16" => build_primitive_batch!(i16, DataType::Int16),
-        "s32" => build_primitive_batch!(i32, DataType::Int32),
-        "s64" => build_primitive_batch!(i64, DataType::Int64),
-        "u8" => build_primitive_batch!(u8, DataType::UInt8),
-        "u16" => build_primitive_batch!(u16, DataType::UInt16),
-        "u32" => build_primitive_batch!(u32, DataType::UInt32),
-        "u64" => build_primitive_batch!(u64, DataType::UInt64),
-        "f32" => build_primitive_batch!(f32, DataType::Float32),
-        "f64" => build_primitive_batch!(f64, DataType::Float64),
-        other => return err_encode(env, &format!("unknown dtype '{}' for column creation", other)),
-    };
-
-    let schema = Arc::new(Schema::new(vec![Field::new(
-        &col_name,
-        array.data_type().clone(),
-        false,
-    )]));
-    match RecordBatch::try_new(schema, vec![array]) {
+    let schema = Arc::new(Schema::new(fields));
+    match RecordBatch::try_new(schema, arrays) {
         Ok(batch) => ok_encode(env, ResourceArc::new(ExArrowRecordBatch { batch })),
         Err(e) => err_encode(env, &e.to_string()),
     }
+}
+
+// ── Column-array builder (shared by single-column and multi-column NIFs) ─────
+
+macro_rules! build_col {
+    ($bytes:expr, $length:expr, $NativeType:ty, $ArrowDType:expr) => {{
+        let elem_size = std::mem::size_of::<$NativeType>();
+        if $bytes.len() != $length * elem_size {
+            return Err(format!(
+                "binary length mismatch: expected {} bytes ({} × {}), got {}",
+                $length * elem_size,
+                $length,
+                elem_size,
+                $bytes.len()
+            ));
+        }
+        let buf = Buffer::from_slice_ref($bytes);
+        let array_data = ArrayData::builder($ArrowDType)
+            .len($length)
+            .add_buffer(buf)
+            .build()
+            .map_err(|e| e.to_string())?;
+        let array: ArrayRef = Arc::new(
+            PrimitiveArray::<<$NativeType as NativeTypeAlias>::ArrowType>::from(array_data),
+        );
+        ($ArrowDType, array)
+    }};
+}
+
+fn build_column_array(bytes: &[u8], dtype_str: &str, length: usize) -> Result<(DataType, ArrayRef), String> {
+    let pair = match dtype_str {
+        "s8"  => build_col!(bytes, length, i8,  DataType::Int8),
+        "s16" => build_col!(bytes, length, i16, DataType::Int16),
+        "s32" => build_col!(bytes, length, i32, DataType::Int32),
+        "s64" => build_col!(bytes, length, i64, DataType::Int64),
+        "u8"  => build_col!(bytes, length, u8,  DataType::UInt8),
+        "u16" => build_col!(bytes, length, u16, DataType::UInt16),
+        "u32" => build_col!(bytes, length, u32, DataType::UInt32),
+        "u64" => build_col!(bytes, length, u64, DataType::UInt64),
+        "f32" => build_col!(bytes, length, f32, DataType::Float32),
+        "f64" => build_col!(bytes, length, f64, DataType::Float64),
+        other => return Err(format!("unknown dtype '{}' for column creation", other)),
+    };
+    Ok(pair)
 }
 
 // Helper trait to associate Rust native types with Arrow type markers.

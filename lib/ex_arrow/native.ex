@@ -123,6 +123,9 @@ defmodule ExArrow.Native do
   def record_batch_from_column_binary(_col_name, _binary, _dtype_str, _length),
     do: :erlang.nif_error(:nif_not_loaded)
 
+  def record_batch_from_column_binaries(_names, _binaries, _dtypes, _length),
+    do: :erlang.nif_error(:nif_not_loaded)
+
   # Compute kernels
   def compute_filter(_batch_ref, _predicate_ref), do: :erlang.nif_error(:nif_not_loaded)
   def compute_project(_batch_ref, _column_names), do: :erlang.nif_error(:nif_not_loaded)
@@ -137,4 +140,10 @@ defmodule ExArrow.Native do
 
   def parquet_writer_to_binary(_schema_ref, _batches),
     do: :erlang.nif_error(:nif_not_loaded)
+
+  # CDI (Arrow C Data Interface)
+  def cdi_export(_batch_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def cdi_import(_handle_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def cdi_pointers(_handle_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def cdi_mark_consumed(_handle_ref), do: :erlang.nif_error(:nif_not_loaded)
 end

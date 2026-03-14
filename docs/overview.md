@@ -20,7 +20,7 @@ This doc set covers:
 | Module | Requires | What it does |
 |--------|----------|--------------|
 | `ExArrow.Explorer` | `{:explorer, "~> 0.8"}` | Convert between `ExArrow.Stream`/`RecordBatch` and `Explorer.DataFrame` |
-| `ExArrow.Nx` | `{:nx, "~> 0.7"}` | Convert numeric Arrow columns to `Nx.Tensor` and back |
+| `ExArrow.Nx` | `{:nx, "~> 0.9"}` | Convert numeric Arrow columns to `Nx.Tensor` and back |
 | `ExArrow.ADBC.ConnectionPool` | `{:nimble_pool, "~> 1.1"}` | NimblePool-backed connection pool for ADBC databases |
 | ADBC driver download | `{:adbc, "~> 0.7"}` | `ExArrow.ADBC.DriverHelper.ensure_driver_and_open/2` |
 
