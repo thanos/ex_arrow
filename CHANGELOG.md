@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-10
+
+### Added
+
+- **Arrow compute kernels** — `ExArrow.Compute` with three operations:
+  `filter/2` (mask rows using the first column of a boolean-typed record
+  batch), `project/2` (select and reorder columns by name), and `sort/3`
+  (sort a batch by a named column, ascending or descending).  All operations
+  run entirely in native Arrow memory via the `arrow-select` and `arrow-ord`
+  Rust crates; results are new `ExArrow.RecordBatch` handles that can be
+  piped directly into IPC writers, Flight `do_put`, or further compute calls.
+- **Parquet support** — `ExArrow.Parquet.Reader` and
+  `ExArrow.Parquet.Writer` for reading and writing the Parquet columnar
+  storage format, backed by the `parquet` Rust crate.  Both file paths and
+  in-memory binaries are supported.  Parquet streams share the same
+  `ExArrow.Stream` interface as IPC and ADBC streams — `schema/1`, `next/1`,
+  and `to_list/1` all work identically.
+- **Explorer bridge module** — `ExArrow.Explorer` for direct conversion
+  between `ExArrow.Stream` / `ExArrow.RecordBatch` and
+  `Explorer.DataFrame` without writing manual IPC boilerplate.  Functions:
+  `from_stream/1`, `from_record_batch/1`, `to_stream/1`,
+  `to_record_batches/1`.  Requires `{:explorer, "~> 0.8"}` in your
+  `mix.exs`; when Explorer is absent every function returns an informative
+  `{:error, ...}` tuple.
+- **Nx bridge module** — `ExArrow.Nx` for converting Arrow numeric columns
+  to `Nx.Tensor` values (and back) by sharing the raw byte buffer — no
+  list materialisation.  Functions: `column_to_tensor/2`, `to_tensors/1`,
+  `from_tensor/2`.  Supports all integer and float Arrow types.
+  Non-numeric columns return `{:error, ...}` and are silently skipped by
+  `to_tensors/1`.  Requires `{:nx, "~> 0.7"}` in your `mix.exs`.
+- **New optional dependency** — `{:nx, "~> 0.7", optional: true}` added to
+  `mix.exs`.  No action required unless you use `ExArrow.Nx`.
+- **`ExArrow.Stream` Parquet backend** — `Stream.schema/1` and
+  `Stream.next/1` dispatch correctly for `:parquet`-backed streams returned
+  by `ExArrow.Parquet.Reader`.
+- **New Rust crate dependencies** — `arrow-select`, `arrow-ord`,
+  `arrow-buffer`, `arrow-data` (compute kernels) and `parquet` (Parquet
+  support) added to `native/ex_arrow_native/Cargo.toml`.
+- **New guides** — `docs/parquet_guide.md` and `docs/compute_guide.md` with
+  full API walkthroughs, examples, and performance notes.
+
+### Fixed
+
+- Dialyzer `call_without_opaque` warnings in `ExArrow.Explorer` and
+  `ExArrow.Nx` — removed unnecessary struct pattern matches from function
+  heads that were leaking the concrete struct type through the `@opaque`
+  boundary of `ExArrow.Stream.t()` and `ExArrow.RecordBatch.t()`.
+- Credo `alias must appear before module attribute` in `nx_test.exs` and
+  `explorer_test.exs`.
+- Credo `Pipe chain should start with a raw value` in `parquet_test.exs`.
+- Credo `length/1 is expensive` in `explorer_test.exs`.
+- `checksum-Elixir.ExArrow.Native.exs` regenerated for v0.3.0 across all
+  supported platforms.
+
 ## [0.2.0] - 2026-03-09
 
 ### Added
