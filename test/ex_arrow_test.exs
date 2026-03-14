@@ -148,6 +148,12 @@ defmodule ExArrowTest do
   end
 
   describe "stubs (Flight, ADBC)" do
+    setup do
+      Application.put_env(:ex_arrow, :adbc_database_impl, ExArrow.ADBC.DatabaseImpl)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_database_impl) end)
+      :ok
+    end
+
     test "Flight.Client.connect to non-existent server returns error" do
       assert {:error, _} = ExArrow.Flight.Client.connect("localhost", 39_283, [])
     end

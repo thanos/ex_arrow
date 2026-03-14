@@ -115,4 +115,26 @@ defmodule ExArrow.Native do
   def adbc_statement_execute(_statement_ref), do: :erlang.nif_error(:nif_not_loaded)
   def adbc_stream_schema(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
   def adbc_stream_next(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
+
+  # Nx column buffer helpers
+  def record_batch_column_buffer(_batch_ref, _col_name),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  def record_batch_from_column_binary(_col_name, _binary, _dtype_str, _length),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  # Compute kernels
+  def compute_filter(_batch_ref, _predicate_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def compute_project(_batch_ref, _column_names), do: :erlang.nif_error(:nif_not_loaded)
+  def compute_sort(_batch_ref, _column_name, _ascending), do: :erlang.nif_error(:nif_not_loaded)
+
+  # Parquet
+  def parquet_reader_from_file(_path), do: :erlang.nif_error(:nif_not_loaded)
+  def parquet_reader_from_binary(_binary), do: :erlang.nif_error(:nif_not_loaded)
+  def parquet_stream_schema(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def parquet_stream_next(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def parquet_writer_to_file(_path, _schema_ref, _batches), do: :erlang.nif_error(:nif_not_loaded)
+
+  def parquet_writer_to_binary(_schema_ref, _batches),
+    do: :erlang.nif_error(:nif_not_loaded)
 end
