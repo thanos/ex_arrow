@@ -24,7 +24,10 @@ defmodule ExArrow.ADBC.DatabaseServerTest do
     :ok
   end
 
-  defp unique_name, do: :"db_server_#{:erlang.unique_integer([:positive])}"
+  # Use {:global, ref} instead of a dynamic atom — atoms are never GC'd, so
+  # generating one per test run would slowly leak them across the test VM.
+  # GenServer, GenServer.stop, and DatabaseServer.get/1 all accept {:global, term}.
+  defp unique_name, do: {:global, make_ref()}
 
   # ── start_link/1 ────────────────────────────────────────────────────────────
 
@@ -63,10 +66,10 @@ defmodule ExArrow.ADBC.DatabaseServerTest do
       fake_db = %Database{resource: make_ref()}
       stub(ExArrow.ADBC.DatabaseMock, :open, fn _opts -> {:ok, fake_db} end)
 
-      name = unique_name()
+      {:global, key} = name = unique_name()
       {:ok, pid} = DatabaseServer.start_link(name: name, driver_path: "fake.so")
 
-      assert Process.whereis(name) == pid
+      assert :global.whereis_name(key) == pid
 
       GenServer.stop(pid)
     end
@@ -96,11 +99,11 @@ defmodule ExArrow.ADBC.DatabaseServerTest do
       stub(ExArrow.ADBC.DatabaseMock, :open, fn _opts -> {:ok, fake_db} end)
 
       name = unique_name()
-      {:ok, _pid} = DatabaseServer.start_link(name: name, driver_path: "fake.so")
+      {:ok, pid} = DatabaseServer.start_link(name: name, driver_path: "fake.so")
 
       assert DatabaseServer.get(name) == fake_db
 
-      GenServer.stop(Process.whereis(name))
+      GenServer.stop(pid)
     end
   end
 

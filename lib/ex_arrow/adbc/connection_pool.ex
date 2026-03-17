@@ -151,10 +151,14 @@ if Code.ensure_loaded?(NimblePool) do
 
     @impl NimblePool
     def init_worker(db_or_name) do
-      # Resolve atom names to a Database handle without pattern-matching on the
-      # opaque struct internals (which would break the @opaque type contract and
-      # cause a Dialyzer call_without_opaque warning).
-      db = if is_atom(db_or_name), do: DatabaseServer.get(db_or_name), else: db_or_name
+      # Resolve any GenServer name (atom, {:global, term}, {:via, mod, term}) to a
+      # Database handle.  We identify a "name" by checking it is NOT an already-open
+      # Database struct — this avoids pattern-matching on the opaque struct internals
+      # and accepts all valid GenServer.name() forms (not just atoms).
+      db =
+        if is_struct(db_or_name, ExArrow.ADBC.Database),
+          do: db_or_name,
+          else: DatabaseServer.get(db_or_name)
 
       case Connection.open(db) do
         {:ok, conn} -> {:ok, %Worker{db: db, conn: conn}, db_or_name}

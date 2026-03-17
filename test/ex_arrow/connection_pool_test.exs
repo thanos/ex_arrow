@@ -84,7 +84,7 @@ defmodule ExArrow.ADBC.ConnectionPoolTest do
       stub(ExArrow.ADBC.DatabaseMock, :open, fn _opts -> {:ok, fake_db} end)
       stub(ExArrow.ADBC.ConnectionMock, :open, fn _db -> {:ok, conn} end)
 
-      name = :"db_server_#{:erlang.unique_integer([:positive])}"
+      name = {:global, make_ref()}
 
       prev_db_impl = Application.get_env(:ex_arrow, :adbc_database_impl)
       Application.put_env(:ex_arrow, :adbc_database_impl, ExArrow.ADBC.DatabaseMock)
@@ -159,7 +159,7 @@ defmodule ExArrow.ADBC.ConnectionPoolTest do
 
     test "includes :name in pool opts when provided", %{db: db} do
       pid = spawn(fn -> Process.sleep(:infinity) end)
-      name = :"pool_#{:erlang.unique_integer([:positive])}"
+      name = {:global, make_ref()}
 
       expect(ExArrow.NimblePoolMock, :start_link, fn opts ->
         assert opts[:name] == name
