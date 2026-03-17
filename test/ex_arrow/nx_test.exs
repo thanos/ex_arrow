@@ -132,6 +132,35 @@ defmodule ExArrow.NxTest do
         assert {:error, msg} = ExArrowNx.from_tensor(tensor, "col")
         assert msg =~ "unsupported"
       end
+
+      # Round-trips for every remaining dtype — covers nx_dtype_to_arrow/1 AND
+      # parse_nx_dtype/1 for each type in a single pass.
+      for {nx_type, label, values} <- [
+            {{:s, 8}, "s8", [1, 2, 3]},
+            {{:s, 16}, "s16", [100, 200, 300]},
+            {{:s, 32}, "s32", [1000, 2000, 3000]},
+            {{:u, 8}, "u8", [1, 2, 255]},
+            {{:u, 16}, "u16", [0, 1000, 65_535]},
+            {{:u, 32}, "u32", [0, 1, 100_000]},
+            {{:u, 64}, "u64", [0, 1, 999_999]},
+            {{:f, 64}, "f64", [1.0, 2.0, 3.0]}
+          ] do
+        test "round-trip #{label}" do
+          t = Nx.tensor(unquote(values), type: unquote(nx_type))
+          assert {:ok, batch} = ExArrowNx.from_tensor(t, "col")
+          assert {:ok, recovered} = ExArrowNx.column_to_tensor(batch, "col")
+          assert Nx.type(recovered) == unquote(nx_type)
+          assert Nx.size(recovered) == length(unquote(values))
+        end
+      end
+    end
+
+    describe "from_tensors/1 — edge cases" do
+      test "returns error when a column name is not a string" do
+        tensors = %{atom_key: Nx.tensor([1, 2], type: {:s, 32})}
+        assert {:error, msg} = ExArrowNx.from_tensors(tensors)
+        assert msg =~ "column name must be a string"
+      end
     end
   else
     test "returns descriptive error when Nx is not loaded" do

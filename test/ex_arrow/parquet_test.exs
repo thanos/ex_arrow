@@ -66,6 +66,18 @@ defmodule ExArrow.ParquetTest do
     test "from_file returns error for missing file" do
       assert {:error, _msg} = Parquet.Reader.from_file("/tmp/this_does_not_exist_xyz.parquet")
     end
+
+    test "to_file returns error when parent directory does not exist" do
+      {schema, batch} = source_batch()
+      path = "/nonexistent_dir_#{:erlang.unique_integer([:positive])}/out.parquet"
+      assert {:error, _msg} = Parquet.Writer.to_file(path, schema, [batch])
+    end
+  end
+
+  describe "Reader.from_binary/1" do
+    test "returns error for non-Parquet binary" do
+      assert {:error, _msg} = Parquet.Reader.from_binary("this is not parquet data")
+    end
   end
 
   describe "Stream integration" do

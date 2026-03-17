@@ -14,10 +14,16 @@ pub struct ExArrowSchema {
     pub schema: Arc<Schema>,
 }
 
+#[rustler::resource_impl]
+impl rustler::Resource for ExArrowSchema {}
+
 /// Opaque handle for an Arrow record batch.
 pub struct ExArrowRecordBatch {
     pub batch: RecordBatch,
 }
+
+#[rustler::resource_impl]
+impl rustler::Resource for ExArrowRecordBatch {}
 
 /// Backing for IPC stream: either in-memory bytes or a buffered file (streaming, no full slurp).
 pub enum IpcStreamBacking {
@@ -30,6 +36,9 @@ pub struct ExArrowIpcStream {
     pub reader: IpcStreamBacking,
 }
 
+#[rustler::resource_impl]
+impl rustler::Resource for ExArrowIpcStream {}
+
 /// Backing for IPC file reader: file path or in-memory bytes (for tests / from_binary).
 pub enum IpcFileBacking {
     File(Mutex<FileReader<BufReader<File>>>),
@@ -40,3 +49,6 @@ pub enum IpcFileBacking {
 pub struct ExArrowIpcFile {
     pub backing: IpcFileBacking,
 }
+
+#[rustler::resource_impl]
+impl rustler::Resource for ExArrowIpcFile {}

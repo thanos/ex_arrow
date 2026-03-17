@@ -79,7 +79,7 @@ if Code.ensure_loaded?(NimblePool) do
       ]
 
       nimble_opts = if name, do: [{:name, name} | nimble_opts], else: nimble_opts
-      NimblePool.start_link(nimble_opts)
+      nimble_pool_mod().start_link(nimble_opts)
     end
 
     @doc """
@@ -99,7 +99,7 @@ if Code.ensure_loaded?(NimblePool) do
     def query(pool, sql, opts \\ []) when is_binary(sql) do
       pool_timeout = Keyword.get(opts, :pool_timeout, 5_000)
 
-      NimblePool.checkout!(
+      nimble_pool_mod().checkout!(
         pool,
         :checkout,
         fn _from, %Worker{conn: conn} = worker ->
@@ -136,7 +136,7 @@ if Code.ensure_loaded?(NimblePool) do
     def with_connection(pool, fun, opts \\ []) when is_function(fun, 1) do
       pool_timeout = Keyword.get(opts, :pool_timeout, 5_000)
 
-      NimblePool.checkout!(
+      nimble_pool_mod().checkout!(
         pool,
         :checkout,
         fn _from, %Worker{conn: conn} = worker ->
@@ -183,6 +183,10 @@ if Code.ensure_loaded?(NimblePool) do
     end
 
     # ── Private helpers ─────────────────────────────────────────────────────────
+
+    defp nimble_pool_mod do
+      Application.get_env(:ex_arrow, :nimble_pool_mod, NimblePool)
+    end
 
     defp run_statement(conn, sql) do
       with {:ok, stmt} <- Statement.new(conn),

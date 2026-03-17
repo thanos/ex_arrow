@@ -5,7 +5,7 @@
 //! entire file into memory.  This is ideal for large Parquet files where only a
 //! subset of batches will be consumed.
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 use bytes::Bytes;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -15,13 +15,11 @@ use parquet::file::properties::WriterProperties;
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use arrow_schema::SchemaRef;
-use rustler::resource::{
-    open_struct_resource_type, ResourceArc, ResourceTypeProvider, NIF_RESOURCE_FLAGS,
-};
+use rustler::ResourceArc;
 use rustler::{Encoder, Env, Term};
 
 use crate::resources::{ExArrowRecordBatch, ExArrowSchema};
-use crate::util::{err_encode, ok_encode, SyncResourceType};
+use crate::util::{err_encode, ok_encode};
 
 // ── Resource ────────────────────────────────────────────────────────────────
 
@@ -32,28 +30,8 @@ pub struct ExArrowParquetStream {
     pub reader: Mutex<Box<dyn Iterator<Item = Result<RecordBatch, ArrowError>> + Send>>,
 }
 
-static EX_ARROW_PARQUET_STREAM_TYPE: OnceLock<SyncResourceType<ExArrowParquetStream>> =
-    OnceLock::new();
-
-impl ResourceTypeProvider for ExArrowParquetStream {
-    fn get_type() -> &'static rustler::resource::ResourceType<Self> {
-        &EX_ARROW_PARQUET_STREAM_TYPE
-            .get()
-            .expect("ExArrowParquetStream resource not initialised (on_load not run?)")
-            .0
-    }
-}
-
-pub fn parquet_register_resources(env: Env) -> bool {
-    let flags = NIF_RESOURCE_FLAGS::ERL_NIF_RT_CREATE;
-    let Some(t) =
-        open_struct_resource_type::<ExArrowParquetStream>(env, "ExArrowParquetStream\0", flags)
-    else {
-        return false;
-    };
-    let _ = EX_ARROW_PARQUET_STREAM_TYPE.set(SyncResourceType(t));
-    true
-}
+#[rustler::resource_impl]
+impl rustler::Resource for ExArrowParquetStream {}
 
 // ── Readers ─────────────────────────────────────────────────────────────────
 

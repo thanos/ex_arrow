@@ -19,17 +19,14 @@
 
 use std::alloc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::OnceLock;
 
 use arrow::ffi::{from_ffi, to_ffi, FFI_ArrowArray, FFI_ArrowSchema};
 use arrow_array::{Array, StructArray};
-use rustler::resource::{
-    open_struct_resource_type, ResourceArc, ResourceTypeProvider, NIF_RESOURCE_FLAGS,
-};
+use rustler::ResourceArc;
 use rustler::{Encoder, Env, Term};
 
 use crate::resources::ExArrowRecordBatch;
-use crate::util::{err_encode, ok_encode, SyncResourceType};
+use crate::util::{err_encode, ok_encode};
 
 // ── Resource ────────────────────────────────────────────────────────────────
 
@@ -52,6 +49,9 @@ pub struct ExArrowCdiHandle {
 unsafe impl Send for ExArrowCdiHandle {}
 unsafe impl Sync for ExArrowCdiHandle {}
 
+#[rustler::resource_impl]
+impl rustler::Resource for ExArrowCdiHandle {}
+
 impl Drop for ExArrowCdiHandle {
     fn drop(&mut self) {
         let schema_raw = self.schema_ptr.swap(0, Ordering::SeqCst) as *mut FFI_ArrowSchema;
@@ -68,28 +68,6 @@ impl Drop for ExArrowCdiHandle {
             }
         }
     }
-}
-
-static EX_ARROW_CDI_HANDLE_TYPE: OnceLock<SyncResourceType<ExArrowCdiHandle>> = OnceLock::new();
-
-impl ResourceTypeProvider for ExArrowCdiHandle {
-    fn get_type() -> &'static rustler::resource::ResourceType<Self> {
-        &EX_ARROW_CDI_HANDLE_TYPE
-            .get()
-            .expect("ExArrowCdiHandle resource not initialised (on_load not run?)")
-            .0
-    }
-}
-
-pub fn cdi_register_resources(env: Env) -> bool {
-    let flags = NIF_RESOURCE_FLAGS::ERL_NIF_RT_CREATE;
-    let Some(t) =
-        open_struct_resource_type::<ExArrowCdiHandle>(env, "ExArrowCdiHandle\0", flags)
-    else {
-        return false;
-    };
-    let _ = EX_ARROW_CDI_HANDLE_TYPE.set(SyncResourceType(t));
-    true
 }
 
 // ── NIFs ─────────────────────────────────────────────────────────────────────

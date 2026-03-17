@@ -16,7 +16,7 @@ use arrow_schema::{DataType, Field, Schema};
 
 use arrow_ipc::reader::{FileReader, StreamReader};
 use arrow_ipc::writer::{FileWriter, StreamWriter};
-use rustler::resource::ResourceArc;
+use rustler::ResourceArc;
 use rustler::{Encoder, Env, Term};
 
 use crate::resources::{ExArrowIpcFile, ExArrowIpcStream, ExArrowRecordBatch, ExArrowSchema, IpcFileBacking, IpcStreamBacking};
@@ -167,7 +167,7 @@ fn data_type_to_atom(env: Env, dt: &arrow_schema::DataType) -> rustler::types::a
 
 /// Return the schema ref of a record batch.
 #[rustler::nif]
-pub fn record_batch_schema(batch: ResourceArc<ExArrowRecordBatch>) -> rustler::resource::ResourceArc<ExArrowSchema> {
+pub fn record_batch_schema(batch: ResourceArc<ExArrowRecordBatch>) -> rustler::ResourceArc<ExArrowSchema> {
     let schema_handle = ExArrowSchema {
         schema: batch.batch.schema().clone(),
     };
@@ -480,7 +480,7 @@ pub fn record_batch_from_column_binary<'a>(
     length: u64,
 ) -> Term<'a> {
     match build_column_array(binary.as_slice(), &dtype_str, length as usize) {
-        Err(e) => err_encode(env, &e),
+        Err(e) => err_encode(env, e.as_str()),
         Ok((data_type, array)) => {
             let schema = Arc::new(Schema::new(vec![Field::new(&col_name, data_type, false)]));
             match RecordBatch::try_new(schema, vec![array]) {
@@ -519,7 +519,7 @@ pub fn record_batch_from_column_binaries<'a>(
 
     for ((name, binary), dtype_str) in names.iter().zip(binaries.iter()).zip(dtypes.iter()) {
         match build_column_array(binary.as_slice(), dtype_str, length) {
-            Err(e) => return err_encode(env, &e),
+            Err(e) => return err_encode(env, e.as_str()),
             Ok((data_type, array)) => {
                 fields.push(Field::new(name, data_type, false));
                 arrays.push(array);

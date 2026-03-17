@@ -33,5 +33,22 @@ defmodule ExArrow.Flight.ServerTest do
       assert {:ok, server} = ExArrow.Flight.Server.start_link(0, [])
       assert :ok = ExArrow.Flight.Server.stop(server)
     end
+
+    # ── TLS option validation (pure-Elixir, no network required) ──────────────
+
+    test "returns error when :tls is not a keyword list" do
+      assert {:error, msg} = ExArrow.Flight.Server.start_link(0, tls: "bad")
+      assert msg =~ "keyword list"
+    end
+
+    test "returns error when :tls is missing :cert_pem" do
+      assert {:error, msg} = ExArrow.Flight.Server.start_link(0, tls: [key_pem: "k"])
+      assert msg =~ "cert_pem"
+    end
+
+    test "returns error when :tls is missing :key_pem" do
+      assert {:error, msg} = ExArrow.Flight.Server.start_link(0, tls: [cert_pem: "c"])
+      assert msg =~ "key_pem"
+    end
   end
 end

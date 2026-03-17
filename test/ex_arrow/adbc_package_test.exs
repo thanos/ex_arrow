@@ -11,6 +11,8 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
   """
   use ExUnit.Case, async: false
 
+  import Mox
+
   alias ExArrow.ADBC.{
     AdbcPackageManager,
     Connection,
@@ -20,6 +22,11 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
   }
 
   alias ExArrow.{Schema, Stream}
+
+  setup context do
+    Mox.set_mox_from_context(context)
+    :ok
+  end
 
   setup do
     # Ensure manager is not configured so we control state
@@ -67,6 +74,26 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
 
     test "open(:adbc_package) via Database returns same as impl" do
       assert {:error, _} = Database.open(:adbc_package)
+    end
+
+    test "open(:adbc_package) returns {:ok, db} when pids are available" do
+      # Inject a state that looks like a live backend using sys.replace_state.
+      mgr = Process.whereis(ExArrow.ADBC.AdbcPackageManager)
+      db_pid = spawn(fn -> Process.sleep(5_000) end)
+      conn_pid = spawn(fn -> Process.sleep(5_000) end)
+      :sys.replace_state(mgr, fn _s -> %{db: db_pid, conn: conn_pid} end)
+
+      assert {:ok, %Database{resource: :adbc_package}} = Database.open(:adbc_package)
+    end
+
+    test "open(:adbc_package) returns error when backend previously failed" do
+      # Inject a cached-error state so the {:error, reason} branch is hit.
+      mgr = Process.whereis(ExArrow.ADBC.AdbcPackageManager)
+      :sys.replace_state(mgr, fn _s -> {:error, "driver_load_failed"} end)
+
+      assert {:error, msg} = Database.open(:adbc_package)
+      assert msg =~ "failed to start"
+      assert msg =~ "driver_load_failed"
     end
 
     @tag :adbc_package
@@ -130,6 +157,142 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     test "execute_statement returns error for unknown statement ref" do
       ref = make_ref()
       assert {:error, "statement not found"} = AdbcPackageManager.execute_statement(ref)
+    end
+  end
+
+  # ── StatementImpl :adbc_package backend ─────────────────────────────────────
+  # AdbcPackageManager is running from setup (no driver configured).
+  # These tests drive StatementImpl through the public Statement API so that
+  # the :adbc_package function clauses in statement_impl.ex are covered.
+
+  describe "StatementImpl :adbc_package backend (via Statement API)" do
+    test "new/1 returns a statement with an {:adbc_package, ref} resource" do
+      conn = %Connection{resource: :adbc_package}
+      assert {:ok, %Statement{resource: {:adbc_package, ref}}} = Statement.new(conn)
+      assert is_reference(ref)
+    end
+
+    test "set_sql/2 stores SQL for an :adbc_package statement" do
+      conn = %Connection{resource: :adbc_package}
+      {:ok, stmt} = Statement.new(conn)
+      assert :ok = Statement.set_sql(stmt, "SELECT 1")
+    end
+
+    test "execute/1 returns error when backend not configured" do
+      conn = %Connection{resource: :adbc_package}
+      {:ok, stmt} = Statement.new(conn)
+      :ok = Statement.set_sql(stmt, "SELECT 1")
+      # No driver configured → AdbcPackageManager cannot start → {:error, _}
+      assert {:error, _reason} = Statement.execute(stmt)
+    end
+  end
+
+  # ── AdbcPackagePool callback unit tests ────────────────────────────────────
+  # Call NimblePool callbacks directly — no pool process needed.
+
+  describe "AdbcPackagePool NimblePool callbacks" do
+    test "handle_checkout/4 returns the conn_pid for checkout" do
+      conn_pid = self()
+      assert {:ok, ^conn_pid, ^conn_pid, :state} =
+               ExArrow.ADBC.AdbcPackagePool.handle_checkout(:checkout, :from, conn_pid, :state)
+    end
+
+    test "handle_checkin/4 with :ok keeps the conn_pid" do
+      conn_pid = self()
+      assert {:ok, ^conn_pid, :state} =
+               ExArrow.ADBC.AdbcPackagePool.handle_checkin(:ok, :from, conn_pid, :state)
+    end
+
+    test "handle_checkin/4 with {:remove, reason} removes the worker" do
+      conn_pid = self()
+      assert {:remove, :some_error, :state} =
+               ExArrow.ADBC.AdbcPackagePool.handle_checkin(
+                 {:remove, :some_error},
+                 :from,
+                 conn_pid,
+                 :state
+               )
+    end
+
+    test "terminate_worker/3 kills a live connection process" do
+      conn_pid = spawn(fn -> Process.sleep(5_000) end)
+      assert Process.alive?(conn_pid)
+      assert {:ok, :state} = ExArrow.ADBC.AdbcPackagePool.terminate_worker(:reason, conn_pid, :state)
+      Process.sleep(10)
+      refute Process.alive?(conn_pid)
+    end
+
+    test "terminate_worker/3 handles a non-pid conn gracefully" do
+      assert {:ok, :state} =
+               ExArrow.ADBC.AdbcPackagePool.terminate_worker(:reason, :not_a_pid, :state)
+    end
+
+    test "init_worker/1 returns error when Adbc.Connection cannot be opened" do
+      # Use a dead PID so the connection attempt fails immediately with noproc.
+      # Trap exits so the EXIT signal from the failed start_link doesn't crash
+      # the test process before we can inspect the return value.
+      dead = spawn(fn -> :ok end)
+      Process.sleep(10)
+      refute Process.alive?(dead)
+
+      Process.flag(:trap_exit, true)
+      assert {:error, _reason} = ExArrow.ADBC.AdbcPackagePool.init_worker(dead)
+      receive do {:EXIT, _, _} -> :ok after 0 -> :ok end
+    end
+  end
+
+  # ── AdbcPackagePool start_link / query with NimblePoolMock ─────────────────
+
+  describe "AdbcPackagePool start_link/1 and query/3 with NimblePoolMock" do
+    setup do
+      Application.put_env(:ex_arrow, :nimble_pool_mod, ExArrow.NimblePoolMock)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :nimble_pool_mod) end)
+      :ok
+    end
+
+    test "start_link/1 delegates to NimblePool.start_link with correct opts" do
+      pid = spawn(fn -> Process.sleep(:infinity) end)
+      db_pid = self()
+
+      stub(ExArrow.NimblePoolMock, :start_link, fn opts ->
+        assert opts[:worker] == {ExArrow.ADBC.AdbcPackagePool, db_pid}
+        assert opts[:pool_size] == 3
+        {:ok, pid}
+      end)
+
+      assert {:ok, ^pid} =
+               ExArrow.ADBC.AdbcPackagePool.start_link(database: db_pid, pool_size: 3)
+    end
+
+    test "start_link/1 uses __MODULE__ as default name" do
+      pid = spawn(fn -> Process.sleep(:infinity) end)
+
+      stub(ExArrow.NimblePoolMock, :start_link, fn opts ->
+        assert opts[:name] == ExArrow.ADBC.AdbcPackagePool
+        {:ok, pid}
+      end)
+
+      ExArrow.ADBC.AdbcPackagePool.start_link(database: self())
+    end
+
+    test "query/3 calls checkout! with the sql and returns its result" do
+      # Do NOT invoke fun — calling Adbc.Connection.query with a fake pid
+      # causes a recursive GenServer.call on the test process.
+      stub(ExArrow.NimblePoolMock, :checkout!, fn _pool, sql, _fun, _timeout ->
+        assert sql == "SELECT 42"
+        :mocked_result
+      end)
+
+      assert :mocked_result = ExArrow.ADBC.AdbcPackagePool.query(:fake_pool, "SELECT 42")
+    end
+
+    test "query/3 forwards pool_timeout option to checkout!" do
+      stub(ExArrow.NimblePoolMock, :checkout!, fn _pool, _sql, _fun, timeout ->
+        assert timeout == 8_000
+        :ok
+      end)
+
+      ExArrow.ADBC.AdbcPackagePool.query(:fake_pool, "SELECT 1", pool_timeout: 8_000)
     end
   end
 

@@ -10,7 +10,7 @@ if Code.ensure_loaded?(NimblePool) do
       name = Keyword.get(opts, :name, __MODULE__)
       pool_size = Keyword.get(opts, :pool_size, System.schedulers_online())
 
-      NimblePool.start_link(worker: {__MODULE__, db_pid}, name: name, pool_size: pool_size)
+      nimble_pool_mod().start_link(worker: {__MODULE__, db_pid}, name: name, pool_size: pool_size)
     end
 
     @doc false
@@ -19,7 +19,7 @@ if Code.ensure_loaded?(NimblePool) do
       pool_timeout = Keyword.get(opts, :pool_timeout, 5_000)
       conn_module = Module.safe_concat(["Elixir", "Adbc", "Connection"])
 
-      NimblePool.checkout!(
+      nimble_pool_mod().checkout!(
         pool,
         sql,
         fn _from, conn_pid ->
@@ -27,6 +27,10 @@ if Code.ensure_loaded?(NimblePool) do
         end,
         pool_timeout
       )
+    end
+
+    defp nimble_pool_mod do
+      Application.get_env(:ex_arrow, :nimble_pool_mod, NimblePool)
     end
 
     @impl NimblePool

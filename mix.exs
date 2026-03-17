@@ -75,20 +75,20 @@ defmodule ExArrow.MixProject do
     [
       {:rustler_precompiled, "~> 0.8"},
       {:adbc, "~> 0.7", optional: true},
-      {:explorer, "~> 0.8", optional: true},
+      {:explorer, "~> 0.11", optional: true},
       {:nx, "~> 0.9", optional: true},
       {:nimble_pool, "~> 1.1", optional: true},
-      {:rustler, "~>  0.32.0", optional: true},
+      {:rustler, "~> 0.36", optional: true},
       {:ex_doc, "~> 0.34", only: :dev},
       {:benchee, "~> 1.4", only: :dev},
       {:benchee_html, "~> 1.0", only: :dev},
       {:benchee_json, "~> 1.0", only: :dev},
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:credo, "~> 1.7.17", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:excoveralls, "~> 0.18", only: :test},
       {:mox, "~> 1.0", only: :test},
-      {:stream_data, "~> 1.2.0", only: :test}
+      {:stream_data, "~> 1.3.0", only: :test}
     ]
   end
 

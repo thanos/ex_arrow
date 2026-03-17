@@ -11,7 +11,9 @@
           "config/"
         ],
         excluded: [
-          "lib/ex_arrow/native.ex"
+          "lib/ex_arrow/native.ex",
+          "test/ex_arrow/connection_pool_test.exs",
+          "test/ex_arrow/database_server_test.exs"
         ]
       },
       plugins: [],

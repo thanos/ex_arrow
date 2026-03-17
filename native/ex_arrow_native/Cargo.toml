@@ -11,7 +11,7 @@ path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-rustler = { version = "0.32", default-features = false, features = ["derive"] }
+rustler = { version = "0.37", default-features = false, features = ["derive"] }
 arrow = { version = "56", default-features = false, features = ["ipc", "ffi"] }
 arrow-ipc = "56"
 arrow-schema = { version = "56", default-features = false }

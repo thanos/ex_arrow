@@ -1,6 +1,8 @@
 defmodule ExArrow.NativeTest do
   use ExUnit.Case, async: true
 
+  # ── NIF loaded (normal test run) ────────────────────────────────────────────
+
   describe "nif_loaded?/0" do
     @tag :nif
     test "returns true when NIF is loaded (e.g. in test env)" do
@@ -52,6 +54,75 @@ defmodule ExArrow.NativeTest do
       assert {:ok, batch_ref} = first
       assert is_reference(batch_ref)
       assert ExArrow.Native.ipc_stream_next(stream_ref) == :done
+    end
+  end
+
+  # ── NIF not loaded (run with: EX_ARROW_SKIP_NIF=1 mix test --only no_nif) ──
+  #
+  # When EX_ARROW_SKIP_NIF=1 the RustlerPrecompiled `use` block is skipped and
+  # all functions fall through to the :nif_not_loaded stubs in this file.
+  # These tests are excluded by default (see test_helper.exs).
+
+  describe "nif_loaded?/0 (NIF absent)" do
+    @tag :no_nif
+    test "returns false when NIF is not loaded" do
+      refute ExArrow.Native.nif_loaded?()
+    end
+  end
+
+  describe "stub functions (NIF absent)" do
+    @tag :no_nif
+    test "nif_version/0 raises nif_not_loaded" do
+      assert_raise ErlangError, fn -> ExArrow.Native.nif_version() end
+    end
+
+    @tag :no_nif
+    test "ipc_test_fixture_binary/0 raises nif_not_loaded" do
+      assert_raise ErlangError, fn -> ExArrow.Native.ipc_test_fixture_binary() end
+    end
+
+    @tag :no_nif
+    test "ipc_reader_from_binary/1 raises nif_not_loaded" do
+      assert_raise ErlangError, fn -> ExArrow.Native.ipc_reader_from_binary(<<>>) end
+    end
+
+    @tag :no_nif
+    test "ipc_stream_next/1 raises nif_not_loaded" do
+      assert_raise ErlangError, fn -> ExArrow.Native.ipc_stream_next(:fake) end
+    end
+
+    @tag :no_nif
+    test "record_batch_column_buffer/2 raises nif_not_loaded" do
+      assert_raise ErlangError, fn ->
+        ExArrow.Native.record_batch_column_buffer(:fake, "col")
+      end
+    end
+
+    @tag :no_nif
+    test "parquet_reader_from_binary/1 raises nif_not_loaded" do
+      assert_raise ErlangError, fn -> ExArrow.Native.parquet_reader_from_binary(<<>>) end
+    end
+
+    @tag :no_nif
+    test "compute_filter/2 raises nif_not_loaded" do
+      assert_raise ErlangError, fn -> ExArrow.Native.compute_filter(:fake, :fake) end
+    end
+
+    @tag :no_nif
+    test "adbc_database_open/1 raises nif_not_loaded" do
+      assert_raise ErlangError, fn -> ExArrow.Native.adbc_database_open("fake.so") end
+    end
+
+    @tag :no_nif
+    test "cdi_export/1 raises nif_not_loaded" do
+      assert_raise ErlangError, fn -> ExArrow.Native.cdi_export(:fake) end
+    end
+
+    @tag :no_nif
+    test "flight_server_start/3 raises nif_not_loaded" do
+      assert_raise ErlangError, fn ->
+        ExArrow.Native.flight_server_start("localhost", 0, nil)
+      end
     end
   end
 end

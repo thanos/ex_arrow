@@ -1,6 +1,13 @@
 defmodule ExArrow.IPC.ReaderWriterTest do
   use ExUnit.Case, async: true
 
+  describe "Reader.from_binary/1" do
+    @tag :ipc
+    test "returns error for non-IPC binary" do
+      assert {:error, _msg} = ExArrow.IPC.Reader.from_binary("not an IPC stream")
+    end
+  end
+
   describe "Reader.from_file/1" do
     @tag :ipc
     test "returns error when file does not exist" do
@@ -26,6 +33,18 @@ defmodule ExArrow.IPC.ReaderWriterTest do
       batch = ExArrow.Stream.next(stream)
       path = "/nonexistent_parent_#{:erlang.unique_integer([:positive])}/out.arrow"
       assert {:error, _msg} = ExArrow.IPC.Writer.to_file(path, schema, [batch])
+    end
+
+    @tag :ipc
+    @tag :tmp_dir
+    test "to_file writes a readable IPC file", %{tmp_dir: dir} do
+      {:ok, binary} = ExArrow.Native.ipc_test_fixture_binary()
+      {:ok, stream} = ExArrow.IPC.Reader.from_binary(binary)
+      {:ok, schema} = ExArrow.Stream.schema(stream)
+      batch = ExArrow.Stream.next(stream)
+      path = Path.join(dir, "out.arrow")
+      assert :ok = ExArrow.IPC.Writer.to_file(path, schema, [batch])
+      assert File.exists?(path)
     end
   end
 end

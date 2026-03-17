@@ -1,19 +1,17 @@
 //! ADBC NIFs: bind to adbc.h via adbc_driver_manager (Database, Connection, Statement, execute -> stream).
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use adbc_core::options::{AdbcVersion, ObjectDepth, OptionDatabase, OptionValue};
 use adbc_core::{Connection, Database, Driver, Statement};
 use adbc_driver_manager::{ManagedConnection, ManagedDatabase, ManagedDriver, ManagedStatement};
 use arrow::record_batch::{RecordBatch, RecordBatchReader};
 use arrow_schema::SchemaRef;
-use rustler::resource::{open_struct_resource_type, ResourceType, ResourceTypeProvider, NIF_RESOURCE_FLAGS};
-use rustler::resource::ResourceArc;
+use rustler::ResourceArc;
 use rustler::{Encoder, Env, Term};
 
 use crate::resources::{ExArrowRecordBatch, ExArrowSchema};
-use crate::util::{err_encode, ok_encode, SyncResourceType};
-use std::sync::Arc;
+use crate::util::{err_encode, ok_encode};
 
 rustler::atoms! {
     driver_path,
@@ -32,15 +30,24 @@ pub struct AdbcDatabase {
     pub database: ManagedDatabase,
 }
 
+#[rustler::resource_impl]
+impl rustler::Resource for AdbcDatabase {}
+
 /// ADBC Connection handle (Mutex for new_statement(&mut self)).
 pub struct AdbcConnection {
     pub connection: Mutex<ManagedConnection>,
 }
 
+#[rustler::resource_impl]
+impl rustler::Resource for AdbcConnection {}
+
 /// ADBC Statement handle (Mutex for execute(&mut self)).
 pub struct AdbcStatement {
     pub statement: Mutex<ManagedStatement>,
 }
+
+#[rustler::resource_impl]
+impl rustler::Resource for AdbcStatement {}
 
 /// Result stream from Statement::execute: pre-collected batches + schema for schema/next.
 pub struct AdbcResultStream {
@@ -48,6 +55,9 @@ pub struct AdbcResultStream {
     pub batches: Mutex<Vec<RecordBatch>>,
     pub index: Mutex<usize>,
 }
+
+#[rustler::resource_impl]
+impl rustler::Resource for AdbcResultStream {}
 
 // ── Database open: decode driver path or opts from Elixir ─────────────────────
 
@@ -105,7 +115,7 @@ enum DriverSpec {
 pub fn adbc_database_open<'a>(env: Env<'a>, driver_path_or_opts: Term<'a>) -> Term<'a> {
     let spec = match decode_driver_spec(driver_path_or_opts) {
         Ok(s) => s,
-        Err(e) => return err_encode(env, &e),
+        Err(e) => return err_encode(env, e.as_str()),
     };
     let version = AdbcVersion::V100;
     let (driver, database) = match spec {
@@ -389,7 +399,7 @@ pub fn adbc_connection_get_objects<'a>(
     };
     let depth_val = match decode_object_depth(&depth_str) {
         Ok(d) => d,
-        Err(e) => return err_encode(env, &e),
+        Err(e) => return err_encode(env, e.as_str()),
     };
     let catalog_o = decode_optional_string(catalog);
     let db_schema_o = decode_optional_string(db_schema);
@@ -449,51 +459,3 @@ pub fn adbc_statement_bind<'a>(
     }
 }
 
-// ── Resource type registration ────────────────────────────────────────────────
-
-static ADBC_DATABASE_TYPE: OnceLock<SyncResourceType<AdbcDatabase>> = OnceLock::new();
-static ADBC_CONNECTION_TYPE: OnceLock<SyncResourceType<AdbcConnection>> = OnceLock::new();
-static ADBC_STATEMENT_TYPE: OnceLock<SyncResourceType<AdbcStatement>> = OnceLock::new();
-static ADBC_RESULT_STREAM_TYPE: OnceLock<SyncResourceType<AdbcResultStream>> = OnceLock::new();
-
-impl ResourceTypeProvider for AdbcDatabase {
-    fn get_type() -> &'static ResourceType<Self> {
-        &ADBC_DATABASE_TYPE.get().expect("AdbcDatabase not initialized").0
-    }
-}
-impl ResourceTypeProvider for AdbcConnection {
-    fn get_type() -> &'static ResourceType<Self> {
-        &ADBC_CONNECTION_TYPE.get().expect("AdbcConnection not initialized").0
-    }
-}
-impl ResourceTypeProvider for AdbcStatement {
-    fn get_type() -> &'static ResourceType<Self> {
-        &ADBC_STATEMENT_TYPE.get().expect("AdbcStatement not initialized").0
-    }
-}
-impl ResourceTypeProvider for AdbcResultStream {
-    fn get_type() -> &'static ResourceType<Self> {
-        &ADBC_RESULT_STREAM_TYPE.get().expect("AdbcResultStream not initialized").0
-    }
-}
-
-pub fn adbc_register_resources(env: rustler::Env) -> bool {
-    let flags = NIF_RESOURCE_FLAGS::ERL_NIF_RT_CREATE;
-    let Some(t) = open_struct_resource_type::<AdbcDatabase>(env, "AdbcDatabase\0", flags) else {
-        return false;
-    };
-    let _ = ADBC_DATABASE_TYPE.set(SyncResourceType(t));
-    let Some(t) = open_struct_resource_type::<AdbcConnection>(env, "AdbcConnection\0", flags) else {
-        return false;
-    };
-    let _ = ADBC_CONNECTION_TYPE.set(SyncResourceType(t));
-    let Some(t) = open_struct_resource_type::<AdbcStatement>(env, "AdbcStatement\0", flags) else {
-        return false;
-    };
-    let _ = ADBC_STATEMENT_TYPE.set(SyncResourceType(t));
-    let Some(t) = open_struct_resource_type::<AdbcResultStream>(env, "AdbcResultStream\0", flags) else {
-        return false;
-    };
-    let _ = ADBC_RESULT_STREAM_TYPE.set(SyncResourceType(t));
-    true
-}
