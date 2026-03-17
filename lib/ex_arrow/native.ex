@@ -39,6 +39,7 @@ defmodule ExArrow.Native do
       :error, :nif_not_loaded -> false
     end
   end
+
   # coveralls-ignore-start
   def nif_version, do: :erlang.nif_error(:nif_not_loaded)
   def ipc_test_fixture_binary, do: :erlang.nif_error(:nif_not_loaded)
@@ -146,5 +147,5 @@ defmodule ExArrow.Native do
   def cdi_import(_handle_ref), do: :erlang.nif_error(:nif_not_loaded)
   def cdi_pointers(_handle_ref), do: :erlang.nif_error(:nif_not_loaded)
   def cdi_mark_consumed(_handle_ref), do: :erlang.nif_error(:nif_not_loaded)
-    # coveralls-ignore-stop
+  # coveralls-ignore-stop
 end

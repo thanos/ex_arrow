@@ -193,18 +193,21 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
   describe "AdbcPackagePool NimblePool callbacks" do
     test "handle_checkout/4 returns the conn_pid for checkout" do
       conn_pid = self()
+
       assert {:ok, ^conn_pid, ^conn_pid, :state} =
                ExArrow.ADBC.AdbcPackagePool.handle_checkout(:checkout, :from, conn_pid, :state)
     end
 
     test "handle_checkin/4 with :ok keeps the conn_pid" do
       conn_pid = self()
+
       assert {:ok, ^conn_pid, :state} =
                ExArrow.ADBC.AdbcPackagePool.handle_checkin(:ok, :from, conn_pid, :state)
     end
 
     test "handle_checkin/4 with {:remove, reason} removes the worker" do
       conn_pid = self()
+
       assert {:remove, :some_error, :state} =
                ExArrow.ADBC.AdbcPackagePool.handle_checkin(
                  {:remove, :some_error},
@@ -217,7 +220,10 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     test "terminate_worker/3 kills a live connection process" do
       conn_pid = spawn(fn -> Process.sleep(5_000) end)
       assert Process.alive?(conn_pid)
-      assert {:ok, :state} = ExArrow.ADBC.AdbcPackagePool.terminate_worker(:reason, conn_pid, :state)
+
+      assert {:ok, :state} =
+               ExArrow.ADBC.AdbcPackagePool.terminate_worker(:reason, conn_pid, :state)
+
       Process.sleep(10)
       refute Process.alive?(conn_pid)
     end
@@ -237,7 +243,12 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
 
       Process.flag(:trap_exit, true)
       assert {:error, _reason} = ExArrow.ADBC.AdbcPackagePool.init_worker(dead)
-      receive do {:EXIT, _, _} -> :ok after 0 -> :ok end
+
+      receive do
+        {:EXIT, _, _} -> :ok
+      after
+        0 -> :ok
+      end
     end
   end
 
@@ -332,7 +343,11 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     # Returns the manager pid and preserves the ETS table when replacing state.
     defp inject_state(extra) do
       mgr = Process.whereis(AdbcPackageManager)
-      table = :sys.get_state(mgr) |> Map.get(:table)
+
+      table =
+        mgr
+        |> :sys.get_state()
+        |> Map.get(:table)
 
       :sys.replace_state(mgr, fn _s ->
         Map.merge(%{table: table}, extra)
