@@ -23,7 +23,6 @@ defmodule ExArrow.Stream do
   never set the `backend` field directly; it is assigned by the function that
   opens the stream.
   """
-  alias ExArrow.Native
   alias ExArrow.RecordBatch
   alias ExArrow.Schema
 
@@ -36,21 +35,21 @@ defmodule ExArrow.Stream do
   """
   @spec schema(t()) :: {:ok, Schema.t()} | {:error, String.t()}
   def schema(%__MODULE__{resource: ref, backend: :adbc}) do
-    case Native.adbc_stream_schema(ref) do
+    case native().adbc_stream_schema(ref) do
       {:error, msg} -> {:error, msg}
       schema_ref -> {:ok, Schema.from_ref(schema_ref)}
     end
   end
 
   def schema(%__MODULE__{resource: ref, backend: :ipc}) do
-    case Native.ipc_stream_schema(ref) do
+    case native().ipc_stream_schema(ref) do
       {:error, msg} -> {:error, msg}
       schema_ref -> {:ok, Schema.from_ref(schema_ref)}
     end
   end
 
   def schema(%__MODULE__{resource: ref, backend: :parquet}) do
-    schema_ref = Native.parquet_stream_schema(ref)
+    schema_ref = native().parquet_stream_schema(ref)
     {:ok, Schema.from_ref(schema_ref)}
   end
 
@@ -60,7 +59,7 @@ defmodule ExArrow.Stream do
   """
   @spec next(t()) :: RecordBatch.t() | nil | {:error, String.t()}
   def next(%__MODULE__{resource: ref, backend: :adbc}) do
-    case Native.adbc_stream_next(ref) do
+    case native().adbc_stream_next(ref) do
       :done -> nil
       {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
       {:error, msg} -> {:error, msg}
@@ -68,7 +67,7 @@ defmodule ExArrow.Stream do
   end
 
   def next(%__MODULE__{resource: ref, backend: :ipc}) do
-    case Native.ipc_stream_next(ref) do
+    case native().ipc_stream_next(ref) do
       :done -> nil
       {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
       {:error, msg} -> {:error, msg}
@@ -76,7 +75,7 @@ defmodule ExArrow.Stream do
   end
 
   def next(%__MODULE__{resource: ref, backend: :parquet}) do
-    case Native.parquet_stream_next(ref) do
+    case native().parquet_stream_next(ref) do
       :done -> nil
       {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
       {:error, msg} -> {:error, msg}
@@ -93,6 +92,8 @@ defmodule ExArrow.Stream do
   def to_list(%__MODULE__{} = stream) do
     do_collect(stream, [])
   end
+
+  defp native, do: Application.get_env(:ex_arrow, :stream_native, ExArrow.Native)
 
   defp do_collect(stream, acc) do
     case next(stream) do

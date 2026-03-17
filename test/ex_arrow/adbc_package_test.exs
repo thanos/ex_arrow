@@ -296,6 +296,181 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     end
   end
 
+  # ── AdbcPackageManager injectable-module unit tests ────────────────────────
+  # Cover start_if_configured, start_database, start_connection, start_pool,
+  # use_pool?, start_pool_or_connection, query, and adbc_result_to_stream
+  # without needing a real ADBC driver or Explorer installation.
+
+  describe "AdbcPackageManager with injectable stubs" do
+    @env_keys [
+      :adbc_db_module,
+      :adbc_conn_module,
+      :adbc_result_module,
+      :explorer_df_module,
+      :nimble_pool_mod,
+      :adbc_package,
+      :adbc_package_pool_size
+    ]
+
+    setup do
+      saved = Enum.map(@env_keys, fn k -> {k, Application.get_env(:ex_arrow, k)} end)
+
+      on_exit(fn ->
+        Enum.each(saved, fn
+          {k, nil} -> Application.delete_env(:ex_arrow, k)
+          {k, v} -> Application.put_env(:ex_arrow, k, v)
+        end)
+      end)
+
+      :ok
+    end
+
+    defp put_stubs(overrides) do
+      Enum.each(overrides, fn {k, v} -> Application.put_env(:ex_arrow, k, v) end)
+    end
+
+    # Returns the manager pid and preserves the ETS table when replacing state.
+    defp inject_state(extra) do
+      mgr = Process.whereis(AdbcPackageManager)
+      table = :sys.get_state(mgr) |> Map.get(:table)
+
+      :sys.replace_state(mgr, fn _s ->
+        Map.merge(%{table: table}, extra)
+      end)
+
+      mgr
+    end
+
+    test "start_connection path: start_if_configured and start_connection success" do
+      put_stubs(
+        adbc_package: [driver: :test, uri: ":memory:"],
+        adbc_db_module: ExArrow.ADBC.AdbcDbStub,
+        adbc_conn_module: ExArrow.ADBC.AdbcConnStub
+      )
+
+      assert {:ok, {db_pid, conn_pid}} = AdbcPackageManager.get_pids()
+      assert is_pid(db_pid)
+      assert is_pid(conn_pid)
+    end
+
+    test "start_connection error path: start_pool_or_connection kills db_pid on failure" do
+      put_stubs(
+        adbc_package: [driver: :test, uri: ":memory:"],
+        adbc_db_module: ExArrow.ADBC.AdbcDbStub,
+        adbc_conn_module: ExArrow.ADBC.AdbcConnErrStub
+      )
+
+      assert {:error, :stub_conn_failed} = AdbcPackageManager.get_pids()
+    end
+
+    test "start_pool path: use_pool? true covers start_pool success" do
+      pool_pid = spawn(fn -> Process.sleep(:infinity) end)
+
+      stub(ExArrow.NimblePoolMock, :start_link, fn _opts -> {:ok, pool_pid} end)
+
+      put_stubs(
+        adbc_package: [driver: :test, uri: ":memory:"],
+        adbc_db_module: ExArrow.ADBC.AdbcDbStub,
+        nimble_pool_mod: ExArrow.NimblePoolMock,
+        adbc_package_pool_size: 2
+      )
+
+      assert {:ok, {db_pid, nil}} = AdbcPackageManager.get_pids()
+      assert is_pid(db_pid)
+    end
+
+    test "start_pool error path: start_pool_or_connection kills db_pid on pool failure" do
+      stub(ExArrow.NimblePoolMock, :start_link, fn _opts -> {:error, :stub_pool_failed} end)
+
+      put_stubs(
+        adbc_package: [driver: :test, uri: ":memory:"],
+        adbc_db_module: ExArrow.ADBC.AdbcDbStub,
+        nimble_pool_mod: ExArrow.NimblePoolMock,
+        adbc_package_pool_size: 2
+      )
+
+      assert {:error, :stub_pool_failed} = AdbcPackageManager.get_pids()
+    end
+
+    test "execute_statement success (conn): covers query/conn, ensure_started/%{db:_}, adbc_result_to_stream" do
+      put_stubs(
+        adbc_conn_module: ExArrow.ADBC.AdbcConnStub,
+        adbc_result_module: ExArrow.ADBC.AdbcResultStub,
+        explorer_df_module: ExArrow.ADBC.ExplorerDfStub
+      )
+
+      db_pid = spawn(fn -> Process.sleep(:infinity) end)
+      conn_pid = spawn(fn -> Process.sleep(:infinity) end)
+      inject_state(%{db: db_pid, conn: conn_pid})
+
+      {:ok, ref} = AdbcPackageManager.create_statement()
+      :ok = AdbcPackageManager.set_statement_sql(ref, "SELECT 1")
+
+      assert {:ok, %ExArrow.Stream{}} = AdbcPackageManager.execute_statement(ref)
+    end
+
+    test "execute_statement success (pool): covers query/pool path" do
+      stub(ExArrow.NimblePoolMock, :checkout!, fn _pool, _sql, _fun, _timeout ->
+        {:ok, :stub_pool_query_result}
+      end)
+
+      put_stubs(
+        nimble_pool_mod: ExArrow.NimblePoolMock,
+        adbc_result_module: ExArrow.ADBC.AdbcResultStub,
+        explorer_df_module: ExArrow.ADBC.ExplorerDfStub
+      )
+
+      db_pid = spawn(fn -> Process.sleep(:infinity) end)
+      inject_state(%{db: db_pid, pool: ExArrow.ADBC.AdbcPackagePool})
+
+      {:ok, ref} = AdbcPackageManager.create_statement()
+      :ok = AdbcPackageManager.set_statement_sql(ref, "SELECT 1")
+
+      assert {:ok, %ExArrow.Stream{}} = AdbcPackageManager.execute_statement(ref)
+    end
+
+    test "execute_statement query error: covers {:error, _} reply in handle_call" do
+      put_stubs(adbc_conn_module: ExArrow.ADBC.AdbcConnQueryErrStub)
+
+      db_pid = spawn(fn -> Process.sleep(:infinity) end)
+      conn_pid = spawn(fn -> Process.sleep(:infinity) end)
+      inject_state(%{db: db_pid, conn: conn_pid})
+
+      {:ok, ref} = AdbcPackageManager.create_statement()
+      :ok = AdbcPackageManager.set_statement_sql(ref, "SELECT 1")
+
+      assert {:error, :stub_query_failed} = AdbcPackageManager.execute_statement(ref)
+    end
+
+    test "adbc_result_to_stream without Explorer: returns missing-dep error" do
+      # Use a non-existent module so Code.ensure_loaded? returns false.
+      put_stubs(
+        adbc_conn_module: ExArrow.ADBC.AdbcConnStub,
+        adbc_result_module: ExArrow.ADBC.AdbcResultStub,
+        explorer_df_module: ExArrow.ADBC.NonExistentExplorer
+      )
+
+      db_pid = spawn(fn -> Process.sleep(:infinity) end)
+      conn_pid = spawn(fn -> Process.sleep(:infinity) end)
+      inject_state(%{db: db_pid, conn: conn_pid})
+
+      {:ok, ref} = AdbcPackageManager.create_statement()
+      :ok = AdbcPackageManager.set_statement_sql(ref, "SELECT 1")
+
+      assert {:error, msg} = AdbcPackageManager.execute_statement(ref)
+      assert msg =~ "adbc_package backend requires the :explorer dependency"
+    end
+
+    test "set_statement_sql when state has no ETS table returns :not_configured" do
+      :sys.replace_state(Process.whereis(AdbcPackageManager), fn _s ->
+        {:error, :no_table_state}
+      end)
+
+      assert {:error, :not_configured} =
+               AdbcPackageManager.set_statement_sql(make_ref(), "SELECT 1")
+    end
+  end
+
   describe "adbc_package integration (requires adbc + explorer)" do
     @tag :adbc_package
     test "full flow: open(:adbc_package) -> connection -> statement -> execute when configured" do
