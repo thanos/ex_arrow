@@ -21,9 +21,4 @@ Together they demonstrate all ExArrow functionality: IPC (stream + file), Flight
 3. For **ADBC** (00 and 03), you need a native ADBC driver (e.g. SQLite). See **[Installing an ADBC driver](INSTALL_ADBC_DRIVER.md)** for step-by-step options: the [`adbc`](https://hex.pm/packages/adbc) Hex package (precompiled artifacts; see [livebook-dev/adbc](https://github.com/livebook-dev/adbc) and their [CI](https://github.com/livebook-dev/adbc/blob/main/.github/workflows/ci.yml)), or building/installing from [Apache Arrow ADBC](https://github.com/apache/arrow-adbc). Without a driver, the ADBC cells will report an error and point you to that guide.
 
 **Running from the repo (path dependency)**  
-If you open a notebook that uses `Mix.install([{:ex_arrow, path: ".."}])`, ExArrow is built from source and **requires the `rustler` dependency and a Rust toolchain**. Add rustler to the install list (e.g. `{:rustler, "~> 0.36", optional: true}`) and ensure Rust is installed. See the main [README Installation section](../README.md#installation) (“Building from source” and path dependency). To avoid that, use the Hex package instead: `Mix.install([{:ex_arrow, "~> 0.1.0"}])` so the precompiled NIF is downloaded and no Rust or rustler is needed.
-
-## For the Medium article
-
-- Use **00_quickstart** as the “try it in 5 minutes” section with copy-paste or screenshots.
-- Use **01_ipc**, **02_flight**, and **03_adbc** as the tutorial sequence, with key code snippets and explanations drawn from each notebook.
+If you open a notebook that uses `Mix.install([{:ex_arrow, path: ".."}])`, ExArrow is built from source and **requires the `rustler` dependency and a Rust toolchain**. Add rustler to the install list (e.g. `{:rustler, "~> 0.32.0", optional: true}`) and ensure Rust is installed. See the main [README Installation section](../README.md#installation) (“Building from source” and path dependency). To avoid that, use the Hex package instead: `Mix.install([{:ex_arrow, "~> 0.1.0"}])` so the precompiled NIF is downloaded and no Rust or rustler is needed.
