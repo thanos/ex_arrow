@@ -165,14 +165,15 @@ Errors (driver load failure, execute failure, unsupported operation) are returne
 
 ## Support matrix
 
-| Feature | ExArrow API | Driver support |
-|---------|-------------|----------------|
-| Database.open (path / name) | ✓ | All drivers |
-| Connection.open | ✓ | All drivers |
-| Statement.new(conn, sql), execute | ✓ | All drivers |
-| get_table_types | ✓ | Varies (e.g. SQLite ✓) |
-| get_table_schema | ✓ | Varies |
-| get_objects | ✓ | Varies |
-| Statement.bind | ✓ | Varies |
+| Feature | Native driver backend | `:adbc_package` backend |
+|---------|----------------------|------------------------|
+| `Database.open(path / keyword)` | ✓ All drivers | `Database.open(:adbc_package)` |
+| `Connection.open` | ✓ All drivers | ✓ |
+| `Statement.new(conn, sql)` + `execute` | ✓ All drivers | ✓ (requires Explorer) |
+| `get_table_types` | ✓ Varies (SQLite ✓) | ✗ returns error |
+| `get_table_schema` | ✓ Varies | ✗ returns error |
+| `get_objects` | ✓ Varies | ✗ returns error |
+| `Statement.bind` | ✓ Varies | ✗ returns error |
+| Connection pooling | `ConnectionPool` (NimblePool) | ✓ `adbc_package_pool_size > 1` |
 
 Run `mix test --include adbc` with a driver to exercise metadata and binding; without a driver those tests fail with a clear message. Use `mix test --exclude adbc` to skip ADBC integration tests.

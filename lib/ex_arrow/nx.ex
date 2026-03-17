@@ -35,13 +35,29 @@ defmodule ExArrow.Nx do
   your column contains nulls and you need to distinguish them, inspect the
   original batch (null support may be added in a future release).
 
+  ## Public API
+
+  | Function | Direction | Description |
+  |----------|-----------|-------------|
+  | `column_to_tensor/2` | Arrow → Nx | Extract one named numeric column as an `Nx.Tensor` |
+  | `to_tensors/1` | Arrow → Nx | Extract all numeric columns as `%{name => Nx.Tensor}` |
+  | `from_tensor/2` | Nx → Arrow | Single tensor → single-column `RecordBatch` |
+  | `from_tensors/1` | Nx → Arrow | Map of tensors → multi-column `RecordBatch` (single NIF call) |
+
   ## Quick example
 
-      # Read a batch, extract the "price" column as a float64 tensor
+      # Read a batch, extract one column as a tensor
       {:ok, stream}  = ExArrow.Parquet.Reader.from_file("/data/trades.parquet")
       batch          = ExArrow.Stream.next(stream)
       {:ok, tensor}  = ExArrow.Nx.column_to_tensor(batch, "price")
       mean_price     = tensor |> Nx.mean() |> Nx.to_number()
+
+      # Build a multi-column batch from tensors (v0.4+)
+      tensors = %{
+        "price"  => Nx.tensor([1.0, 2.0, 3.0], type: {:f, 64}),
+        "volume" => Nx.tensor([10, 20, 30],     type: {:s, 64})
+      }
+      {:ok, batch} = ExArrow.Nx.from_tensors(tensors)
   """
 
   alias ExArrow.Native

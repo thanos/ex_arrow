@@ -107,6 +107,7 @@ defmodule ExArrow.MixProject do
         "docs/flight_guide.md",
         "docs/adbc_guide.md",
         "docs/cdi_guide.md",
+        "docs/nx_guide.md",
         "docs/benchmarks.md"
       ],
       groups_for_modules: [

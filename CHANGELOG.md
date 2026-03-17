@@ -5,19 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] - 2026-03-11
+## [0.4.0] - 2026-03-17
 
 ### Added
 
+- **`:adbc_package` supervised backend** — a pure-Elixir ADBC backend that
+  uses the Elixir `Adbc.*` packages rather than a native driver loaded by the
+  ex_arrow NIF.  Configure it with:
+  ```elixir
+  config :ex_arrow, :adbc_package, driver: :sqlite, uri: ":memory:"
+  ```
+  `ExArrow.Application` automatically starts
+  `ExArrow.ADBC.AdbcPackageManager` when the key is present.
+  `Database.open(:adbc_package)` returns a sentinel `%Database{}` that routes
+  all subsequent `Connection`, `Statement`, and `execute` calls through the
+  manager.  Query results are converted to `ExArrow.Stream` via the Explorer
+  IPC bridge (requires `{:explorer, "~> 0.11"}` in your deps).
+  Set `config :ex_arrow, :adbc_package_pool_size, N` (N > 1) to activate a
+  `NimblePool`-backed connection pool when `{:nimble_pool, "~> 1.1"}` is
+  present.
+- **`ExArrow.ADBC.AdbcPackageManager`** (internal) — `GenServer` that owns the
+  supervised `Adbc.Database` + `Adbc.Connection` (or `AdbcPackagePool`)
+  lifecycle for the `:adbc_package` backend.  Exposes `get_pids/0`,
+  `create_statement/1`, `set_statement_sql/2`, and `execute_statement/1` as
+  internal APIs consumed by `Database`, `Connection`, and `Statement`.
+- **`ExArrow.ADBC.AdbcPackagePool`** (internal) — `NimblePool` worker module
+  wrapping a pool of `Adbc.Connection` processes.  Activated automatically when
+  `adbc_package_pool_size > 1` and `NimblePool` is available.
 - **Arrow C Data Interface (`ExArrow.CDI`)** — zero-copy record batch transfer
-  using the standardised Arrow CDI ABI.  `export/1` serialises a RecordBatch
-  into heap-allocated `FFI_ArrowSchema` + `FFI_ArrowArray` C structs wrapped in
-  a BEAM-managed resource handle.  `import/1` reconstructs a RecordBatch from
-  the handle without any intermediate IPC bytes.  `pointers/1` exposes the raw
-  C struct addresses as `{schema_ptr, array_ptr}` integers for interop with any
-  CDI-compatible runtime (Polars, DuckDB, etc.) running in the same process.
-  `mark_consumed/1` safely nulls the handle so the BEAM GC skips the Arrow
-  release callback after an external consumer has taken ownership.
+  using the standardised Arrow CDI ABI.  `export/1` serialises a
+  `RecordBatch` into heap-allocated `FFI_ArrowSchema` + `FFI_ArrowArray` C
+  structs wrapped in a BEAM-managed resource handle.  `import/1` reconstructs a
+  `RecordBatch` from the handle without any intermediate IPC bytes.
+  `pointers/1` exposes the raw C struct addresses as
+  `{schema_ptr, array_ptr}` integers for interop with any CDI-compatible
+  runtime (Polars, DuckDB, etc.) in the same OS process.  `mark_consumed/1`
+  safely nulls the handle so the BEAM GC skips the Arrow release callback
+  after an external consumer has taken ownership.
 - **`ExArrow.Nx.from_tensors/1`** — builds a multi-column `RecordBatch` from a
   `%{col_name => Nx.Tensor}` map in a single NIF call (new
   `record_batch_from_column_binaries` NIF).  Column order follows
@@ -32,19 +56,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`docs/cdi_guide.md`** — new guide covering CDI concepts, round-trip usage,
   interop with external consumers, memory safety guarantees, and the roadmap
   for the zero-copy Explorer bridge.
+- **`docs/adbc_guide.md`** — new "Using the adbc_package backend" section with
+  supervision tree setup, pool sizing, Explorer dependency note, and error
+  handling.
+- **`{:stream_data, "~> 1.3.0", only: :test}`** — added for property-based
+  test helpers (test dependency only; no impact on library users).
 
 ### Changed
 
+- **`ExArrow.Stream` native dispatch** — all six NIF calls in `schema/1` and
+  `next/1` now go through a private `native/0` helper that reads
+  `Application.get_env(:ex_arrow, :stream_native, ExArrow.Native)`, making
+  the module fully testable in isolation without a loaded NIF.  The public API
+  is unchanged.
 - **`ExArrow.Explorer` module documentation** updated to describe the current
   IPC path and the planned CDI zero-copy path for a future Explorer release.
 - **`ExArrow.Nx` module documentation** updated with `from_tensors/1` examples.
 - **Cargo.toml** — `arrow` crate updated to include the `ffi` feature;
   `ex_arrow_native` version bumped to `0.4.0`.
+- **`nx` optional dependency** constraint updated from `~> 0.7` to `~> 0.9`.
 
 ### Fixed
 
-- `ExArrow.Parquet` stream lock now propagates `ArrowError` from lazy iterator
-  (previously impossible with eager loading; now correctly returned as
+- **`AdbcPackageManager.handle_call({:set_statement_sql, ...})`** — crashed with
+  `BadMapError` when the manager state was a cached `{:error, reason}` tuple
+  (i.e. after a failed driver start).  A `when not is_map(state)` guard clause
+  now returns `{:error, :not_configured}` cleanly.
+- **`ExArrow.Parquet` stream lock** now propagates `ArrowError` from the lazy
+  iterator (previously impossible with eager loading; now correctly returned as
   `{:error, msg}`).
 
 ---
