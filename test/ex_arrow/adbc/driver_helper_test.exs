@@ -6,8 +6,28 @@ defmodule ExArrow.ADBC.DriverHelperTest do
 
   alias ExArrow.ADBC.{Database, DriverHelper}
 
+  # Keys that must be absent for these tests to behave as "native-driver" tests.
+  # If another test module leaves :adbc_package configured (e.g. after a crash
+  # prevents its on_exit cleanup), ensure_driver_and_open/2 would take the
+  # adbc_package branch and hit AdbcPackageManager — which is not started here.
+  @guard_keys [:adbc_package, :adbc_database_impl, :adbc_download_module]
+
   setup context do
     Mox.set_mox_from_context(context)
+
+    saved = Enum.map(@guard_keys, fn k -> {k, Application.get_env(:ex_arrow, k)} end)
+
+    on_exit(fn ->
+      Enum.each(saved, fn
+        {k, nil} -> Application.delete_env(:ex_arrow, k)
+        {k, v} -> Application.put_env(:ex_arrow, k, v)
+      end)
+    end)
+
+    # Always start from a clean slate so leaks from other test modules do not
+    # cause ensure_driver_and_open/2 to take the :adbc_package code path.
+    Enum.each(@guard_keys, fn k -> Application.delete_env(:ex_arrow, k) end)
+
     :ok
   end
 

@@ -184,6 +184,9 @@ defmodule ExArrow.ADBC.AdbcPackageManager do
         ok
 
       {:error, reason} ->
+        # Unlink before killing so the :killed exit signal does not propagate
+        # back to this process (start_link creates a bidirectional link).
+        Process.unlink(db_pid)
         Process.exit(db_pid, :kill)
         {:error, reason}
     end
