@@ -44,7 +44,13 @@ defmodule ExArrow.IPC.ReaderWriterTest do
       batch = ExArrow.Stream.next(stream)
       path = Path.join(dir, "out.arrow")
       assert :ok = ExArrow.IPC.Writer.to_file(path, schema, [batch])
-      assert File.exists?(path)
+
+      # Read it back to verify the file is a valid IPC file, not just present.
+      assert {:ok, read_stream} = ExArrow.IPC.Reader.from_file(path)
+      assert {:ok, read_schema} = ExArrow.Stream.schema(read_stream)
+      assert ExArrow.Schema.field_names(read_schema) == ExArrow.Schema.field_names(schema)
+      assert %ExArrow.RecordBatch{} = ExArrow.Stream.next(read_stream)
+      assert nil == ExArrow.Stream.next(read_stream)
     end
   end
 end

@@ -512,7 +512,7 @@ All operations run entirely in native memory. Results are new
 ## Using ExArrow with Explorer
 
 [Explorer](https://hex.pm/packages/explorer) handles in-memory analysis.
-ExArrow handles streaming and transport. Add `{:explorer, "~> 0.8"}` to your
+ExArrow handles streaming and transport. Add `{:explorer, "~> 0.11"}` to your
 `mix.exs` to enable the bridge.
 
 **ExArrow → Explorer** (one call, no boilerplate):
@@ -745,7 +745,7 @@ welcome for any of them.
 
 - **Arrow compute kernels** — `ExArrow.Compute.filter/2`, `project/2`, `sort/3`: filter, select columns, and sort record batches entirely in native Arrow buffers without materialising data into BEAM terms.
 - **Parquet support** — `ExArrow.Parquet.Reader` and `ExArrow.Parquet.Writer`: read and write Parquet files and in-memory binaries via the Arrow Rust `parquet` crate; streaming API compatible with IPC and ADBC streams.
-- **Explorer bridge module** — `ExArrow.Explorer`: direct conversion between `ExArrow.Stream` / `ExArrow.RecordBatch` and `Explorer.DataFrame` without writing manual IPC code. Add `{:explorer, "~> 0.8"}` to enable.
+- **Explorer bridge module** — `ExArrow.Explorer`: direct conversion between `ExArrow.Stream` / `ExArrow.RecordBatch` and `Explorer.DataFrame` without writing manual IPC code. Add `{:explorer, "~> 0.11"}` to enable.
 - **Nx bridge module** — `ExArrow.Nx`: convert Arrow columns to `Nx.Tensor` values and back by sharing raw byte buffers. No list materialisation. Add `{:nx, "~> 0.9"}` to enable.
 
 ### Shipped (v0.4.0)
@@ -792,7 +792,7 @@ when you only need normal SQL results. For Parquet-only workflows with no
 Flight/ADBC, consider Explorer's Parquet support first.
 
 **Can I use ExArrow and Explorer together?**
-Yes. Add `{:explorer, "~> 0.8"}` to your `mix.exs` and use `ExArrow.Explorer`
+Yes. Add `{:explorer, "~> 0.11"}` to your `mix.exs` and use `ExArrow.Explorer`
 (v0.3+) for one-call conversion: `ExArrow.Explorer.from_stream/1`,
 `from_record_batch/1`, `to_stream/1`. The bridge uses Arrow IPC internally;
 you can also do the round-trip manually with `ExArrow.IPC.Writer.to_binary/2`

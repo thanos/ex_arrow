@@ -5,9 +5,9 @@
 Mix.install([
   {:ex_arrow, path: Path.join(__DIR__, "..")},
   {:adbc, "~> 0.7"},
-  {:explorer, "~> 0.8"},
+  {:explorer, "~> 0.11"},
   {:nimble_pool, "~> 1.1"},
-  {:rustler, "~> 0.32.0"}
+  {:rustler, "~> 0.36"}
 ])
 
 # ── Section ──

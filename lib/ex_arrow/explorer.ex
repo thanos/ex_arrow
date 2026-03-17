@@ -6,7 +6,7 @@ defmodule ExArrow.Explorer do
   `Explorer.DataFrame` via an in-memory Arrow IPC round-trip.  No CSV or
   row-by-row conversion is performed — the path is always columnar binary.
 
-  Requires `{:explorer, "~> 0.8"}` in your `mix.exs` dependencies.  When
+  Requires `{:explorer, "~> 0.11"}` in your `mix.exs` dependencies.  When
   Explorer is absent every function returns `{:error, "Explorer is not
   available..."}`.
 
@@ -155,7 +155,7 @@ defmodule ExArrow.Explorer do
     def to_record_batches(_df), do: {:error, explorer_missing_message()}
 
     defp explorer_missing_message do
-      "Explorer is not available. Add {:explorer, \"~> 0.8\"} to your mix.exs dependencies."
+      "Explorer is not available. Add {:explorer, \"~> 0.11\"} to your mix.exs dependencies."
     end
   end
 end
