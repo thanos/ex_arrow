@@ -79,8 +79,8 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     test "open(:adbc_package) returns {:ok, db} when pids are available" do
       # Inject a state that looks like a live backend using sys.replace_state.
       mgr = Process.whereis(ExArrow.ADBC.AdbcPackageManager)
-      db_pid = spawn(fn -> Process.sleep(5_000) end)
-      conn_pid = spawn(fn -> Process.sleep(5_000) end)
+      db_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      conn_pid = spawn_link(fn -> Process.sleep(:infinity) end)
       :sys.replace_state(mgr, fn _s -> %{db: db_pid, conn: conn_pid} end)
 
       assert {:ok, %Database{resource: :adbc_package}} = Database.open(:adbc_package)
@@ -218,8 +218,14 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     end
 
     test "terminate_worker/3 kills a live connection process" do
-      conn_pid = spawn(fn -> Process.sleep(5_000) end)
+      conn_pid = spawn_link(fn -> Process.sleep(:infinity) end)
       assert Process.alive?(conn_pid)
+
+      # Unlink before the intentional kill: terminate_worker uses Process.exit/2
+      # with :kill (untrappable), and the link would otherwise propagate :killed
+      # back to the test process.  spawn_link is still used above so the process
+      # is cleaned up automatically if the test fails before reaching this point.
+      Process.unlink(conn_pid)
 
       assert {:ok, :state} =
                ExArrow.ADBC.AdbcPackagePool.terminate_worker(:reason, conn_pid, :state)
@@ -262,7 +268,7 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     end
 
     test "start_link/1 delegates to NimblePool.start_link with correct opts" do
-      pid = spawn(fn -> Process.sleep(:infinity) end)
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
       db_pid = self()
 
       stub(ExArrow.NimblePoolMock, :start_link, fn opts ->
@@ -276,7 +282,7 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     end
 
     test "start_link/1 uses __MODULE__ as default name" do
-      pid = spawn(fn -> Process.sleep(:infinity) end)
+      pid = spawn_link(fn -> Process.sleep(:infinity) end)
 
       stub(ExArrow.NimblePoolMock, :start_link, fn opts ->
         assert opts[:name] == ExArrow.ADBC.AdbcPackagePool
@@ -379,7 +385,7 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     end
 
     test "start_pool path: use_pool? true covers start_pool success" do
-      pool_pid = spawn(fn -> Process.sleep(:infinity) end)
+      pool_pid = spawn_link(fn -> Process.sleep(:infinity) end)
 
       stub(ExArrow.NimblePoolMock, :start_link, fn _opts -> {:ok, pool_pid} end)
 
@@ -414,8 +420,8 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
         explorer_df_module: ExArrow.ADBC.ExplorerDfStub
       )
 
-      db_pid = spawn(fn -> Process.sleep(:infinity) end)
-      conn_pid = spawn(fn -> Process.sleep(:infinity) end)
+      db_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      conn_pid = spawn_link(fn -> Process.sleep(:infinity) end)
       inject_state(%{db: db_pid, conn: conn_pid})
 
       {:ok, ref} = AdbcPackageManager.create_statement()
@@ -435,7 +441,7 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
         explorer_df_module: ExArrow.ADBC.ExplorerDfStub
       )
 
-      db_pid = spawn(fn -> Process.sleep(:infinity) end)
+      db_pid = spawn_link(fn -> Process.sleep(:infinity) end)
       inject_state(%{db: db_pid, pool: ExArrow.ADBC.AdbcPackagePool})
 
       {:ok, ref} = AdbcPackageManager.create_statement()
@@ -447,8 +453,8 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     test "execute_statement query error: covers {:error, _} reply in handle_call" do
       put_stubs(adbc_conn_module: ExArrow.ADBC.AdbcConnQueryErrStub)
 
-      db_pid = spawn(fn -> Process.sleep(:infinity) end)
-      conn_pid = spawn(fn -> Process.sleep(:infinity) end)
+      db_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      conn_pid = spawn_link(fn -> Process.sleep(:infinity) end)
       inject_state(%{db: db_pid, conn: conn_pid})
 
       {:ok, ref} = AdbcPackageManager.create_statement()
@@ -465,8 +471,8 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
         explorer_df_module: ExArrow.ADBC.NonExistentExplorer
       )
 
-      db_pid = spawn(fn -> Process.sleep(:infinity) end)
-      conn_pid = spawn(fn -> Process.sleep(:infinity) end)
+      db_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      conn_pid = spawn_link(fn -> Process.sleep(:infinity) end)
       inject_state(%{db: db_pid, conn: conn_pid})
 
       {:ok, ref} = AdbcPackageManager.create_statement()
