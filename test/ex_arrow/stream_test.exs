@@ -13,9 +13,10 @@ defmodule ExArrow.StreamTest do
     prev = Application.get_env(:ex_arrow, :stream_native)
 
     on_exit(fn ->
-      if prev,
-        do: Application.put_env(:ex_arrow, :stream_native, prev),
-        else: Application.delete_env(:ex_arrow, :stream_native)
+      case prev do
+        nil -> Application.delete_env(:ex_arrow, :stream_native)
+        val -> Application.put_env(:ex_arrow, :stream_native, val)
+      end
     end)
 
     :ok
