@@ -21,7 +21,7 @@ use std::alloc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use arrow::ffi::{from_ffi, to_ffi, FFI_ArrowArray, FFI_ArrowSchema};
-use arrow_array::{Array, StructArray};
+use arrow_array::StructArray;
 use rustler::ResourceArc;
 use rustler::{Encoder, Env, Term};
 
@@ -81,7 +81,8 @@ impl Drop for ExArrowCdiHandle {
 #[rustler::nif(schedule = "DirtyCpu")]
 pub fn cdi_export<'a>(env: Env<'a>, batch: ResourceArc<ExArrowRecordBatch>) -> Term<'a> {
     let struct_array: StructArray = batch.batch.clone().into();
-    let array_data = struct_array.into_data();
+    // `into_data` is from `arrow_array::Array`; use UFCS so we don't need a trait import.
+    let array_data = <StructArray as arrow_array::Array>::into_data(struct_array);
 
     let (ffi_array, ffi_schema) = match to_ffi(&array_data) {
         Ok(pair) => pair,

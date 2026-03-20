@@ -55,7 +55,7 @@ defmodule ExArrow.ADBC.ExplorerDfStub do
   @spec new(map()) :: map()
   def new(map), do: map
 
-  @spec dump_ipc_stream!(DataFrame.t()) :: binary()
+  @spec dump_ipc_stream!(term()) :: binary()
   def dump_ipc_stream!(_df) do
     {:ok, binary} = ExArrow.Native.ipc_test_fixture_binary()
     binary
