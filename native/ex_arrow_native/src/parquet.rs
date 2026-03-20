@@ -98,7 +98,11 @@ pub fn parquet_stream_schema<'a>(
 
 /// Get the next record batch from the lazy reader.
 /// Returns `:done`, `{:ok, batch_ref}`, or `{:error, msg}`.
-#[rustler::nif]
+///
+/// Scheduled as a dirty CPU NIF: each step may decompress and decode a full
+/// row group (CPU-heavy). File-backed streams also perform read I/O inside
+/// the same iterator step, so this must not run on a normal scheduler thread.
+#[rustler::nif(schedule = "DirtyCpu")]
 pub fn parquet_stream_next<'a>(
     env: Env<'a>,
     stream: ResourceArc<ExArrowParquetStream>,
