@@ -75,6 +75,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cargo.toml** — `arrow` crate updated to include the `ffi` feature;
   `ex_arrow_native` version bumped to `0.4.0`.
 - **`nx` optional dependency** constraint updated from `~> 0.7` to `~> 0.9`.
+- **`adbc` optional dependency** constraint updated from `~> 0.7` to `~> 0.9` to
+  match current Hex releases (`mix.lock` resolves e.g. 0.9.0; `~> 0.7` only
+  allowed `< 0.8.0`).  Documentation and Livebook examples updated accordingly.
+- **Parquet `parquet_stream_next` NIF** — scheduled as **dirty CPU** (`schedule =
+  "DirtyCpu"` in Rust) so lazy row-group decode does not block normal BEAM
+  scheduler threads.
 
 ### Fixed
 
@@ -82,6 +88,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `BadMapError` when the manager state was a cached `{:error, reason}` tuple
   (i.e. after a failed driver start).  A `when not is_map(state)` guard clause
   now returns `{:error, :not_configured}` cleanly.
+- **`AdbcPackageManager` startup failure** — when pool or connection startup failed
+  after spawning a `Database` process linked to the manager, `Process.exit(db_pid,
+  :kill)` could kill the manager via the link.  The manager now **unlinks** the
+  database pid before terminating it.
 - **`ExArrow.Parquet` stream lock** now propagates `ArrowError` from the lazy
   iterator (previously impossible with eager loading; now correctly returned as
   `{:error, msg}`).

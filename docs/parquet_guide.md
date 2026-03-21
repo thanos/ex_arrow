@@ -162,6 +162,11 @@ open until the stream resource is garbage-collected; for binary-backed streams
 (`from_binary/1`) the bytes are held in native memory and released at the same
 time.
 
+**Implementation note:** each `Stream.next/1` call runs the native
+`parquet_stream_next` step on a **dirty CPU** NIF scheduler so row-group decode
+(and any file read inside that step) does not block normal BEAM scheduler
+threads.
+
 ---
 
 ## Comparison with IPC

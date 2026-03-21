@@ -35,6 +35,7 @@ Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, and ADBC database
 - [Roadmap](#roadmap)
   - [Shipped (v0.2.0)](#shipped-v020)
   - [Shipped (v0.3.0)](#shipped-v030)
+  - [Shipped (v0.4.0)](#shipped-v040)
 - [FAQ](#faq)
 - [License](#license)
 
@@ -750,6 +751,12 @@ welcome for any of them.
 
 ### Shipped (v0.4.0)
 
+- **`:adbc_package` supervised backend** — use the Elixir `adbc` packages
+  (`Adbc.Database` / `Adbc.Connection`) under `ExArrow`’s supervision instead of
+  loading a native ADBC driver via the NIF. Configure `config :ex_arrow, :adbc_package`,
+  then `Database.open(:adbc_package)`; optional `NimblePool` when
+  `adbc_package_pool_size > 1`. Requires `{:adbc, "~> 0.9"}` and
+  `{:explorer, "~> 0.11"}` for result conversion.
 - **Arrow C Data Interface** — `ExArrow.CDI`: export a RecordBatch to
   `FFI_ArrowArray` + `FFI_ArrowSchema` C structs and import them back.
   Pointer addresses are exposed for interop with any CDI-compatible runtime
