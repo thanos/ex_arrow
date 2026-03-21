@@ -40,6 +40,18 @@ defmodule ExArrow.ADBC.ConnectionPoolTest do
   defp new_stmt, do: %Statement{resource: make_ref()}
   defp new_stream, do: %Stream{resource: make_ref(), backend: :adbc}
 
+  # Mock NimblePool return pid: spawn_link + on_exit kill so failed assertions
+  # cannot leave sleep(:infinity) processes in the VM.
+  defp fake_nimble_pool_pid do
+    pid = spawn_link(fn -> Process.sleep(:infinity) end)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: Process.exit(pid, :kill)
+    end)
+
+    pid
+  end
+
   # ── NimblePoolBehaviour ──────────────────────────────────────────────────────
 
   describe "NimblePoolBehaviour" do
@@ -145,8 +157,7 @@ defmodule ExArrow.ADBC.ConnectionPoolTest do
     end
 
     test "delegates to NimblePool.start_link with correct options", %{db: db} do
-      # Fake pool pid — must not outlive the test (spawn_link cleans up on test exit).
-      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      pid = fake_nimble_pool_pid()
 
       expect(ExArrow.NimblePoolMock, :start_link, fn opts ->
         assert opts[:worker] == {ConnectionPool, db}
@@ -159,7 +170,7 @@ defmodule ExArrow.ADBC.ConnectionPoolTest do
     end
 
     test "includes :name in pool opts when provided", %{db: db} do
-      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      pid = fake_nimble_pool_pid()
       name = {:global, make_ref()}
 
       expect(ExArrow.NimblePoolMock, :start_link, fn opts ->
@@ -171,7 +182,7 @@ defmodule ExArrow.ADBC.ConnectionPoolTest do
     end
 
     test "omits :name from pool opts when not provided", %{db: db} do
-      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      pid = fake_nimble_pool_pid()
 
       expect(ExArrow.NimblePoolMock, :start_link, fn opts ->
         refute Keyword.has_key?(opts, :name)

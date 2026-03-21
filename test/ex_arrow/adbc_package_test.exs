@@ -36,7 +36,7 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     Application.delete_env(:ex_arrow, :adbc_package_pool_size)
 
     if pid = Process.whereis(ExArrow.ADBC.AdbcPackageManager) do
-      GenServer.stop(pid, :normal, 5_000)
+      GenServer.stop(pid, :shutdown, 5_000)
       Process.sleep(50)
     end
 
@@ -46,7 +46,9 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
       pid = Process.whereis(ExArrow.ADBC.AdbcPackageManager)
 
       if is_pid(pid) and Process.alive?(pid) do
-        GenServer.stop(pid, :normal, 5_000)
+        # :shutdown (not :normal) propagates exit to linked stub processes from
+        # AdbcDbStub / AdbcConnStub spawn_link; :normal would leave them sleeping.
+        GenServer.stop(pid, :shutdown, 5_000)
       end
 
       if saved_package != nil, do: Application.put_env(:ex_arrow, :adbc_package, saved_package)
@@ -56,6 +58,18 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     end)
 
     :ok
+  end
+
+  # Fake db/conn/pool pids that sleep forever: spawn_link + on_exit kill so nothing
+  # lingers if a test aborts before normal teardown (e.g. failed assertion).
+  defp infinity_stub_pid do
+    pid = spawn_link(fn -> Process.sleep(:infinity) end)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: Process.exit(pid, :kill)
+    end)
+
+    pid
   end
 
   describe "DatabaseAdbcPackageImpl" do
@@ -79,8 +93,8 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     test "open(:adbc_package) returns {:ok, db} when pids are available" do
       # Inject a state that looks like a live backend using sys.replace_state.
       mgr = Process.whereis(ExArrow.ADBC.AdbcPackageManager)
-      db_pid = spawn_link(fn -> Process.sleep(:infinity) end)
-      conn_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      db_pid = infinity_stub_pid()
+      conn_pid = infinity_stub_pid()
       :sys.replace_state(mgr, fn _s -> %{db: db_pid, conn: conn_pid} end)
 
       assert {:ok, %Database{resource: :adbc_package}} = Database.open(:adbc_package)
@@ -218,7 +232,7 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     end
 
     test "terminate_worker/3 kills a live connection process" do
-      conn_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      conn_pid = infinity_stub_pid()
       assert Process.alive?(conn_pid)
 
       # Unlink before the intentional kill: terminate_worker uses Process.exit/2
@@ -268,7 +282,7 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     end
 
     test "start_link/1 delegates to NimblePool.start_link with correct opts" do
-      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      pid = infinity_stub_pid()
       db_pid = self()
 
       stub(ExArrow.NimblePoolMock, :start_link, fn opts ->
@@ -282,7 +296,7 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     end
 
     test "start_link/1 uses __MODULE__ as default name" do
-      pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      pid = infinity_stub_pid()
 
       stub(ExArrow.NimblePoolMock, :start_link, fn opts ->
         assert opts[:name] == ExArrow.ADBC.AdbcPackagePool
@@ -385,7 +399,7 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     end
 
     test "start_pool path: use_pool? true covers start_pool success" do
-      pool_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      pool_pid = infinity_stub_pid()
 
       stub(ExArrow.NimblePoolMock, :start_link, fn _opts -> {:ok, pool_pid} end)
 
@@ -420,8 +434,8 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
         explorer_df_module: ExArrow.ADBC.ExplorerDfStub
       )
 
-      db_pid = spawn_link(fn -> Process.sleep(:infinity) end)
-      conn_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      db_pid = infinity_stub_pid()
+      conn_pid = infinity_stub_pid()
       inject_state(%{db: db_pid, conn: conn_pid})
 
       {:ok, ref} = AdbcPackageManager.create_statement()
@@ -441,7 +455,7 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
         explorer_df_module: ExArrow.ADBC.ExplorerDfStub
       )
 
-      db_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      db_pid = infinity_stub_pid()
       inject_state(%{db: db_pid, pool: ExArrow.ADBC.AdbcPackagePool})
 
       {:ok, ref} = AdbcPackageManager.create_statement()
@@ -453,8 +467,8 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     test "execute_statement query error: covers {:error, _} reply in handle_call" do
       put_stubs(adbc_conn_module: ExArrow.ADBC.AdbcConnQueryErrStub)
 
-      db_pid = spawn_link(fn -> Process.sleep(:infinity) end)
-      conn_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      db_pid = infinity_stub_pid()
+      conn_pid = infinity_stub_pid()
       inject_state(%{db: db_pid, conn: conn_pid})
 
       {:ok, ref} = AdbcPackageManager.create_statement()
@@ -471,8 +485,8 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
         explorer_df_module: ExArrow.ADBC.NonExistentExplorer
       )
 
-      db_pid = spawn_link(fn -> Process.sleep(:infinity) end)
-      conn_pid = spawn_link(fn -> Process.sleep(:infinity) end)
+      db_pid = infinity_stub_pid()
+      conn_pid = infinity_stub_pid()
       inject_state(%{db: db_pid, conn: conn_pid})
 
       {:ok, ref} = AdbcPackageManager.create_statement()
