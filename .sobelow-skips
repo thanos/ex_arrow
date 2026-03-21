@@ -1,3 +1,4 @@
 
 SQL.Query: SQL injection,lib/ex_arrow/adbc/adbc_package_manager.ex:105,34277FB
 SQL.Query: SQL injection,lib/ex_arrow/adbc/adbc_package_manager.ex:110,18AD068
+SQL.Query: SQL injection,lib/ex_arrow/adbc/adbc_package_manager.ex:114,40411AD

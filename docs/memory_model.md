@@ -7,8 +7,9 @@ ExArrow uses **opaque handles** (Elixir structs wrapping a `resource` reference)
 ## Copying rules
 
 - **By default**: No copying. Functions return handles or small metadata (e.g. field names, row count). Large buffers stay in native memory.
-- **Explicit copy**: When we add accessors that return Elixir lists or binaries (e.g. "give me column X as a list"), that will be documented as copying data onto the BEAM heap.
-- **Streaming**: IPC and Flight streams yield RecordBatch handles one at a time. Consume and drop handles to allow native memory to be reclaimed; do not hold all batches in memory if you need low footprint.
+- **Explicit copy**: Accessors that return Elixir lists or binaries (e.g. `ExArrow.Nx.column_to_tensor/2`) copy the buffer once from native Arrow memory onto the BEAM heap and are documented as such.
+- **Streaming**: IPC, Flight, and Parquet streams yield `RecordBatch` handles one at a time. Consume and drop handles to allow native memory to be reclaimed; do not hold all batches in memory if you need a low footprint.
+- **CDI transfer**: `ExArrow.CDI.export/1` exposes a `RecordBatch`'s `FFI_ArrowSchema` and `FFI_ArrowArray` C structs as raw pointer addresses, enabling a CDI-compatible runtime (Polars, DuckDB, etc.) running in the same OS process to import the data **without any copy or serialisation**. The BEAM resource holds the C structs alive until `import/1` or `mark_consumed/1` is called. See [CDI guide](cdi_guide.md).
 
 ## NIF scheduling
 

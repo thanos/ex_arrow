@@ -78,6 +78,10 @@ defmodule ExArrow.ADBC.AdbcPackageManager do
   end
 
   # sobelow_skip ["Sobelow.SQL.Query"]
+  def handle_call({:set_statement_sql, _ref, _sql}, _from, state) when not is_map(state) do
+    {:reply, {:error, :not_configured}, state}
+  end
+
   def(handle_call({:set_statement_sql, ref, sql}, _from, state)) do
     table = Map.get(state, :table)
 
@@ -134,8 +138,7 @@ defmodule ExArrow.ADBC.AdbcPackageManager do
       pool_module.query(pool, sql)
     else
       conn_pid = Map.get(state, :conn)
-      conn_module = Module.safe_concat(["Elixir", "Adbc", "Connection"])
-      apply(conn_module, :query, [conn_pid, sql])
+      apply(adbc_conn_module(), :query, [conn_pid, sql])
     end
   end
 
@@ -163,8 +166,7 @@ defmodule ExArrow.ADBC.AdbcPackageManager do
   end
 
   defp start_database(opts) do
-    db_module = Module.safe_concat(["Elixir", "Adbc", "Database"])
-    apply(db_module, :start_link, [opts])
+    apply(adbc_db_module(), :start_link, [opts])
   end
 
   defp use_pool? do
@@ -182,6 +184,9 @@ defmodule ExArrow.ADBC.AdbcPackageManager do
         ok
 
       {:error, reason} ->
+        # Unlink before killing so the :killed exit signal does not propagate
+        # back to this process (start_link creates a bidirectional link).
+        Process.unlink(db_pid)
         Process.exit(db_pid, :kill)
         {:error, reason}
     end
@@ -201,24 +206,54 @@ defmodule ExArrow.ADBC.AdbcPackageManager do
   end
 
   defp start_connection(db_pid, state) do
-    conn_module = Module.safe_concat(["Elixir", "Adbc", "Connection"])
-
-    case apply(conn_module, :start_link, [[database: db_pid]]) do
+    case apply(adbc_conn_module(), :start_link, [[database: db_pid]]) do
       {:ok, conn_pid} -> {:ok, Map.merge(state, %{db: db_pid, conn: conn_pid})}
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp adbc_db_module,
+    do:
+      Application.get_env(
+        :ex_arrow,
+        :adbc_db_module,
+        Module.safe_concat(["Elixir", "Adbc", "Database"])
+      )
+
+  defp adbc_conn_module,
+    do:
+      Application.get_env(
+        :ex_arrow,
+        :adbc_conn_module,
+        Module.safe_concat(["Elixir", "Adbc", "Connection"])
+      )
+
+  defp adbc_result_module,
+    do:
+      Application.get_env(
+        :ex_arrow,
+        :adbc_result_module,
+        Module.safe_concat(["Elixir", "Adbc", "Result"])
+      )
+
+  defp explorer_df_module,
+    do:
+      Application.get_env(
+        :ex_arrow,
+        :explorer_df_module,
+        Module.safe_concat(["Elixir", "Explorer", "DataFrame"])
+      )
 
   defp adbc_result_to_stream({:ok, result}) do
     adbc_result_to_stream(result)
   end
 
   defp adbc_result_to_stream(result) do
-    result_module = Module.safe_concat(["Elixir", "Adbc", "Result"])
+    result_module = adbc_result_module()
     materialized = apply(result_module, :materialize, [result])
     map = apply(result_module, :to_map, [materialized])
 
-    explorer_df = Module.safe_concat(["Elixir", "Explorer", "DataFrame"])
+    explorer_df = explorer_df_module()
 
     if Code.ensure_loaded?(explorer_df) do
       df = apply(explorer_df, :new, [map])

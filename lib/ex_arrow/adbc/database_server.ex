@@ -43,9 +43,12 @@ defmodule ExArrow.ADBC.DatabaseServer do
 
   @doc """
   Returns the `ExArrow.ADBC.Database.t()` held by the named server.
+
+  `name` can be any valid GenServer name: a local atom, a
+  `{:global, term}` tuple, or a `{:via, module, term}` tuple.
   """
-  @spec get(atom()) :: Database.t()
-  def get(name) when is_atom(name) do
+  @spec get(GenServer.name()) :: Database.t()
+  def get(name) do
     GenServer.call(name, :get)
   end
 

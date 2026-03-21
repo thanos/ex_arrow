@@ -7,7 +7,7 @@ defmodule ExArrow.Nx do
   handing it directly to `Nx.from_binary/2`.  No intermediate list
   materialisation occurs.
 
-  Requires `{:nx, "~> 0.7"}` in your `mix.exs` dependencies.  When Nx is
+  Requires `{:nx, "~> 0.9"}` in your `mix.exs` dependencies.  When Nx is
   absent every function returns `{:error, "Nx is not available..."}`.
 
   ### Supported column types
@@ -35,13 +35,29 @@ defmodule ExArrow.Nx do
   your column contains nulls and you need to distinguish them, inspect the
   original batch (null support may be added in a future release).
 
+  ## Public API
+
+  | Function | Direction | Description |
+  |----------|-----------|-------------|
+  | `column_to_tensor/2` | Arrow → Nx | Extract one named numeric column as an `Nx.Tensor` |
+  | `to_tensors/1` | Arrow → Nx | Extract all numeric columns as `%{name => Nx.Tensor}` |
+  | `from_tensor/2` | Nx → Arrow | Single tensor → single-column `RecordBatch` |
+  | `from_tensors/1` | Nx → Arrow | Map of tensors → multi-column `RecordBatch` (single NIF call) |
+
   ## Quick example
 
-      # Read a batch, extract the "price" column as a float64 tensor
+      # Read a batch, extract one column as a tensor
       {:ok, stream}  = ExArrow.Parquet.Reader.from_file("/data/trades.parquet")
       batch          = ExArrow.Stream.next(stream)
       {:ok, tensor}  = ExArrow.Nx.column_to_tensor(batch, "price")
       mean_price     = tensor |> Nx.mean() |> Nx.to_number()
+
+      # Build a multi-column batch from tensors (v0.4+)
+      tensors = %{
+        "price"  => Nx.tensor([1.0, 2.0, 3.0], type: {:f, 64}),
+        "volume" => Nx.tensor([10, 20, 30],     type: {:s, 64})
+      }
+      {:ok, batch} = ExArrow.Nx.from_tensors(tensors)
   """
 
   alias ExArrow.Native
@@ -177,6 +193,94 @@ defmodule ExArrow.Nx do
       end
     end
 
+    @doc """
+    Convert a map of `{column_name => Nx.Tensor}` to a multi-column
+    `ExArrow.RecordBatch` in a single call.
+
+    All tensors must have the same number of elements (`Nx.size/1`).  For
+    rank-2 or higher-rank tensors the elements are flattened into a 1-D column.
+
+    Column order in the resulting batch follows `Map.to_list/1` ordering (i.e.
+    sorted by key).  Supported dtypes are the same as `from_tensor/2`.
+
+    Returns `{:ok, batch}` or `{:error, message}`.
+
+    ## Examples
+
+        tensors = %{
+          "price" => Nx.tensor([1.5, 2.5, 3.5], type: {:f, 64}),
+          "qty"   => Nx.tensor([10, 20, 30],     type: {:s, 32})
+        }
+        {:ok, batch} = ExArrow.Nx.from_tensors(tensors)
+        ExArrow.RecordBatch.num_rows(batch)  #=> 3
+
+        # Round-trip: all columns
+        {:ok, recovered} = ExArrow.Nx.to_tensors(batch)
+        Nx.to_list(recovered["price"])  #=> [1.5, 2.5, 3.5]
+
+        # Mismatched sizes return an error
+        bad = %{"a" => Nx.tensor([1, 2]), "b" => Nx.tensor([1, 2, 3])}
+        {:error, _} = ExArrow.Nx.from_tensors(bad)
+    """
+    @spec from_tensors(%{String.t() => Nx.Tensor.t()}) ::
+            {:ok, RecordBatch.t()} | {:error, String.t()}
+    def from_tensors(tensors) when is_map(tensors) do
+      case collect_tensor_columns(Map.to_list(tensors)) do
+        {:error, _} = err ->
+          err
+
+        {:ok, [], [], [], []} ->
+          {:error, "from_tensors requires at least one column"}
+
+        {:ok, names_rev, dtypes_rev, binaries_rev, lengths_rev} ->
+          build_from_columns(names_rev, dtypes_rev, binaries_rev, lengths_rev)
+      end
+    end
+
+    defp collect_tensor_columns(entries) do
+      Enum.reduce_while(entries, {:ok, [], [], [], []}, fn
+        {name, tensor}, {:ok, ns, ds, bs, ls} ->
+          collect_one_column(name, tensor, ns, ds, bs, ls)
+      end)
+    end
+
+    defp collect_one_column(name, tensor, ns, ds, bs, ls) do
+      if is_binary(name) do
+        case nx_dtype_to_arrow(Nx.type(tensor)) do
+          {:ok, dtype_str} ->
+            {:cont,
+             {:ok, [name | ns], [dtype_str | ds], [Nx.to_binary(tensor) | bs],
+              [Nx.size(tensor) | ls]}}
+
+          {:error, _} = err ->
+            {:halt, err}
+        end
+      else
+        {:halt, {:error, "column name must be a string, got: #{inspect(name)}"}}
+      end
+    end
+
+    defp build_from_columns(names_rev, dtypes_rev, binaries_rev, lengths_rev) do
+      unique_lengths = Enum.uniq(lengths_rev)
+
+      if length(unique_lengths) > 1 do
+        {:error,
+         "all tensors must have the same size; got sizes #{inspect(Enum.reverse(lengths_rev))}"}
+      else
+        [len | _] = lengths_rev
+
+        case Native.record_batch_from_column_binaries(
+               Enum.reverse(names_rev),
+               Enum.reverse(binaries_rev),
+               Enum.reverse(dtypes_rev),
+               len
+             ) do
+          {:ok, ref} -> {:ok, RecordBatch.from_ref(ref)}
+          {:error, _} = err -> err
+        end
+      end
+    end
+
     # ── dtype helpers ────────────────────────────────────────────────────────
 
     defp parse_nx_dtype("s8"), do: {:ok, {:s, 8}}
@@ -214,8 +318,11 @@ defmodule ExArrow.Nx do
     @doc false
     def from_tensor(_tensor, _col_name), do: {:error, nx_missing_message()}
 
+    @doc false
+    def from_tensors(_tensors), do: {:error, nx_missing_message()}
+
     defp nx_missing_message do
-      "Nx is not available. Add {:nx, \"~> 0.7\"} to your mix.exs dependencies."
+      "Nx is not available. Add {:nx, \"~> 0.9\"} to your mix.exs dependencies."
     end
   end
 end

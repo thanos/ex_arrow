@@ -38,6 +38,12 @@ defmodule ExArrow.ExplorerTest do
         assert {:ok, df} = ExArrowExplorer.from_stream(stream2)
         assert Enum.sort(Explorer.DataFrame.names(df)) == Enum.sort(expected_cols)
       end
+
+      test "returns {:error, msg} when the stream raises during schema/next" do
+        bad_stream = %ExArrow.Stream{resource: make_ref(), backend: :ipc}
+        assert {:error, msg} = ExArrowExplorer.from_stream(bad_stream)
+        assert is_binary(msg)
+      end
     end
 
     describe "from_record_batch/1" do
@@ -46,6 +52,12 @@ defmodule ExArrow.ExplorerTest do
         assert {:ok, df} = ExArrowExplorer.from_record_batch(batch)
         assert is_struct(df, Explorer.DataFrame)
         assert Explorer.DataFrame.n_rows(df) == 2
+      end
+
+      test "returns {:error, msg} when batch resource is invalid" do
+        bad_batch = %ExArrow.RecordBatch{resource: make_ref()}
+        assert {:error, msg} = ExArrowExplorer.from_record_batch(bad_batch)
+        assert is_binary(msg)
       end
     end
 
@@ -57,6 +69,11 @@ defmodule ExArrow.ExplorerTest do
         batch = Stream.next(stream)
         assert ExArrow.RecordBatch.num_rows(batch) == 3
       end
+
+      test "returns {:error, msg} when dataframe raises during dump" do
+        assert {:error, msg} = ExArrowExplorer.to_stream(:not_a_dataframe)
+        assert is_binary(msg)
+      end
     end
 
     describe "to_record_batches/1" do
@@ -67,6 +84,11 @@ defmodule ExArrow.ExplorerTest do
         assert batches != []
         total = Enum.sum(Enum.map(batches, &ExArrow.RecordBatch.num_rows/1))
         assert total == 2
+      end
+
+      test "returns {:error, msg} when dataframe raises" do
+        assert {:error, msg} = ExArrowExplorer.to_record_batches(:not_a_dataframe)
+        assert is_binary(msg)
       end
     end
   else

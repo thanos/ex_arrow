@@ -1,14 +1,28 @@
 defmodule ExArrow.Stream do
   @moduledoc """
-  Arrow stream handle (opaque reference to native stream).
+  Opaque handle to a native Arrow record-batch stream.
 
-  Used for IPC streaming, Flight result streams, and ADBC execute results.
-  Yields record batches via an Elixir iterator; data stays in native memory until consumed.
+  Provides a unified iterator interface over three backing sources:
 
-  The `backend` field is `:ipc` for IPC/Flight streams and `:adbc` for ADBC result streams.
-  Callers typically do not set it; it is set when the stream is created.
+  | Backend    | Created by                                              |
+  |------------|---------------------------------------------------------|
+  | `:ipc`     | `ExArrow.IPC.Reader` — Arrow IPC stream or file format  |
+  | `:parquet` | `ExArrow.Parquet.Reader` — lazy row-group Parquet reader |
+  | `:adbc`    | `ExArrow.ADBC.Statement.execute/1` — SQL result streams |
+
+  Flight `do_get` results also use the `:ipc` backend (the Flight client
+  returns an IPC stream resource).
+
+  All three backends expose the same three functions:
+
+  - `schema/1` — inspect the Arrow schema without consuming any batches
+  - `next/1` — read the next batch on demand (`nil` when exhausted)
+  - `to_list/1` — collect all remaining batches into a list
+
+  Record batch data stays in native Arrow memory until consumed.  Callers
+  never set the `backend` field directly; it is assigned by the function that
+  opens the stream.
   """
-  alias ExArrow.Native
   alias ExArrow.RecordBatch
   alias ExArrow.Schema
 
@@ -21,21 +35,21 @@ defmodule ExArrow.Stream do
   """
   @spec schema(t()) :: {:ok, Schema.t()} | {:error, String.t()}
   def schema(%__MODULE__{resource: ref, backend: :adbc}) do
-    case Native.adbc_stream_schema(ref) do
+    case native().adbc_stream_schema(ref) do
       {:error, msg} -> {:error, msg}
       schema_ref -> {:ok, Schema.from_ref(schema_ref)}
     end
   end
 
   def schema(%__MODULE__{resource: ref, backend: :ipc}) do
-    case Native.ipc_stream_schema(ref) do
+    case native().ipc_stream_schema(ref) do
       {:error, msg} -> {:error, msg}
       schema_ref -> {:ok, Schema.from_ref(schema_ref)}
     end
   end
 
   def schema(%__MODULE__{resource: ref, backend: :parquet}) do
-    schema_ref = Native.parquet_stream_schema(ref)
+    schema_ref = native().parquet_stream_schema(ref)
     {:ok, Schema.from_ref(schema_ref)}
   end
 
@@ -45,7 +59,7 @@ defmodule ExArrow.Stream do
   """
   @spec next(t()) :: RecordBatch.t() | nil | {:error, String.t()}
   def next(%__MODULE__{resource: ref, backend: :adbc}) do
-    case Native.adbc_stream_next(ref) do
+    case native().adbc_stream_next(ref) do
       :done -> nil
       {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
       {:error, msg} -> {:error, msg}
@@ -53,7 +67,7 @@ defmodule ExArrow.Stream do
   end
 
   def next(%__MODULE__{resource: ref, backend: :ipc}) do
-    case Native.ipc_stream_next(ref) do
+    case native().ipc_stream_next(ref) do
       :done -> nil
       {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
       {:error, msg} -> {:error, msg}
@@ -61,7 +75,7 @@ defmodule ExArrow.Stream do
   end
 
   def next(%__MODULE__{resource: ref, backend: :parquet}) do
-    case Native.parquet_stream_next(ref) do
+    case native().parquet_stream_next(ref) do
       :done -> nil
       {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
       {:error, msg} -> {:error, msg}
@@ -78,6 +92,8 @@ defmodule ExArrow.Stream do
   def to_list(%__MODULE__{} = stream) do
     do_collect(stream, [])
   end
+
+  defp native, do: Application.get_env(:ex_arrow, :stream_native, ExArrow.Native)
 
   defp do_collect(stream, acc) do
     case next(stream) do

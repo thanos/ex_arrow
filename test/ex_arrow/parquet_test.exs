@@ -66,6 +66,18 @@ defmodule ExArrow.ParquetTest do
     test "from_file returns error for missing file" do
       assert {:error, _msg} = Parquet.Reader.from_file("/tmp/this_does_not_exist_xyz.parquet")
     end
+
+    test "to_file returns error when parent directory does not exist" do
+      {schema, batch} = source_batch()
+      path = "/nonexistent_dir_#{:erlang.unique_integer([:positive])}/out.parquet"
+      assert {:error, _msg} = Parquet.Writer.to_file(path, schema, [batch])
+    end
+  end
+
+  describe "Reader.from_binary/1" do
+    test "returns error for non-Parquet binary" do
+      assert {:error, _msg} = Parquet.Reader.from_binary("this is not parquet data")
+    end
   end
 
   describe "Stream integration" do
@@ -75,6 +87,50 @@ defmodule ExArrow.ParquetTest do
       assert {:ok, stream} = Parquet.Reader.from_binary(parquet_bin)
       batches = Stream.to_list(stream)
       assert length(batches) == 1
+    end
+  end
+
+  describe "lazy row-group streaming" do
+    test "batches are produced lazily via Stream.next/1" do
+      {schema, batch} = source_batch()
+      assert {:ok, parquet_bin} = Parquet.Writer.to_binary(schema, [batch])
+      assert {:ok, stream} = Parquet.Reader.from_binary(parquet_bin)
+
+      # First call returns the batch; second call signals end-of-stream.
+      first = Stream.next(stream)
+      assert first != nil
+      assert ExArrow.RecordBatch.num_rows(first) > 0
+
+      assert Stream.next(stream) == nil
+    end
+
+    test "multiple independent streams are isolated" do
+      {schema, batch} = source_batch()
+      assert {:ok, parquet_bin} = Parquet.Writer.to_binary(schema, [batch])
+
+      assert {:ok, stream1} = Parquet.Reader.from_binary(parquet_bin)
+      assert {:ok, stream2} = Parquet.Reader.from_binary(parquet_bin)
+
+      # Consuming stream1 does not affect stream2.
+      _b1 = Stream.next(stream1)
+      assert Stream.next(stream1) == nil
+
+      b2 = Stream.next(stream2)
+      assert b2 != nil
+      assert ExArrow.RecordBatch.num_rows(b2) == ExArrow.RecordBatch.num_rows(batch)
+    end
+
+    @tag :tmp_dir
+    test "file-backed stream reads lazily without loading entire file", %{tmp_dir: dir} do
+      path = Path.join(dir, "lazy.parquet")
+      {schema, batch} = source_batch()
+      assert :ok = Parquet.Writer.to_file(path, schema, [batch])
+
+      assert {:ok, stream} = Parquet.Reader.from_file(path)
+      rt_batch = Stream.next(stream)
+      assert rt_batch != nil
+      assert ExArrow.RecordBatch.num_rows(rt_batch) == ExArrow.RecordBatch.num_rows(batch)
+      assert Stream.next(stream) == nil
     end
   end
 end

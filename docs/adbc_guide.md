@@ -31,7 +31,7 @@ If you want higher-level driver management (configuration and on-demand
 download), you can use the separate
 [`adbc`](https://hex.pm/packages/adbc) package:
 
-- Add `{:adbc, "~> 0.7"}` to your project.
+- Add `{:adbc, "~> 0.9"}` to your project.
 - Configure drivers or call `Adbc.download_driver!/1` to ensure they are
   available (for example `:sqlite`, `:postgresql`, `:snowflake`).
 - Then open the database with ExArrow, either by path or by `driver_name` and
@@ -65,7 +65,7 @@ the database via `ExArrow.ADBC.Database.open/1`:
 
 When you want to use the [`adbc`](https://hex.pm/packages/adbc) Hex package’s process-based Database/Connection (and its drivers) **instead of** loading a native ADBC C driver, configure ExArrow to start and supervise the adbc processes:
 
-1. Add `{:adbc, "~> 0.7"}`, `{:explorer, "~> 0.8"}` (needed to convert query results to `ExArrow.Stream`), and optionally `{:nimble_pool, "~> 1.1"}` (for connection pooling) to your deps.
+1. Add `{:adbc, "~> 0.9"}`, `{:explorer, "~> 0.11"}` (needed to convert query results to `ExArrow.Stream`), and optionally `{:nimble_pool, "~> 1.1"}` (for connection pooling) to your deps.
 2. Set `config :ex_arrow, :adbc_package` to a keyword list of options passed to `Adbc.Database.start_link/1` (e.g. `[driver: :sqlite, uri: ":memory:"]`).
 
 ExArrow’s application will then start the adbc_package backend (which starts `Adbc.Database` and `Adbc.Connection` under ExArrow’s supervisor. You can open that connection with `Database.open(:adbc_package)` and use the usual flow (Connection.open → Statement.new(conn, sql) → execute). No native driver path or name is required.
@@ -165,14 +165,15 @@ Errors (driver load failure, execute failure, unsupported operation) are returne
 
 ## Support matrix
 
-| Feature | ExArrow API | Driver support |
-|---------|-------------|----------------|
-| Database.open (path / name) | ✓ | All drivers |
-| Connection.open | ✓ | All drivers |
-| Statement.new(conn, sql), execute | ✓ | All drivers |
-| get_table_types | ✓ | Varies (e.g. SQLite ✓) |
-| get_table_schema | ✓ | Varies |
-| get_objects | ✓ | Varies |
-| Statement.bind | ✓ | Varies |
+| Feature | Native driver backend | `:adbc_package` backend |
+|---------|----------------------|------------------------|
+| `Database.open(path / keyword)` | ✓ All drivers | `Database.open(:adbc_package)` |
+| `Connection.open` | ✓ All drivers | ✓ |
+| `Statement.new(conn, sql)` + `execute` | ✓ All drivers | ✓ (requires Explorer) |
+| `get_table_types` | ✓ Varies (SQLite ✓) | ✗ returns error |
+| `get_table_schema` | ✓ Varies | ✗ returns error |
+| `get_objects` | ✓ Varies | ✗ returns error |
+| `Statement.bind` | ✓ Varies | ✗ returns error |
+| Connection pooling | `ConnectionPool` (NimblePool) | ✓ `adbc_package_pool_size > 1` |
 
 Run `mix test --include adbc` with a driver to exercise metadata and binding; without a driver those tests fail with a clear message. Use `mix test --exclude adbc` to skip ADBC integration tests.

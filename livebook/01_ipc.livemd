@@ -3,7 +3,7 @@
 ```elixir
 Mix.install([
   {:ex_arrow, path: Path.join(__DIR__, "..")},
-  {:explorer, "~> 0.8"}
+  {:explorer, "~> 0.11"}
 ])
 ```
 
@@ -155,7 +155,7 @@ if Code.ensure_loaded?(Explorer.DataFrame) do
   df = Explorer.DataFrame.load_ipc_stream!(binary)
   df["id"]
 else
-  "Explorer not loaded; add {:explorer, \"~> 0.8\"} to deps to try this."
+  "Explorer not loaded; add {:explorer, \"~> 0.11\"} to deps to try this."
 end
 ```
 

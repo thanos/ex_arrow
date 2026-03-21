@@ -44,7 +44,7 @@ case ExArrow.ADBC.DriverHelper.ensure_driver_and_open(:sqlite, ":memory:") do
 
   {:error, msg} ->
     IO.puts("Driver not available: #{msg}")
-    IO.puts("Add {:adbc, \"~> 0.7\"} to deps to use DriverHelper, or install an ADBC driver and open by path/name.")
+    IO.puts("Add {:adbc, \"~> 0.9\"} to deps to use DriverHelper, or install an ADBC driver and open by path/name.")
     db = nil
 end
 ```

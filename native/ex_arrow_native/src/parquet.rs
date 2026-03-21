@@ -1,61 +1,42 @@
 //! Parquet NIFs: read and write Parquet files and in-memory binary blobs.
 //!
-//! Streams are eagerly loaded on open (Parquet is a columnar format optimised for
-//! read-all-then-process workloads).  The resulting `ExArrowParquetStream` behaves
-//! identically to an IPC stream from the Elixir side.
+//! Readers are **lazily** iterated: each call to `parquet_stream_next` reads
+//! the next row-group from the underlying file/bytes without pre-loading the
+//! entire file into memory.  This is ideal for large Parquet files where only a
+//! subset of batches will be consumed.
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 use bytes::Bytes;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
 
+use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use arrow_schema::SchemaRef;
-use rustler::resource::{
-    open_struct_resource_type, ResourceArc, ResourceTypeProvider, NIF_RESOURCE_FLAGS,
-};
+use rustler::ResourceArc;
 use rustler::{Encoder, Env, Term};
 
 use crate::resources::{ExArrowRecordBatch, ExArrowSchema};
-use crate::util::{err_encode, ok_encode, SyncResourceType};
+use crate::util::{err_encode, ok_encode};
 
 // ── Resource ────────────────────────────────────────────────────────────────
 
-/// Holds eagerly-collected Parquet batches; schema cached separately for
+/// Holds a lazy Parquet reader iterator; schema cached separately for
 /// zero-cost `parquet_stream_schema` calls.
 pub struct ExArrowParquetStream {
     pub schema: SchemaRef,
-    pub batches: Mutex<std::vec::IntoIter<RecordBatch>>,
+    pub reader: Mutex<Box<dyn Iterator<Item = Result<RecordBatch, ArrowError>> + Send>>,
 }
 
-static EX_ARROW_PARQUET_STREAM_TYPE: OnceLock<SyncResourceType<ExArrowParquetStream>> =
-    OnceLock::new();
-
-impl ResourceTypeProvider for ExArrowParquetStream {
-    fn get_type() -> &'static rustler::resource::ResourceType<Self> {
-        &EX_ARROW_PARQUET_STREAM_TYPE
-            .get()
-            .expect("ExArrowParquetStream resource not initialised (on_load not run?)")
-            .0
-    }
-}
-
-pub fn parquet_register_resources(env: Env) -> bool {
-    let flags = NIF_RESOURCE_FLAGS::ERL_NIF_RT_CREATE;
-    let Some(t) =
-        open_struct_resource_type::<ExArrowParquetStream>(env, "ExArrowParquetStream\0", flags)
-    else {
-        return false;
-    };
-    let _ = EX_ARROW_PARQUET_STREAM_TYPE.set(SyncResourceType(t));
-    true
-}
+#[rustler::resource_impl]
+impl rustler::Resource for ExArrowParquetStream {}
 
 // ── Readers ─────────────────────────────────────────────────────────────────
 
-/// Open a Parquet file for reading.  Returns `{:ok, stream_ref}` or `{:error, msg}`.
+/// Open a Parquet file for lazy row-group streaming.
+/// Returns `{:ok, stream_ref}` or `{:error, msg}`.
 #[rustler::nif]
 pub fn parquet_reader_from_file<'a>(env: Env<'a>, path: String) -> Term<'a> {
     let file = match std::fs::File::open(&path) {
@@ -69,7 +50,8 @@ pub fn parquet_reader_from_file<'a>(env: Env<'a>, path: String) -> Term<'a> {
     build_stream(env, builder)
 }
 
-/// Read Parquet data from an in-memory binary.  Returns `{:ok, stream_ref}` or `{:error, msg}`.
+/// Read Parquet data from an in-memory binary (lazy row-group streaming).
+/// Returns `{:ok, stream_ref}` or `{:error, msg}`.
 #[rustler::nif]
 pub fn parquet_reader_from_binary<'a>(env: Env<'a>, binary: rustler::Binary) -> Term<'a> {
     let bytes = Bytes::copy_from_slice(binary.as_slice());
@@ -92,13 +74,10 @@ where
         Ok(r) => r,
         Err(e) => return err_encode(env, &e.to_string()),
     };
-    let batches: Vec<RecordBatch> = match reader.collect::<Result<Vec<_>, _>>() {
-        Ok(b) => b,
-        Err(e) => return err_encode(env, &e.to_string()),
-    };
+    // Store the reader as a boxed trait object — row groups are read lazily on demand.
     let stream = ExArrowParquetStream {
         schema,
-        batches: Mutex::new(batches.into_iter()),
+        reader: Mutex::new(Box::new(reader)),
     };
     ok_encode(env, ResourceArc::new(stream))
 }
@@ -117,13 +96,18 @@ pub fn parquet_stream_schema<'a>(
     ResourceArc::new(handle).encode(env)
 }
 
-/// Get the next record batch.  Returns `:done`, `{:ok, batch_ref}`, or `{:error, msg}`.
-#[rustler::nif]
+/// Get the next record batch from the lazy reader.
+/// Returns `:done`, `{:ok, batch_ref}`, or `{:error, msg}`.
+///
+/// Scheduled as a dirty CPU NIF: each step may decompress and decode a full
+/// row group (CPU-heavy). File-backed streams also perform read I/O inside
+/// the same iterator step, so this must not run on a normal scheduler thread.
+#[rustler::nif(schedule = "DirtyCpu")]
 pub fn parquet_stream_next<'a>(
     env: Env<'a>,
     stream: ResourceArc<ExArrowParquetStream>,
 ) -> Term<'a> {
-    let mut guard = match stream.batches.lock() {
+    let mut guard = match stream.reader.lock() {
         Ok(g) => g,
         Err(_) => return err_encode(env, "parquet stream lock poisoned"),
     };
@@ -131,7 +115,8 @@ pub fn parquet_stream_next<'a>(
         None => rustler::types::atom::Atom::from_str(env, "done")
             .unwrap()
             .encode(env),
-        Some(batch) => ok_encode(env, ResourceArc::new(ExArrowRecordBatch { batch })),
+        Some(Err(e)) => err_encode(env, &e.to_string()),
+        Some(Ok(batch)) => ok_encode(env, ResourceArc::new(ExArrowRecordBatch { batch })),
     }
 }
 

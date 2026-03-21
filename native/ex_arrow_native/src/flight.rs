@@ -19,7 +19,7 @@ use bytes::Bytes;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use futures::TryStreamExt;
-use rustler::resource::ResourceArc;
+use rustler::ResourceArc;
 use rustler::{Encoder, Env, Term};
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status, Streaming};
@@ -555,6 +555,9 @@ pub struct FlightServerHandle {
     shutdown: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 
+#[rustler::resource_impl]
+impl rustler::Resource for FlightServerHandle {}
+
 /// Start a Flight server on the given port (0 = any available).
 ///
 /// `server_tls` controls transport security:
@@ -574,7 +577,7 @@ pub struct FlightServerHandle {
 pub fn flight_server_start<'a>(env: Env<'a>, host: String, port: u16, server_tls: Term<'a>) -> Term<'a> {
     let tls_mode = match parse_server_tls(server_tls) {
         Ok(m) => m,
-        Err(e) => return err_encode(env, &e),
+        Err(e) => return err_encode(env, e.as_str()),
     };
     let state = Arc::new(Mutex::new(EchoState {
         datasets: std::collections::HashMap::new(),
@@ -742,6 +745,9 @@ pub struct FlightClientHandle {
     client: Mutex<arrow_flight::client::FlightClient>,
 }
 
+#[rustler::resource_impl]
+impl rustler::Resource for FlightClientHandle {}
+
 // ── Client NIFs ───────────────────────────────────────────────────────────────
 
 /// Connect to a Flight server. Returns `{:ok, client_ref}` or `{:error, msg}`.
@@ -767,7 +773,7 @@ pub fn flight_client_connect<'a>(
 ) -> Term<'a> {
     let mode = match parse_tls_mode(tls_mode) {
         Ok(m) => m,
-        Err(e) => return err_encode(env, &e),
+        Err(e) => return err_encode(env, e.as_str()),
     };
 
     // Choose URI scheme and build the optional TLS config.
@@ -842,7 +848,7 @@ pub fn flight_client_do_put<'a>(
     if descriptor.decode::<rustler::Atom>().ok() != Some(none_atom) {
         match decode_descriptor(descriptor) {
             Ok(d) => encoder = encoder.with_flight_descriptor(Some(d)),
-            Err(e) => return err_encode(env, &e),
+            Err(e) => return err_encode(env, e.as_str()),
         }
     }
     let flight_data = encoder.build(stream);
@@ -967,13 +973,13 @@ pub fn flight_client_list_flights<'a>(
                 collect_fut,
             )) {
                 Ok(Ok(v)) => v,
-                Ok(Err(e)) => return err_encode(env, &e),
+                Ok(Err(e)) => return err_encode(env, e.as_str()),
                 Err(_) => return err_encode(env, "list_flights: request timed out"),
             }
         } else {
             match client.rt.block_on(collect_fut) {
                 Ok(v) => v,
-                Err(e) => return err_encode(env, &e),
+                Err(e) => return err_encode(env, e.as_str()),
             }
         }
     };
@@ -1095,13 +1101,13 @@ pub fn flight_client_list_actions<'a>(
                 collect_fut,
             )) {
                 Ok(Ok(v)) => v,
-                Ok(Err(e)) => return err_encode(env, &e),
+                Ok(Err(e)) => return err_encode(env, e.as_str()),
                 Err(_) => return err_encode(env, "list_actions: request timed out"),
             }
         } else {
             match client.rt.block_on(collect_fut) {
                 Ok(v) => v,
-                Err(e) => return err_encode(env, &e),
+                Err(e) => return err_encode(env, e.as_str()),
             }
         }
     };
@@ -1149,13 +1155,13 @@ pub fn flight_client_do_action<'a>(
                 collect_fut,
             )) {
                 Ok(Ok(v)) => v,
-                Ok(Err(e)) => return err_encode(env, &e),
+                Ok(Err(e)) => return err_encode(env, e.as_str()),
                 Err(_) => return err_encode(env, "do_action: request timed out"),
             }
         } else {
             match client.rt.block_on(collect_fut) {
                 Ok(v) => v,
-                Err(e) => return err_encode(env, &e),
+                Err(e) => return err_encode(env, e.as_str()),
             }
         }
     };
@@ -1166,51 +1172,3 @@ pub fn flight_client_do_action<'a>(
     }
 }
 
-// ── Resource type registration ────────────────────────────────────────────────
-
-use std::sync::OnceLock as ResourceOnceLock;
-use rustler::resource::{open_struct_resource_type, ResourceType, ResourceTypeProvider, NIF_RESOURCE_FLAGS};
-use crate::util::SyncResourceType;
-
-static FLIGHT_SERVER_HANDLE_TYPE: ResourceOnceLock<SyncResourceType<FlightServerHandle>> =
-    ResourceOnceLock::new();
-static FLIGHT_CLIENT_HANDLE_TYPE: ResourceOnceLock<SyncResourceType<FlightClientHandle>> =
-    ResourceOnceLock::new();
-
-impl ResourceTypeProvider for FlightServerHandle {
-    fn get_type() -> &'static ResourceType<Self> {
-        &FLIGHT_SERVER_HANDLE_TYPE
-            .get()
-            .expect("FlightServerHandle not initialized")
-            .0
-    }
-}
-
-impl ResourceTypeProvider for FlightClientHandle {
-    fn get_type() -> &'static ResourceType<Self> {
-        &FLIGHT_CLIENT_HANDLE_TYPE
-            .get()
-            .expect("FlightClientHandle not initialized")
-            .0
-    }
-}
-
-pub fn flight_register_resources(env: rustler::Env) -> bool {
-    let flags = NIF_RESOURCE_FLAGS::ERL_NIF_RT_CREATE;
-
-    let Some(t) =
-        open_struct_resource_type::<FlightServerHandle>(env, "ExArrowFlightServerHandle\0", flags)
-    else {
-        return false;
-    };
-    let _ = FLIGHT_SERVER_HANDLE_TYPE.set(SyncResourceType(t));
-
-    let Some(t) =
-        open_struct_resource_type::<FlightClientHandle>(env, "ExArrowFlightClientHandle\0", flags)
-    else {
-        return false;
-    };
-    let _ = FLIGHT_CLIENT_HANDLE_TYPE.set(SyncResourceType(t));
-
-    true
-}

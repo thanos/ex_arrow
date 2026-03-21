@@ -79,7 +79,7 @@ if Code.ensure_loaded?(NimblePool) do
       ]
 
       nimble_opts = if name, do: [{:name, name} | nimble_opts], else: nimble_opts
-      NimblePool.start_link(nimble_opts)
+      nimble_pool_mod().start_link(nimble_opts)
     end
 
     @doc """
@@ -99,7 +99,7 @@ if Code.ensure_loaded?(NimblePool) do
     def query(pool, sql, opts \\ []) when is_binary(sql) do
       pool_timeout = Keyword.get(opts, :pool_timeout, 5_000)
 
-      NimblePool.checkout!(
+      nimble_pool_mod().checkout!(
         pool,
         :checkout,
         fn _from, %Worker{conn: conn} = worker ->
@@ -136,7 +136,7 @@ if Code.ensure_loaded?(NimblePool) do
     def with_connection(pool, fun, opts \\ []) when is_function(fun, 1) do
       pool_timeout = Keyword.get(opts, :pool_timeout, 5_000)
 
-      NimblePool.checkout!(
+      nimble_pool_mod().checkout!(
         pool,
         :checkout,
         fn _from, %Worker{conn: conn} = worker ->
@@ -151,10 +151,14 @@ if Code.ensure_loaded?(NimblePool) do
 
     @impl NimblePool
     def init_worker(db_or_name) do
-      # Resolve atom names to a Database handle without pattern-matching on the
-      # opaque struct internals (which would break the @opaque type contract and
-      # cause a Dialyzer call_without_opaque warning).
-      db = if is_atom(db_or_name), do: DatabaseServer.get(db_or_name), else: db_or_name
+      # Resolve any GenServer name (atom, {:global, term}, {:via, mod, term}) to a
+      # Database handle.  We identify a "name" by checking it is NOT an already-open
+      # Database struct — this avoids pattern-matching on the opaque struct internals
+      # and accepts all valid GenServer.name() forms (not just atoms).
+      db =
+        if is_struct(db_or_name, ExArrow.ADBC.Database),
+          do: db_or_name,
+          else: DatabaseServer.get(db_or_name)
 
       case Connection.open(db) do
         {:ok, conn} -> {:ok, %Worker{db: db, conn: conn}, db_or_name}
@@ -183,6 +187,10 @@ if Code.ensure_loaded?(NimblePool) do
     end
 
     # ── Private helpers ─────────────────────────────────────────────────────────
+
+    defp nimble_pool_mod do
+      Application.get_env(:ex_arrow, :nimble_pool_mod, NimblePool)
+    end
 
     defp run_statement(conn, sql) do
       with {:ok, stmt} <- Statement.new(conn),

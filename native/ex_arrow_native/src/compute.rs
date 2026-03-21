@@ -9,7 +9,7 @@ use arrow_ord::sort::sort_to_indices;
 use arrow_schema::SortOptions;
 use arrow_select::filter::filter_record_batch;
 use arrow_select::take::take;
-use rustler::resource::ResourceArc;
+use rustler::ResourceArc;
 use rustler::{Env, Term};
 
 use crate::resources::ExArrowRecordBatch;
@@ -57,7 +57,7 @@ pub fn compute_project<'a>(
         .collect::<Result<Vec<_>, _>>()
     {
         Ok(idx) => idx,
-        Err(e) => return err_encode(env, &e),
+        Err(e) => return err_encode(env, e.as_str()),
     };
     match batch.batch.project(&indices) {
         Ok(projected) => ok_encode(env, ResourceArc::new(ExArrowRecordBatch { batch: projected })),
@@ -96,7 +96,7 @@ pub fn compute_sort<'a>(
             .collect::<Result<Vec<_>, _>>()
         {
             Ok(cols) => cols,
-            Err(e) => return err_encode(env, &e),
+            Err(e) => return err_encode(env, e.as_str()),
         };
     match RecordBatch::try_new(batch.batch.schema(), new_columns) {
         Ok(sorted) => ok_encode(env, ResourceArc::new(ExArrowRecordBatch { batch: sorted })),

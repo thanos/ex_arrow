@@ -110,8 +110,8 @@ batches = Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end) |> Enum.take_
 ```elixir
 Mix.install([
   {:ex_arrow, path: Path.join(__DIR__, "..")},
-  {:rustler, "~> 0.32.0", optional: true},
-  {:adbc, "~> 0.7"},
+  {:rustler, "~> 0.36", optional: true},
+  {:adbc, "~> 0.9"},
   {:kino_explorer, "~> 0.1.20"}
 ],
   config: [adbc: [drivers: [:sqlite]]]
