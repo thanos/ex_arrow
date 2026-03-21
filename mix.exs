@@ -74,7 +74,7 @@ defmodule ExArrow.MixProject do
   defp deps do
     [
       {:rustler_precompiled, "~> 0.8"},
-      {:adbc, "~> 0.7", optional: true},
+      {:adbc, "~> 0.9", optional: true},
       {:explorer, "~> 0.11", optional: true},
       {:nx, "~> 0.9", optional: true},
       {:nimble_pool, "~> 1.1", optional: true},

@@ -25,7 +25,7 @@ The [livebook-dev/adbc](https://github.com/livebook-dev/adbc) project provides E
    def deps do
      [
        {:ex_arrow, "~> 0.1.0"},
-       {:adbc, "~> 0.7", optional: true}
+       {:adbc, "~> 0.9", optional: true}
      ]
    end
    ```
@@ -54,7 +54,7 @@ The [livebook-dev/adbc](https://github.com/livebook-dev/adbc) project provides E
    ```elixir
    Mix.install([
      {:ex_arrow, "~> 0.1.0"},
-     {:adbc, "~> 0.7"}
+     {:adbc, "~> 0.9"}
    ])
    ```
 
@@ -99,8 +99,8 @@ The [livebook-dev/adbc](https://github.com/livebook-dev/adbc) repo builds native
 
 | Goal                         | Action |
 |-----------------------------|--------|
-| Use ExArrow in Livebook     | Prefer `Mix.install([{:ex_arrow, "~> 0.1.0"}])`; add `{:adbc, "~> 0.7"}` if you want the adbc package to try to provide a driver. |
-| Driver from adbc package    | Add `{:adbc, "~> 0.7"}`, set `config :adbc, :drivers, [:sqlite]` (or use `Adbc.download_driver/1` in Livebook), then open with `DriverHelper.ensure_driver_and_open/2` or `Database.open(driver_name: "adbc_driver_sqlite", uri: "...")`. |
+| Use ExArrow in Livebook     | Prefer `Mix.install([{:ex_arrow, "~> 0.1.0"}])`; add `{:adbc, "~> 0.9"}` if you want the adbc package to try to provide a driver. |
+| Driver from adbc package    | Add `{:adbc, "~> 0.9"}`, set `config :adbc, :drivers, [:sqlite]` (or use `Adbc.download_driver/1` in Livebook), then open with `DriverHelper.ensure_driver_and_open/2` or `Database.open(driver_name: "adbc_driver_sqlite", uri: "...")`. |
 | Use your own driver binary  | Build or install the C/C++ driver (e.g. from [Arrow ADBC](https://github.com/apache/arrow-adbc)), then `Database.open(driver_path: "/path/to/libadbc_driver_sqlite.dylib", ...)` or set `ADBC_DRIVER` and use `driver_name`. |
 | Download fails / wrong file | Rely on Option 2: build or install the native driver and use `driver_path` or `ADBC_DRIVER` + `driver_name`. |
 
