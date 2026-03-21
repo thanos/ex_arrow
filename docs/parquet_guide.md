@@ -146,23 +146,22 @@ row group on demand without touching the rest of the file.
 
 ```
 from_file/1  →  footer scan only  (schema cached, reader open)
-Stream.next  →  decode row-group 0
-Stream.next  →  decode row-group 1
+ExArrow.Stream.next/1  →  decode row-group 0
+ExArrow.Stream.next/1  →  decode row-group 1
 …
-Stream.next  →  nil  (end of file)
+ExArrow.Stream.next/1  →  nil  (end of file)
 ```
 
-This keeps peak memory proportional to the largest single row group rather
-than the full file, which is important for multi-gigabyte Parquet datasets.
-If you only need the first N batches you can stop calling `next/1` on the
-stream and the remaining row groups are never decoded.
+Peak memory stays proportional to the largest single row group rather than the
+full file.  If you only need the first *N* batches you can stop calling
+`ExArrow.Stream.next/1` and the remaining row groups are never decoded.
 
 For file-backed streams (`from_file/1`) the underlying OS file handle is kept
 open until the stream resource is garbage-collected; for binary-backed streams
 (`from_binary/1`) the bytes are held in native memory and released at the same
 time.
 
-**Implementation note:** each `Stream.next/1` call runs the native
+**Implementation note:** each `ExArrow.Stream.next/1` call runs the native
 `parquet_stream_next` step on a **dirty CPU** NIF scheduler so row-group decode
 (and any file read inside that step) does not block normal BEAM scheduler
 threads.
