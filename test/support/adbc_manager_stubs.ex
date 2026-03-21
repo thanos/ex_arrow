@@ -41,6 +41,16 @@ defmodule ExArrow.ADBC.AdbcConnQueryErrStub do
   def query(_conn_pid, _sql), do: {:error, :stub_query_failed}
 end
 
+# Returns {:ok, {:ok, inner}} so AdbcPackageManager.adbc_result_to_stream/1 hits the
+# unwrap clause for nested {:ok, result} from some drivers.
+defmodule ExArrow.ADBC.AdbcConnNestedOkStub do
+  @moduledoc false
+  @spec start_link(list()) :: {:ok, pid()} | {:error, term()}
+  def start_link(_opts), do: {:ok, spawn_link(fn -> Process.sleep(:infinity) end)}
+  @spec query(pid(), binary()) :: {:ok, term()} | {:error, term()}
+  def query(_conn_pid, _sql), do: {:ok, {:ok, %{}}}
+end
+
 defmodule ExArrow.ADBC.AdbcResultStub do
   @moduledoc false
   @spec materialize(map()) :: map()
@@ -60,4 +70,13 @@ defmodule ExArrow.ADBC.ExplorerDfStub do
     {:ok, binary} = ExArrow.Native.ipc_test_fixture_binary()
     binary
   end
+end
+
+# Explorer stub that produces invalid IPC bytes so Reader.from_binary/1 fails.
+defmodule ExArrow.ADBC.ExplorerDfBadIpcStub do
+  @moduledoc false
+  def new(map), do: map
+
+  @spec dump_ipc_stream!(term()) :: binary()
+  def dump_ipc_stream!(_df), do: <<"not_valid_arrow_ipc">>
 end

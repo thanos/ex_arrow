@@ -266,7 +266,7 @@ defmodule ExArrow.ADBC.AdbcPackageManager do
       end
     else
       {:error,
-       "adbc_package backend requires the :explorer dependency to convert query results to ExArrow.Stream. Add {:explorer, \"~> 0.8\"} to your deps."}
+       "adbc_package backend requires the :explorer dependency to convert query results to ExArrow.Stream. Add {:explorer, \"~> 0.11\"} to your deps."}
     end
   end
 end

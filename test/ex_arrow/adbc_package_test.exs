@@ -388,6 +388,22 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
       assert is_pid(conn_pid)
     end
 
+    test "get_pids second call returns cached db and conn (handle_call :get_pids %{db, conn})" do
+      put_stubs(
+        adbc_package: [driver: :test, uri: ":memory:"],
+        adbc_db_module: ExArrow.ADBC.AdbcDbStub,
+        adbc_conn_module: ExArrow.ADBC.AdbcConnStub
+      )
+
+      assert {:ok, {db1, conn1}} = AdbcPackageManager.get_pids()
+      assert {:ok, {^db1, ^conn1}} = AdbcPackageManager.get_pids()
+    end
+
+    test "get_pids when :adbc_package is empty list returns :not_configured" do
+      put_stubs(adbc_package: [])
+      assert {:error, :not_configured} = AdbcPackageManager.get_pids()
+    end
+
     test "start_connection error path: start_pool_or_connection kills db_pid on failure" do
       put_stubs(
         adbc_package: [driver: :test, uri: ":memory:"],
@@ -477,6 +493,42 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
       assert {:error, :stub_query_failed} = AdbcPackageManager.execute_statement(ref)
     end
 
+    @tag :nif
+    test "execute_statement unwraps nested {:ok, inner} from query (adbc_result_to_stream/1)" do
+      put_stubs(
+        adbc_conn_module: ExArrow.ADBC.AdbcConnNestedOkStub,
+        adbc_result_module: ExArrow.ADBC.AdbcResultStub,
+        explorer_df_module: ExArrow.ADBC.ExplorerDfStub
+      )
+
+      db_pid = infinity_stub_pid()
+      conn_pid = infinity_stub_pid()
+      inject_state(%{db: db_pid, conn: conn_pid})
+
+      {:ok, ref} = AdbcPackageManager.create_statement()
+      :ok = AdbcPackageManager.set_statement_sql(ref, "SELECT 1")
+
+      assert {:ok, %ExArrow.Stream{}} = AdbcPackageManager.execute_statement(ref)
+    end
+
+    @tag :nif
+    test "adbc_result_to_stream propagates Reader.from_binary error when IPC bytes are invalid" do
+      put_stubs(
+        adbc_conn_module: ExArrow.ADBC.AdbcConnStub,
+        adbc_result_module: ExArrow.ADBC.AdbcResultStub,
+        explorer_df_module: ExArrow.ADBC.ExplorerDfBadIpcStub
+      )
+
+      db_pid = infinity_stub_pid()
+      conn_pid = infinity_stub_pid()
+      inject_state(%{db: db_pid, conn: conn_pid})
+
+      {:ok, ref} = AdbcPackageManager.create_statement()
+      :ok = AdbcPackageManager.set_statement_sql(ref, "SELECT 1")
+
+      assert {:error, _} = AdbcPackageManager.execute_statement(ref)
+    end
+
     test "adbc_result_to_stream without Explorer: returns missing-dep error" do
       # Use a non-existent module so Code.ensure_loaded? returns false.
       put_stubs(
@@ -494,6 +546,7 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
 
       assert {:error, msg} = AdbcPackageManager.execute_statement(ref)
       assert msg =~ "adbc_package backend requires the :explorer dependency"
+      assert msg =~ "~> 0.11"
     end
 
     test "set_statement_sql when state has no ETS table returns :not_configured" do
@@ -503,6 +556,22 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
 
       assert {:error, :not_configured} =
                AdbcPackageManager.set_statement_sql(make_ref(), "SELECT 1")
+    end
+
+    test "set_statement_sql when map state has no :table key returns :not_configured" do
+      mgr = Process.whereis(AdbcPackageManager)
+      prev = :sys.get_state(mgr)
+      db = infinity_stub_pid()
+      conn = infinity_stub_pid()
+
+      :sys.replace_state(mgr, fn _s -> %{db: db, conn: conn} end)
+
+      assert {:error, :not_configured} =
+               AdbcPackageManager.set_statement_sql(make_ref(), "SELECT 1")
+
+      # Restore immediately — the outer setup may stop/restart the manager before
+      # on_exit runs, which would make a deferred replace_state fail with :noproc.
+      :sys.replace_state(mgr, fn _s -> prev end)
     end
   end
 
