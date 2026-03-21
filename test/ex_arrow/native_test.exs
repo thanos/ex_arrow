@@ -57,11 +57,12 @@ defmodule ExArrow.NativeTest do
     end
   end
 
-  # ── NIF not loaded (run with: EX_ARROW_SKIP_NIF=1 mix test --only no_nif) ──
+  # ── NIF not loaded (run with: EX_ARROW_SKIP_NIF=1 mix test --include no_nif) ──
   #
   # When EX_ARROW_SKIP_NIF=1 the RustlerPrecompiled `use` block is skipped and
   # all functions fall through to the :nif_not_loaded stubs in this file.
-  # These tests are excluded by default (see test_helper.exs).
+  # These tests are excluded by default; use --include (not --only) so the tag
+  # overrides test_helper.exs's exclude list (see test/test_helper.exs).
 
   describe "nif_loaded?/0 (NIF absent)" do
     @tag :no_nif
