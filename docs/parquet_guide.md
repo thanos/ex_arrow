@@ -139,14 +139,32 @@ schema = ExArrow.RecordBatch.schema(active)
 
 ## How Parquet is read
 
-Parquet has a footer that must be read before any row groups can be decoded.
-ExArrow reads all row groups eagerly on `from_file/1` / `from_binary/1` and
-stores the resulting batches in native Arrow memory.  Batches are only moved
-into BEAM terms when `ExArrow.Stream.next/1` is called.
+Parquet has a footer that is scanned once on `from_file/1` / `from_binary/1`
+to extract the schema and locate row groups.  Row groups are then decoded
+**lazily** — each call to `ExArrow.Stream.next/1` reads and decodes the next
+row group on demand without touching the rest of the file.
 
-This is efficient for the typical use case of reading a Parquet file and
-immediately processing it (ADBC-style lazy streaming over very large files is
-a planned improvement — see roadmap).
+```
+from_file/1  →  footer scan only  (schema cached, reader open)
+ExArrow.Stream.next/1  →  decode row-group 0
+ExArrow.Stream.next/1  →  decode row-group 1
+…
+ExArrow.Stream.next/1  →  nil  (end of file)
+```
+
+Peak memory stays proportional to the largest single row group rather than the
+full file.  If you only need the first *N* batches you can stop calling
+`ExArrow.Stream.next/1` and the remaining row groups are never decoded.
+
+For file-backed streams (`from_file/1`) the underlying OS file handle is kept
+open until the stream resource is garbage-collected; for binary-backed streams
+(`from_binary/1`) the bytes are held in native memory and released at the same
+time.
+
+**Implementation note:** each `ExArrow.Stream.next/1` call runs the native
+`parquet_stream_next` step on a **dirty CPU** NIF scheduler so row-group decode
+(and any file read inside that step) does not block normal BEAM scheduler
+threads.
 
 ---
 
