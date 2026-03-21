@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1774105820122,
+  "lastUpdate": 1774106365250,
   "repoUrl": "https://github.com/thanos/ex_arrow",
   "entries": {
     "ExArrow Benchmark Suite": [
@@ -2679,6 +2679,140 @@ window.BENCHMARK_DATA = {
           {
             "name": "[pipeline] file → Flight (zero-copy, 20 batches)",
             "value": 1618321,
+            "unit": "ns/op"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "thanosv@gmail.com",
+            "name": "thanos",
+            "username": "thanos"
+          },
+          "committer": {
+            "email": "thanosv@gmail.com",
+            "name": "thanos",
+            "username": "thanos"
+          },
+          "distinct": true,
+          "id": "5cd03f25ae9dcba13ecb4bee6c46cdbee59c08a9",
+          "message": "s added to raise adbc_package_manager.ex coverage and tighten behavior:\n\nCode\nlib/ex_arrow/adbc/adbc_package_manager.ex — Explorer missing-dep string now says ~> 0.11 (was ~> 0.8).\nStubs (test/support/adbc_manager_stubs.ex)\nAdbcConnNestedOkStub — query/2 returns {:ok, {:ok, %{}}} so adbc_result_to_stream/1 hits the {:ok, result} unwrap clause.\nExplorerDfBadIpcStub — dump_ipc_stream!/1 returns garbage bytes so Reader.from_binary/1 can return {:error, _}.\nTests (test/ex_arrow/adbc_package_test.exs)\nget_pids twice — same {db, conn} → covers handle_call(:get_pids, _, %{db: _, conn: _}) (cached path).\nadbc_package: [] — get_pids → {:error, :not_configured} → covers ensure_started when start_if_configured falls through to the other branch.\n@tag :nif nested {:ok, _} — uses AdbcConnNestedOkStub + ExplorerDfStub.\n@tag :nif bad IPC — ExplorerDfBadIpcStub → {:error, _} from Reader.from_binary.\nMissing Explorer — assertion now includes ~> 0.11 in the message.\nMap state without :table — set_statement_sql → {:error, :not_configured}; state restored right after the assertion (not in on_exit) so replace_state doesn’t run after the next test’s setup has already stopped the manager (:noproc).\nEX_ARROW_BUILD=1 mix test test/ex_arrow/adbc_package_test.exs --include adbc_package → 44 tests, 0 failures.\nDefault excludes → 40 run, 4 excluded (the @tag :adbc_package integration tests).",
+          "timestamp": "2026-03-21T11:13:23-04:00",
+          "tree_id": "a84e21e41515e205c6066a499167139877ed7172",
+          "url": "https://github.com/thanos/ex_arrow/commit/5cd03f25ae9dcba13ecb4bee6c46cdbee59c08a9"
+        },
+        "date": 1774106364978,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "[adbc] Enum.map (comparable row-oriented)",
+            "value": 457,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[adbc] open ipc stream (20 batches)",
+            "value": 2234,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[adbc] stream schema peek (20 batches)",
+            "value": 3019,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[adbc] stream collect all batches (20 batches)",
+            "value": 43110,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[flight] list_flights",
+            "value": 203549,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[flight] do_put (10 batches)",
+            "value": 387919,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[flight] do_get stream_handle only (10 batches)",
+            "value": 40660414,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[flight] do_get + collect (10 batches)",
+            "value": 40993612,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[flight] roundtrip put→get (10 batches)",
+            "value": 41374247,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] stream_handle (10 batches)",
+            "value": 1854,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] stream_handle (50 batches)",
+            "value": 3174,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] from_file handle (50 batches)",
+            "value": 6452,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] materialise (10 batches)",
+            "value": 22926,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] materialise (50 batches)",
+            "value": 105750,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_read] from_file + materialise (50 batches)",
+            "value": 119468,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_write] term_to_binary (100 rows, 3 fields)",
+            "value": 9770,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_write] ipc to_binary (10 batches)",
+            "value": 16426,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_write] ipc to_binary (50 batches)",
+            "value": 73696,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[ipc_write] ipc to_file (50 batches)",
+            "value": 664523,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[pipeline] file → Flight (zero-copy, 20 batches)",
+            "value": 1411414,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[pipeline] materialise → Flight (20 batches)",
+            "value": 1451464,
+            "unit": "ns/op"
+          },
+          {
+            "name": "[pipeline] binary → Flight (20 batches)",
+            "value": 1546444,
             "unit": "ns/op"
           }
         ]
