@@ -172,6 +172,56 @@ defmodule ExArrow.FlightSQL.ClientTest do
 
       assert {:error, %Error{code: :not_found}} = Client.stream_query(fake_client, "SELECT *")
     end
+
+    # Verify that the stream returned by stream_query/2 is Enumerable —
+    # mock returns a real IPC-backed stream so Enum functions can run on it.
+    @tag :nif
+    test "returned stream is Enumerable — Enum.to_list collects batches" do
+      use_mock()
+      fake_client = %Client{resource: make_ref()}
+
+      {:ok, ipc_bin} = ExArrow.Native.ipc_test_fixture_binary()
+      {:ok, stream_ref} = ExArrow.Native.ipc_reader_from_binary(ipc_bin)
+      real_stream = %ExArrow.Stream{resource: stream_ref, backend: :ipc}
+
+      Mox.expect(ExArrow.FlightSQL.ClientMock, :query, fn ^fake_client, "SELECT 1", [] ->
+        {:ok, real_stream}
+      end)
+
+      {:ok, stream} = Client.stream_query(fake_client, "SELECT 1")
+      batches = Enum.to_list(stream)
+
+      assert length(batches) >= 1
+      assert Enum.all?(batches, &match?(%ExArrow.RecordBatch{}, &1))
+    end
+
+    @tag :nif
+    test "Enum.take/2 does partial consumption of the stream" do
+      use_mock()
+      fake_client = %Client{resource: make_ref()}
+
+      {:ok, ipc_bin} = ExArrow.Native.ipc_test_fixture_binary()
+      {:ok, reader} = ExArrow.Native.ipc_reader_from_binary(ipc_bin)
+      schema_ref = ExArrow.Native.ipc_stream_schema(reader)
+      {:ok, batch_ref} = ExArrow.Native.ipc_stream_next(reader)
+
+      {:ok, two_batch_bin} =
+        ExArrow.Native.ipc_writer_to_binary(schema_ref, [batch_ref, batch_ref])
+
+      {:ok, stream_ref} = ExArrow.Native.ipc_reader_from_binary(two_batch_bin)
+      real_stream = %ExArrow.Stream{resource: stream_ref, backend: :ipc}
+
+      Mox.expect(ExArrow.FlightSQL.ClientMock, :query, fn ^fake_client, "SELECT 1", [] ->
+        {:ok, real_stream}
+      end)
+
+      {:ok, stream} = Client.stream_query(fake_client, "SELECT 1")
+      # Take only the first batch — the second is never fetched.
+      result = Enum.take(stream, 1)
+
+      assert length(result) == 1
+      assert match?(%ExArrow.RecordBatch{}, hd(result))
+    end
   end
 
   # ── Mox mock — execute ────────────────────────────────────────────────────────

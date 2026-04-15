@@ -2,7 +2,7 @@ defmodule ExArrow.Stream do
   @moduledoc """
   Opaque handle to a native Arrow record-batch stream.
 
-  Provides a unified iterator interface over three backing sources:
+  Provides a unified iterator interface over four backing sources:
 
   | Backend      | Created by                                                      |
   |--------------|-----------------------------------------------------------------|
@@ -14,7 +14,7 @@ defmodule ExArrow.Stream do
   Plain Flight `do_get` results also use the `:ipc` backend (the Flight client
   returns an IPC stream resource).
 
-  All three backends expose the same three functions:
+  All backends expose the same three functions:
 
   - `schema/1` — inspect the Arrow schema without consuming any batches
   - `next/1` — read the next batch on demand (`nil` when exhausted)
@@ -23,6 +23,37 @@ defmodule ExArrow.Stream do
   Record batch data stays in native Arrow memory until consumed.  Callers
   never set the `backend` field directly; it is assigned by the function that
   opens the stream.
+
+  ## Enumerable
+
+  `ExArrow.Stream` implements the `Enumerable` protocol, so all `Enum` and
+  `Stream` functions work directly on a stream handle:
+
+      {:ok, stream} = ExArrow.FlightSQL.Client.stream_query(client, "SELECT * FROM t")
+
+      # Collect all batches into a list
+      batches = Enum.to_list(stream)
+
+      # Map over batches lazily (materialises here via Enum.map)
+      Enum.map(stream, fn batch -> ExArrow.RecordBatch.num_rows(batch) end)
+
+      # Take the first N batches then stop — the rest are not fetched
+      first_two = Enum.take(stream, 2)
+
+  Each element yielded by the enumerator is an `ExArrow.RecordBatch.t()`.
+  The batch count is not known up front, so `Enum.count/1` traverses the
+  entire stream.  Prefer `ExArrow.FlightSQL.Result.num_rows` when the result
+  has already been materialised.
+
+  Enumeration raises on a transport or server error.  For recoverable error
+  handling iterate manually with `next/1`.
+
+  ### Resource lifecycle
+
+  The underlying gRPC channel and batch buffer are held in a native resource.
+  The resource is released when the stream handle is garbage-collected.
+  Stopping enumeration early (e.g. `Enum.take/2`) is safe — the resource will
+  be released when the stream variable goes out of scope.
   """
   alias ExArrow.RecordBatch
   alias ExArrow.Schema
@@ -119,4 +150,43 @@ defmodule ExArrow.Stream do
       batch -> do_collect(stream, [batch | acc])
     end
   end
+end
+
+defimpl Enumerable, for: ExArrow.Stream do
+  @moduledoc false
+
+  @spec reduce(ExArrow.Stream.t(), Enumerable.acc(), Enumerable.reducer()) ::
+          Enumerable.result()
+  # Halt — stop immediately and return the accumulator as-is.
+  def reduce(_stream, {:halt, acc}, _fun), do: {:halted, acc}
+
+  # Suspend — return a continuation for lazy/coroutine-style consumption.
+  def reduce(stream, {:suspend, acc}, fun),
+    do: {:suspended, acc, &reduce(stream, &1, fun)}
+
+  # Continue — fetch the next batch and recurse.
+  def reduce(stream, {:cont, acc}, fun) do
+    case ExArrow.Stream.next(stream) do
+      nil ->
+        {:done, acc}
+
+      {:error, msg} ->
+        raise "ExArrow.Stream enumeration error: #{msg}"
+
+      batch ->
+        reduce(stream, fun.(batch, acc), fun)
+    end
+  end
+
+  # Batch count is not known ahead of time; fall back to full enumeration.
+  @spec count(ExArrow.Stream.t()) :: {:error, module()}
+  def count(_stream), do: {:error, __MODULE__}
+
+  # Membership test is not meaningful for record-batch streams.
+  @spec member?(ExArrow.Stream.t(), term()) :: {:error, module()}
+  def member?(_stream, _element), do: {:error, __MODULE__}
+
+  # Random-access slicing requires knowing the total size up front.
+  @spec slice(ExArrow.Stream.t()) :: {:error, module()}
+  def slice(_stream), do: {:error, __MODULE__}
 end

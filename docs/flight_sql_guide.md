@@ -123,22 +123,58 @@ connection stays open until the stream is exhausted or the resource is
 garbage-collected.
 
 Prefer this over `query/2` for large result sets that should not be fully buffered
-in memory:
+in memory.
+
+#### Using `Enum` functions (recommended)
+
+`ExArrow.Stream` implements the `Enumerable` protocol, so all `Enum` and `Stream`
+functions work directly on the stream handle.  Each element is an
+`ExArrow.RecordBatch.t()`.
+
+```elixir
+{:ok, stream} = ExArrow.FlightSQL.Client.stream_query(client, "SELECT * FROM events")
+
+# Collect all batches into a list
+batches = Enum.to_list(stream)
+
+# Map over every batch
+row_counts = Enum.map(stream, &ExArrow.RecordBatch.num_rows/1)
+
+# Take only the first N batches — the rest are never fetched
+first_two = Enum.take(stream, 2)
+
+# Comprehension syntax
+for batch <- stream, do: process_batch(batch)
+```
+
+Enumeration raises `RuntimeError` on a transport or server error.  For
+recoverable error handling, iterate manually with `ExArrow.Stream.next/1`:
+
+```elixir
+case ExArrow.Stream.next(stream) do
+  nil            -> :done
+  {:error, msg}  -> {:error, msg}
+  batch          -> process(batch)
+end
+```
+
+#### Manual iteration
 
 ```elixir
 {:ok, stream} = ExArrow.FlightSQL.Client.stream_query(client, "SELECT * FROM events")
 
 {:ok, schema} = ExArrow.Stream.schema(stream)
 
-# Consume one batch at a time
-case ExArrow.Stream.next(stream) do
-  nil   -> :done
-  batch -> process(batch)
-end
-
-# Or collect everything
+# Collect everything (raises on error)
 batches = ExArrow.Stream.to_list(stream)
 ```
+
+#### Resource lifecycle
+
+The underlying gRPC channel and batch buffer are held in a native (Rust) resource.
+The resource is released when the stream handle is garbage-collected.  Stopping
+enumeration early (e.g. `Enum.take/2`) is safe — the resource is released once the
+stream variable goes out of scope.
 
 > #### Concurrency {: .warning}
 > Concurrent calls on the **same** client handle serialise internally — the gRPC
