@@ -3,8 +3,8 @@ defmodule ExArrow.FlightSQL.Client do
   Arrow Flight SQL client for executing SQL queries against a remote server.
 
   Delegates to the configured implementation module (see `:flight_sql_client_impl` in
-  application config). The default is `ExArrow.FlightSQL.ClientImpl`, which is backed by
-  NIFs using the `arrow-flight` + tonic Rust crate stack.
+  application config). The default implementation is backed by NIFs using the
+  `arrow-flight` + tonic Rust crate stack.
 
   ## Quick start
 
@@ -132,6 +132,9 @@ defmodule ExArrow.FlightSQL.Client do
       result = ExArrow.FlightSQL.Client.query!(client, "SELECT * FROM t")
   """
   @spec query!(t(), String.t()) :: Result.t()
+  # sobelow_skip ["SQL.Query"]
+  # False positive: this module is a *client* library; SQL is sent to a remote
+  # Flight SQL server over gRPC and is never executed locally in this process.
   def query!(%__MODULE__{} = client, sql) when is_binary(sql) do
     case query(client, sql) do
       {:ok, result} -> result

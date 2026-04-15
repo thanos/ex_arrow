@@ -31,6 +31,7 @@ defmodule ExArrow.FlightSQL.Result do
   """
 
   alias ExArrow.FlightSQL.Error
+  alias ExArrow.IPC.{Reader, Writer}
   alias ExArrow.{RecordBatch, Schema, Stream}
 
   @type t :: %__MODULE__{
@@ -50,8 +51,8 @@ defmodule ExArrow.FlightSQL.Result do
   Returns `{:error, %ExArrow.FlightSQL.Error{}}` if schema inspection or any batch
   read fails mid-stream.
   """
-  @spec from_stream(Stream.t()) :: {:ok, t()} | {:error, Error.t()}
-  def from_stream(%Stream{} = stream) do
+  @spec from_stream(Stream.t()) :: {:ok, __MODULE__.t()} | {:error, Error.t()}
+  def from_stream(stream) do
     with {:ok, schema} <- wrap_schema_error(Stream.schema(stream)),
          {:ok, batches} <- collect_batches(stream, []) do
       num_rows = Enum.reduce(batches, 0, fn b, acc -> acc + RecordBatch.num_rows(b) end)
@@ -91,20 +92,18 @@ defmodule ExArrow.FlightSQL.Result do
     if Code.ensure_loaded?(ExArrow.Explorer) do
       try do
         # Serialise to IPC binary, read back as a stream, then delegate to Explorer bridge.
-        with {:ok, binary} <- ExArrow.IPC.Writer.to_binary(result.schema, result.batches),
-             {:ok, stream} <- ExArrow.IPC.Reader.from_binary(binary) do
+        with {:ok, binary} <- Writer.to_binary(result.schema, result.batches),
+             {:ok, stream} <- Reader.from_binary(binary) do
           case ExArrow.Explorer.from_stream(stream) do
             {:ok, df} ->
               {:ok, df}
 
             {:error, msg} ->
-              {:error,
-               Error.from_string(:conversion_error, "Explorer conversion failed: #{msg}")}
+              {:error, Error.from_string(:conversion_error, "Explorer conversion failed: #{msg}")}
           end
         else
           {:error, msg} ->
-            {:error,
-             Error.from_string(:conversion_error, "IPC round-trip failed: #{msg}")}
+            {:error, Error.from_string(:conversion_error, "IPC round-trip failed: #{msg}")}
         end
       rescue
         e ->
@@ -137,8 +136,7 @@ defmodule ExArrow.FlightSQL.Result do
   """
   @spec to_tensor(t(), String.t()) :: {:ok, term()} | {:error, Error.t()}
   def to_tensor(%__MODULE__{batches: []}, _column) do
-    {:error,
-     Error.from_string(:conversion_error, "result contains no batches")}
+    {:error, Error.from_string(:conversion_error, "result contains no batches")}
   end
 
   def to_tensor(%__MODULE__{batches: [batch | _]}, column) when is_binary(column) do
@@ -159,8 +157,7 @@ defmodule ExArrow.FlightSQL.Result do
             end
 
           {:error, msg} ->
-            {:error,
-             Error.from_string(:conversion_error, "Nx conversion failed: #{msg}")}
+            {:error, Error.from_string(:conversion_error, "Nx conversion failed: #{msg}")}
         end
       rescue
         e ->

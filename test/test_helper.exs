@@ -9,7 +9,15 @@
 #                    run with: EX_ARROW_SKIP_NIF=1 mix test --include no_nif
 #                    (--include overrides the default exclusion; --only would
 #                    still exclude the tag because it is in the exclude list)
-ExUnit.start(exclude: [adbc: true, adbc_package: true, adbc_integration: true, no_nif: true, flight_sql_integration: true])
+ExUnit.start(
+  exclude: [
+    adbc: true,
+    adbc_package: true,
+    adbc_integration: true,
+    no_nif: true,
+    flight_sql_integration: true
+  ]
+)
 
 # Define Mox mocks for behaviours (Flight, FlightSQL, ADBC).
 # Use in tests with Application.put_env and Mox.stub/expect.

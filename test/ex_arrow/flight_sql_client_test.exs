@@ -57,8 +57,7 @@ defmodule ExArrow.FlightSQL.ClientTest do
       use_mock()
       fake = %Client{resource: make_ref()}
 
-      Mox.expect(ExArrow.FlightSQL.ClientMock, :connect, fn "remote.server:32010",
-                                                             [tls: true] ->
+      Mox.expect(ExArrow.FlightSQL.ClientMock, :connect, fn "remote.server:32010", [tls: true] ->
         {:ok, fake}
       end)
 

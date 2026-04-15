@@ -47,29 +47,28 @@ defmodule ExArrow.FlightSQL.Options do
   # ── URI parsing ───────────────────────────────────────────────────────────────
 
   defp parse_uri(uri) do
-    cond do
-      # Bracketed IPv6: "[::1]:32010" — must have both brackets and port.
-      String.starts_with?(uri, "[") ->
-        case Regex.run(~r/^\[([^\]]+)\]:(\d+)$/, uri) do
-          [_, host, port_str] ->
-            parse_port(port_str, host, uri)
+    # Bracketed IPv6: "[::1]:32010" — must have both brackets and port.
+    if String.starts_with?(uri, "[") do
+      case Regex.run(~r/^\[([^\]]+)\]:(\d+)$/, uri) do
+        [_, host, port_str] ->
+          parse_port(port_str, host, uri)
 
-          _ ->
-            invalid_option(
-              "invalid URI #{inspect(uri)}: IPv6 addresses must use the form [host]:port"
-            )
-        end
+        _ ->
+          invalid_option(
+            "invalid URI #{inspect(uri)}: IPv6 addresses must use the form [host]:port"
+          )
+      end
 
       # Hostname or IPv4 with optional port: "host:port" or "host".
-      true ->
-        case String.split(uri, ":", parts: 2) do
-          [host, port_str] ->
-            parse_port(port_str, host, uri)
+    else
+      case String.split(uri, ":", parts: 2) do
+        [host, port_str] ->
+          parse_port(port_str, host, uri)
 
-          [host] ->
-            # No port supplied — use the Flight SQL default.
-            {:ok, {host, 31_337}}
-        end
+        [host] ->
+          # No port supplied — use the Flight SQL default.
+          {:ok, {host, 31_337}}
+      end
     end
   end
 
