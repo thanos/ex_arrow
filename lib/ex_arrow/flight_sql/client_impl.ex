@@ -6,6 +6,8 @@ defmodule ExArrow.FlightSQL.ClientImpl do
   alias ExArrow.FlightSQL.{Client, Error, Options}
   alias ExArrow.Stream
 
+  require Logger
+
   @impl true
   def connect(uri, opts) do
     with {:ok, %{host: host, port: port, tls_mode: tls_mode, headers: headers}} <-
@@ -60,6 +62,11 @@ defmodule ExArrow.FlightSQL.ClientImpl do
   end
 
   defp wrap_nif_error(other) do
+    Logger.warning(
+      "[ExArrow.FlightSQL] unexpected NIF error shape #{inspect(other)}; " <>
+        "expected {code, grpc_status, msg} or binary"
+    )
+
     Error.from_string(:transport_error, inspect(other))
   end
 end

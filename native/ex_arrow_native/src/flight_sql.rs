@@ -23,6 +23,9 @@ use crate::util::{err_encode, ok_encode};
 
 // All atoms used in this module declared in a single block to avoid conflicts.
 rustler::atoms! {
+    // Standard result atoms
+    ok,
+    error,
     // Error codes
     transport_error,
     server_error,
@@ -139,8 +142,7 @@ fn encode_sql_error<'a>(
     grpc_status: i32,
     msg: &str,
 ) -> Term<'a> {
-    let error_atom = rustler::types::atom::Atom::from_str(env, "error").unwrap();
-    (error_atom, (code, grpc_status, msg)).encode(env)
+    (error(), (code, grpc_status, msg)).encode(env)
 }
 
 fn flight_error_to_term<'a>(env: Env<'a>, err: FlightError) -> Term<'a> {
@@ -365,11 +367,9 @@ pub fn flight_sql_execute<'a>(
         Err(_) => return err_encode(env, "client lock poisoned"),
     };
 
-    let ok_atom = rustler::types::atom::Atom::from_str(env, "ok").unwrap();
-
     match rt.block_on(guard.execute_update(sql, None)) {
-        Ok(n) if n < 0 => (ok_atom, unknown()).encode(env),
-        Ok(n) => (ok_atom, n as u64).encode(env),
+        Ok(n) if n < 0 => (ok(), unknown()).encode(env),
+        Ok(n) => (ok(), n as u64).encode(env),
         Err(e) => flight_error_to_term(env, FlightError::Arrow(e)),
     }
 }

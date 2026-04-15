@@ -53,10 +53,19 @@ defmodule ExArrow.FlightSQL.Result do
   """
   @spec from_stream(Stream.t()) :: {:ok, __MODULE__.t()} | {:error, Error.t()}
   def from_stream(stream) do
-    with {:ok, schema} <- wrap_schema_error(Stream.schema(stream)),
-         {:ok, batches} <- collect_batches(stream, []) do
-      num_rows = Enum.reduce(batches, 0, fn b, acc -> acc + RecordBatch.num_rows(b) end)
-      {:ok, %__MODULE__{schema: schema, batches: batches, num_rows: num_rows}}
+    case wrap_schema_error(Stream.schema(stream)) do
+      {:error, _} = err ->
+        err
+
+      {:ok, schema} ->
+        case collect_batches(stream, []) do
+          {:error, _} = err ->
+            err
+
+          {:ok, batches} ->
+            num_rows = Enum.reduce(batches, 0, fn b, acc -> acc + RecordBatch.num_rows(b) end)
+            {:ok, %__MODULE__{schema: schema, batches: batches, num_rows: num_rows}}
+        end
     end
   end
 

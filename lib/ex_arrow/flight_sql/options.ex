@@ -16,9 +16,10 @@ defmodule ExArrow.FlightSQL.Options do
           headers: [header()]
         }
 
-  # Hosts treated as loopback for the auto-TLS heuristic.
-  # IPv6 addresses use the canonical short form that parse_uri/1 produces after
-  # stripping brackets from "[::1]:port" style URIs.
+  # Single source of truth for loopback host detection.  Kept as a module
+  # attribute so parse_tls/2 and any future callers share the same list.
+  # IPv6 entries use the canonical short form that parse_uri/1 produces after
+  # stripping brackets (e.g. "[::1]:port" → host "::1").
   @loopback_hosts ~w[localhost 127.0.0.1 ::1 ip6-localhost]
 
   @doc """

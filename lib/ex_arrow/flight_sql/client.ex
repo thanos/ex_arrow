@@ -63,6 +63,7 @@ defmodule ExArrow.FlightSQL.Client do
   @opaque t :: %__MODULE__{resource: reference()}
   defstruct [:resource]
 
+  @compile {:inline, [impl: 0]}
   defp impl do
     Application.get_env(:ex_arrow, :flight_sql_client_impl, ExArrow.FlightSQL.ClientImpl)
   end
