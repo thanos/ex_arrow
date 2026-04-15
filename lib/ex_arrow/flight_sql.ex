@@ -41,7 +41,7 @@ defmodule ExArrow.FlightSQL do
   - Bulk ingestion (`DoPut`)
   - Transactions (`BEGIN`, `COMMIT`, `ROLLBACK`)
   - Multi-endpoint distributed query results
-  - Flight SQL server implementation
+  - Flight SQL server-side implementation (ExArrow is a client library only)
 
   ## Ecosystem integration
 

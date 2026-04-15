@@ -1,12 +1,16 @@
 defmodule ExArrow.FlightSQL.ClientBehaviour do
-  @moduledoc """
-  Behaviour for Flight SQL client implementations.
-
-  Swap the real implementation for a mock in tests by setting the
-  `:flight_sql_client_impl` application environment key:
-
-      Application.put_env(:ex_arrow, :flight_sql_client_impl, MyMock)
-  """
+  @moduledoc false
+  # Internal behaviour for Flight SQL client implementations.
+  #
+  # Swap the real implementation for a test mock by setting the
+  # `:flight_sql_client_impl` application environment key before calling
+  # any `ExArrow.FlightSQL.Client` function:
+  #
+  #     Application.put_env(:ex_arrow, :flight_sql_client_impl, MyMock)
+  #
+  # Mox mock definition (test_helper.exs):
+  #
+  #     Mox.defmock(MyMock, for: ExArrow.FlightSQL.ClientBehaviour)
 
   alias ExArrow.{FlightSQL.Error, Stream}
 

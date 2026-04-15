@@ -108,6 +108,32 @@ defmodule ExArrow.StreamTest do
     end
   end
 
+  # ── :flight_sql backend ──────────────────────────────────────────────────────
+
+  describe "schema/1 :flight_sql backend" do
+    test "returns {:error, msg} when native returns error" do
+      Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeError)
+      assert {:error, "flight_sql stream schema error"} = Stream.schema(stream(:flight_sql))
+    end
+  end
+
+  describe "next/1 :flight_sql backend" do
+    test "returns nil when native returns :done" do
+      Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeDone)
+      assert nil == Stream.next(stream(:flight_sql))
+    end
+
+    test "returns {:error, msg} for plain string error" do
+      Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeError)
+      assert {:error, "flight_sql stream next error"} = Stream.next(stream(:flight_sql))
+    end
+
+    test "formats gRPC triple error as [code] message" do
+      Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeFlightSqlTriple)
+      assert {:error, "[unavailable] server gone"} = Stream.next(stream(:flight_sql))
+    end
+  end
+
   # ── to_list/1 error (do_collect raise) ───────────────────────────────────────
 
   describe "to_list/1" do

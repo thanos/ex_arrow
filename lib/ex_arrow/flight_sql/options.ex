@@ -26,7 +26,7 @@ defmodule ExArrow.FlightSQL.Options do
 
   Accepted URI formats:
   - `"hostname:port"` — e.g. `"localhost:32010"`
-  - `"hostname"` — port defaults to 31337
+  - `"hostname"` — port defaults to 32010 (Arrow Flight SQL convention)
   - `"[::1]:port"` — bracketed IPv6 address with explicit port
 
   Accepted keyword options:
@@ -66,8 +66,8 @@ defmodule ExArrow.FlightSQL.Options do
           parse_port(port_str, host, uri)
 
         [host] ->
-          # No port supplied — use the Flight SQL default.
-          {:ok, {host, 31_337}}
+          # No port supplied — use the Arrow Flight SQL conventional default.
+          {:ok, {host, 32_010}}
       end
     end
   end

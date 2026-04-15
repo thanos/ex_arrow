@@ -47,7 +47,9 @@ defmodule ExArrow.FlightSQL.Client do
 
   ## Compatibility
 
-  Tested against DuckDB Flight SQL server (v0.10+) and DataFusion.
+  Designed for DuckDB Flight SQL server (v0.10+), DataFusion, Dremio, and other
+  servers that implement the Arrow Flight SQL specification.  End-to-end
+  validation requires a live server; see the `flight_sql_integration` test tag.
 
   Multi-endpoint `FlightInfo` responses (distributed queries) are not supported in
   v0.5.0 — `query/2` returns `{:error, %Error{code: :multi_endpoint}}` in that case.
@@ -70,8 +72,9 @@ defmodule ExArrow.FlightSQL.Client do
   @doc """
   Connect to a Flight SQL server at the given URI.
 
-  `uri` must be a `"host:port"` string, e.g. `"localhost:32010"`. A bare
-  `"host"` string is accepted and defaults to port `31337`.
+  `uri` must be a `"host:port"` string, e.g. `"localhost:32010"`.
+  An explicit port is strongly recommended; a bare `"host"` string is accepted as
+  a convenience and defaults to port `32010` (the Arrow Flight SQL convention).
 
   ## Examples
 

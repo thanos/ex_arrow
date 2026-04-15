@@ -75,26 +75,33 @@ defmodule ExArrow.FlightSQL.ClientTest do
     end
   end
 
-  # ── Mox mock — query ──────────────────────────────────────────────────────────
+  # ── Mox mock — query/2 ───────────────────────────────────────────────────────
 
   describe "with mock — query/2" do
-    test "returns a Result with schema and batches" do
+    # query/2 materialises the stream into a %Result{}. Use a real IPC stream
+    # returned from the mock so from_stream/1 can actually consume batches.
+    @tag :nif
+    test "returns %Result{} with batches and row count" do
       use_mock()
       fake_client = %Client{resource: make_ref()}
-      fake_stream = %ExArrow.Stream{resource: make_ref(), backend: :flight_sql}
+
+      {:ok, ipc_bin} = ExArrow.Native.ipc_test_fixture_binary()
+      {:ok, stream_ref} = ExArrow.Native.ipc_reader_from_binary(ipc_bin)
+      real_stream = %ExArrow.Stream{resource: stream_ref, backend: :ipc}
 
       Mox.expect(ExArrow.FlightSQL.ClientMock, :query, fn ^fake_client, "SELECT 1", [] ->
-        {:ok, fake_stream}
+        {:ok, real_stream}
       end)
 
-      # query/2 calls impl().query() then collects via Result.from_stream/1.
-      # Since the stream resource is a fake ref, from_stream will fail —
-      # test the delegation path only.
-      result = Client.stream_query(fake_client, "SELECT 1")
-      assert {:ok, %ExArrow.Stream{backend: :flight_sql}} = result
+      assert {:ok, %ExArrow.FlightSQL.Result{num_rows: rows, batches: batches, schema: schema}} =
+               Client.query(fake_client, "SELECT 1")
+
+      assert rows > 0
+      assert length(batches) > 0
+      assert %ExArrow.Schema{} = schema
     end
 
-    test "query/2 propagates error from impl" do
+    test "propagates error from impl" do
       use_mock()
       fake_client = %Client{resource: make_ref()}
 
@@ -104,8 +111,30 @@ defmodule ExArrow.FlightSQL.ClientTest do
 
       assert {:error, %Error{code: :invalid_argument}} = Client.query(fake_client, "BAD SQL")
     end
+  end
 
-    test "query!/2 raises on error" do
+  # ── Mox mock — query!/2 ──────────────────────────────────────────────────────
+
+  describe "with mock — query!/2" do
+    @tag :nif
+    test "returns %Result{} on success" do
+      use_mock()
+      fake_client = %Client{resource: make_ref()}
+
+      {:ok, ipc_bin} = ExArrow.Native.ipc_test_fixture_binary()
+      {:ok, stream_ref} = ExArrow.Native.ipc_reader_from_binary(ipc_bin)
+      real_stream = %ExArrow.Stream{resource: stream_ref, backend: :ipc}
+
+      Mox.expect(ExArrow.FlightSQL.ClientMock, :query, fn ^fake_client, "SELECT 1", [] ->
+        {:ok, real_stream}
+      end)
+
+      result = Client.query!(fake_client, "SELECT 1")
+      assert %ExArrow.FlightSQL.Result{num_rows: rows} = result
+      assert rows > 0
+    end
+
+    test "raises Error on failure" do
       use_mock()
       fake_client = %Client{resource: make_ref()}
 
@@ -185,7 +214,7 @@ defmodule ExArrow.FlightSQL.ClientTest do
     end
   end
 
-  # ── Mox mock — close ──────────────────────────────────────────────────────────
+  # ── Mox mock — close/1 ───────────────────────────────────────────────────────
 
   describe "with mock — close/1" do
     test "close/1 delegates to impl and returns :ok" do
@@ -195,6 +224,16 @@ defmodule ExArrow.FlightSQL.ClientTest do
       Mox.expect(ExArrow.FlightSQL.ClientMock, :close, fn ^fake_client -> :ok end)
 
       assert :ok = Client.close(fake_client)
+    end
+  end
+
+  # ── Real impl — close/1 ───────────────────────────────────────────────────────
+
+  describe "real impl — close/1" do
+    test "returns :ok without a live connection (no-op in v0.5.0)" do
+      # ClientImpl.close/1 drops the resource handle; it is a no-op and never fails.
+      fake_client = %Client{resource: make_ref()}
+      assert :ok = ExArrow.FlightSQL.ClientImpl.close(fake_client)
     end
   end
 

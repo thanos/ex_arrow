@@ -77,8 +77,9 @@ defmodule ExArrow.FlightSQL.Result do
   Convert this result to an Explorer DataFrame.
 
   Requires the optional `:explorer` dependency.  The conversion uses an Arrow IPC
-  round-trip; it is correct for all standard Arrow types, but may be lossy for
-  types that Explorer/Polars does not support (e.g. `decimal128`, `map`).
+  round-trip through `ExArrow.IPC.Writer` and `ExArrow.Explorer.from_stream/1`.
+  Type support is determined by Explorer/Polars; columns with types that Polars
+  does not support (e.g. `decimal128`, nested `map`) may cause a conversion error.
 
   Returns `{:error, %ExArrow.FlightSQL.Error{code: :conversion_error}}` if Explorer
   is not available or if conversion fails.
