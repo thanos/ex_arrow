@@ -147,5 +147,14 @@ defmodule ExArrow.Native do
   def cdi_import(_handle_ref), do: :erlang.nif_error(:nif_not_loaded)
   def cdi_pointers(_handle_ref), do: :erlang.nif_error(:nif_not_loaded)
   def cdi_mark_consumed(_handle_ref), do: :erlang.nif_error(:nif_not_loaded)
+
+  # Flight SQL client
+  def flight_sql_connect(_host, _port, _tls_mode, _headers),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  def flight_sql_query(_client_ref, _sql), do: :erlang.nif_error(:nif_not_loaded)
+  def flight_sql_execute(_client_ref, _sql), do: :erlang.nif_error(:nif_not_loaded)
+  def flight_sql_stream_schema(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def flight_sql_stream_next(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
   # coveralls-ignore-stop
 end

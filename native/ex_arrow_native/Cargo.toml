@@ -21,7 +21,7 @@ arrow-data = { version = "56", default-features = false }
 arrow-select = { version = "56", default-features = false }
 arrow-ord = { version = "56", default-features = false }
 parquet = { version = "56", default-features = false, features = ["arrow"] }
-arrow-flight = "56"
+arrow-flight = { version = "56", features = ["flight-sql"] }
 futures = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros"] }
 tokio-stream = "0.1"

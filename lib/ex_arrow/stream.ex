@@ -4,13 +4,14 @@ defmodule ExArrow.Stream do
 
   Provides a unified iterator interface over three backing sources:
 
-  | Backend    | Created by                                              |
-  |------------|---------------------------------------------------------|
-  | `:ipc`     | `ExArrow.IPC.Reader` — Arrow IPC stream or file format  |
-  | `:parquet` | `ExArrow.Parquet.Reader` — lazy row-group Parquet reader |
-  | `:adbc`    | `ExArrow.ADBC.Statement.execute/1` — SQL result streams |
+  | Backend      | Created by                                                      |
+  |--------------|-----------------------------------------------------------------|
+  | `:ipc`       | `ExArrow.IPC.Reader` — Arrow IPC stream or file format          |
+  | `:parquet`   | `ExArrow.Parquet.Reader` — lazy row-group Parquet reader        |
+  | `:adbc`      | `ExArrow.ADBC.Statement.execute/1` — SQL result streams         |
+  | `:flight_sql`| `ExArrow.FlightSQL.Client.stream_query/2` — Flight SQL streams  |
 
-  Flight `do_get` results also use the `:ipc` backend (the Flight client
+  Plain Flight `do_get` results also use the `:ipc` backend (the Flight client
   returns an IPC stream resource).
 
   All three backends expose the same three functions:
@@ -26,7 +27,7 @@ defmodule ExArrow.Stream do
   alias ExArrow.RecordBatch
   alias ExArrow.Schema
 
-  @opaque t :: %__MODULE__{resource: reference(), backend: :ipc | :adbc | :parquet}
+  @opaque t :: %__MODULE__{resource: reference(), backend: :ipc | :adbc | :parquet | :flight_sql}
   defstruct [:resource, backend: :ipc]
 
   @doc """
@@ -51,6 +52,13 @@ defmodule ExArrow.Stream do
   def schema(%__MODULE__{resource: ref, backend: :parquet}) do
     schema_ref = native().parquet_stream_schema(ref)
     {:ok, Schema.from_ref(schema_ref)}
+  end
+
+  def schema(%__MODULE__{resource: ref, backend: :flight_sql}) do
+    case native().flight_sql_stream_schema(ref) do
+      {:error, msg} -> {:error, msg}
+      {:ok, schema_ref} -> {:ok, Schema.from_ref(schema_ref)}
+    end
   end
 
   @doc """
@@ -78,6 +86,15 @@ defmodule ExArrow.Stream do
     case native().parquet_stream_next(ref) do
       :done -> nil
       {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
+      {:error, msg} -> {:error, msg}
+    end
+  end
+
+  def next(%__MODULE__{resource: ref, backend: :flight_sql}) do
+    case native().flight_sql_stream_next(ref) do
+      :done -> nil
+      {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
+      {:error, {_code, _status, msg}} -> {:error, msg}
       {:error, msg} -> {:error, msg}
     end
   end

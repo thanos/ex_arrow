@@ -1,11 +1,12 @@
 //! ExArrow NIFs: IPC stream read/write, Schema and RecordBatch handles, Flight client/server,
-//! ADBC database connectivity, Arrow compute kernels, Parquet read/write, Nx column buffers,
-//! and the Arrow C Data Interface (CDI).
+//! Flight SQL client, ADBC database connectivity, Arrow compute kernels, Parquet read/write,
+//! Nx column buffers, and the Arrow C Data Interface (CDI).
 
 mod adbc;
 mod cdi;
 mod compute;
 mod flight;
+mod flight_sql;
 mod ipc;
 mod parquet;
 mod resources;
