@@ -30,6 +30,7 @@ defmodule ExArrow.FlightSQL.Result do
 
   """
 
+  alias ExArrow.FlightSQL.Error
   alias ExArrow.{RecordBatch, Schema, Stream}
 
   @type t :: %__MODULE__{
@@ -43,15 +44,31 @@ defmodule ExArrow.FlightSQL.Result do
   @doc """
   Build a `Result` by collecting all batches from a `stream`.
 
-  This is the implementation of `query/2` — calling `to_list/1` on a Flight SQL
-  stream and assembling the result struct.  Callers should not need this directly.
+  This is the implementation of `query/2` — iterating the Flight SQL stream to
+  completion and assembling the result struct.  Callers should not need this directly.
+
+  Returns `{:error, %ExArrow.FlightSQL.Error{}}` if schema inspection or any batch
+  read fails mid-stream.
   """
-  @spec from_stream(Stream.t()) :: {:ok, t()} | {:error, String.t()}
+  @spec from_stream(Stream.t()) :: {:ok, t()} | {:error, Error.t()}
   def from_stream(%Stream{} = stream) do
-    with {:ok, schema} <- Stream.schema(stream) do
-      batches = Stream.to_list(stream)
+    with {:ok, schema} <- wrap_schema_error(Stream.schema(stream)),
+         {:ok, batches} <- collect_batches(stream, []) do
       num_rows = Enum.reduce(batches, 0, fn b, acc -> acc + RecordBatch.num_rows(b) end)
       {:ok, %__MODULE__{schema: schema, batches: batches, num_rows: num_rows}}
+    end
+  end
+
+  # Wrap a plain string error from Stream.schema/1 into a typed %Error{}.
+  defp wrap_schema_error({:ok, _} = ok), do: ok
+  defp wrap_schema_error({:error, msg}), do: {:error, Error.from_string(:protocol_error, msg)}
+
+  # Consume the stream batch-by-batch, returning {:ok, batches} or {:error, %Error{}}.
+  defp collect_batches(stream, acc) do
+    case Stream.next(stream) do
+      nil -> {:ok, Enum.reverse(acc)}
+      {:error, msg} -> {:error, Error.from_string(:transport_error, msg)}
+      batch -> collect_batches(stream, [batch | acc])
     end
   end
 
@@ -69,7 +86,7 @@ defmodule ExArrow.FlightSQL.Result do
 
       {:ok, df} = ExArrow.FlightSQL.Result.to_dataframe(result)
   """
-  @spec to_dataframe(t()) :: {:ok, term()} | {:error, ExArrow.FlightSQL.Error.t()}
+  @spec to_dataframe(t()) :: {:ok, term()} | {:error, Error.t()}
   def to_dataframe(%__MODULE__{} = result) do
     if Code.ensure_loaded?(ExArrow.Explorer) do
       try do
@@ -82,21 +99,21 @@ defmodule ExArrow.FlightSQL.Result do
 
             {:error, msg} ->
               {:error,
-               ExArrow.FlightSQL.Error.from_string(:conversion_error, "Explorer conversion failed: #{msg}")}
+               Error.from_string(:conversion_error, "Explorer conversion failed: #{msg}")}
           end
         else
           {:error, msg} ->
             {:error,
-             ExArrow.FlightSQL.Error.from_string(:conversion_error, "IPC round-trip failed: #{msg}")}
+             Error.from_string(:conversion_error, "IPC round-trip failed: #{msg}")}
         end
       rescue
         e ->
           {:error,
-           ExArrow.FlightSQL.Error.from_string(:conversion_error, "conversion raised: #{Exception.message(e)}")}
+           Error.from_string(:conversion_error, "conversion raised: #{Exception.message(e)}")}
       end
     else
       {:error,
-       ExArrow.FlightSQL.Error.from_string(
+       Error.from_string(
          :conversion_error,
          "Explorer is not available — add {:explorer, \"~> 0.11\"} to your dependencies"
        )}
@@ -118,10 +135,10 @@ defmodule ExArrow.FlightSQL.Result do
 
       {:ok, tensor} = ExArrow.FlightSQL.Result.to_tensor(result, "price")
   """
-  @spec to_tensor(t(), String.t()) :: {:ok, term()} | {:error, ExArrow.FlightSQL.Error.t()}
+  @spec to_tensor(t(), String.t()) :: {:ok, term()} | {:error, Error.t()}
   def to_tensor(%__MODULE__{batches: []}, _column) do
     {:error,
-     ExArrow.FlightSQL.Error.from_string(:conversion_error, "result contains no batches")}
+     Error.from_string(:conversion_error, "result contains no batches")}
   end
 
   def to_tensor(%__MODULE__{batches: [batch | _]}, column) when is_binary(column) do
@@ -135,7 +152,7 @@ defmodule ExArrow.FlightSQL.Result do
 
               :error ->
                 {:error,
-                 ExArrow.FlightSQL.Error.from_string(
+                 Error.from_string(
                    :conversion_error,
                    "column #{inspect(column)} not found in batch"
                  )}
@@ -143,16 +160,16 @@ defmodule ExArrow.FlightSQL.Result do
 
           {:error, msg} ->
             {:error,
-             ExArrow.FlightSQL.Error.from_string(:conversion_error, "Nx conversion failed: #{msg}")}
+             Error.from_string(:conversion_error, "Nx conversion failed: #{msg}")}
         end
       rescue
         e ->
           {:error,
-           ExArrow.FlightSQL.Error.from_string(:conversion_error, "conversion raised: #{Exception.message(e)}")}
+           Error.from_string(:conversion_error, "conversion raised: #{Exception.message(e)}")}
       end
     else
       {:error,
-       ExArrow.FlightSQL.Error.from_string(
+       Error.from_string(
          :conversion_error,
          "Nx is not available — add {:nx, \"~> 0.9\"} to your dependencies"
        )}

@@ -94,7 +94,7 @@ defmodule ExArrow.Stream do
     case native().flight_sql_stream_next(ref) do
       :done -> nil
       {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
-      {:error, {_code, _status, msg}} -> {:error, msg}
+      {:error, {code, _status, msg}} -> {:error, "[#{code}] #{msg}"}
       {:error, msg} -> {:error, msg}
     end
   end

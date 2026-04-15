@@ -149,12 +149,27 @@ fn flight_error_to_term<'a>(env: Env<'a>, err: FlightError) -> Term<'a> {
     match &err {
         FlightError::Tonic(status) => {
             let (code, grpc_code) = match status.code() {
-                Code::Unimplemented => (unimplemented(), 12i32),
+                // Transport / availability errors
+                Code::Cancelled => (transport_error(), 1i32),
+                Code::Unavailable => (transport_error(), 14i32),
+                Code::DeadlineExceeded => (transport_error(), 4i32),
+                // Auth errors
                 Code::Unauthenticated => (unauthenticated(), 16i32),
                 Code::PermissionDenied => (permission_denied(), 7i32),
+                // Lookup / argument errors
                 Code::NotFound => (not_found(), 5i32),
                 Code::InvalidArgument => (invalid_argument(), 3i32),
+                Code::OutOfRange => (invalid_argument(), 11i32),
+                // Feature availability
+                Code::Unimplemented => (unimplemented(), 12i32),
+                // Server-side errors
                 Code::Internal => (server_error(), 13i32),
+                Code::Unknown => (server_error(), 2i32),
+                Code::ResourceExhausted => (server_error(), 8i32),
+                Code::FailedPrecondition => (server_error(), 9i32),
+                Code::Aborted => (server_error(), 10i32),
+                Code::AlreadyExists => (server_error(), 6i32),
+                Code::DataLoss => (server_error(), 15i32),
                 other => (server_error(), other as i32),
             };
             encode_sql_error(env, code, grpc_code, status.message())
@@ -259,6 +274,11 @@ pub fn flight_sql_connect<'a>(
 ///
 /// Returns `{:error, {multi_endpoint, 0, message}}` when `FlightInfo` contains
 /// more than one endpoint — multi-endpoint distribution is not supported in v0.5.0.
+///
+/// **Concurrency note**: concurrent calls on the same client handle are serialised
+/// by an internal Mutex.  `FlightSqlServiceClient::execute` requires exclusive
+/// (`&mut self`) access, so queries cannot be pipelined through one handle.
+/// Create separate client handles for concurrent query workloads.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn flight_sql_query<'a>(
     env: Env<'a>,

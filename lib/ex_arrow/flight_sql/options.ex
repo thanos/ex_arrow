@@ -17,10 +17,17 @@ defmodule ExArrow.FlightSQL.Options do
         }
 
   # Hosts treated as loopback for the auto-TLS heuristic.
-  @loopback_hosts ~w[localhost 127.0.0.1 ::1 0:0:0:0:0:0:0:1 ip6-localhost]
+  # IPv6 addresses use the canonical short form that parse_uri/1 produces after
+  # stripping brackets from "[::1]:port" style URIs.
+  @loopback_hosts ~w[localhost 127.0.0.1 ::1 ip6-localhost]
 
   @doc """
   Parse a `"host:port"` URI string and keyword options into a normalized options map.
+
+  Accepted URI formats:
+  - `"hostname:port"` — e.g. `"localhost:32010"`
+  - `"hostname"` — port defaults to 31337
+  - `"[::1]:port"` — bracketed IPv6 address with explicit port
 
   Accepted keyword options:
   - `:tls` — `false | true | [ca_cert_pem: pem_binary]` (default: auto based on host).
@@ -40,22 +47,39 @@ defmodule ExArrow.FlightSQL.Options do
   # ── URI parsing ───────────────────────────────────────────────────────────────
 
   defp parse_uri(uri) do
-    case String.split(uri, ":", parts: 2) do
-      [host, port_str] ->
-        case Integer.parse(port_str) do
-          {port, ""} when port > 0 and port <= 65_535 ->
-            {:ok, {host, port}}
+    cond do
+      # Bracketed IPv6: "[::1]:32010" — must have both brackets and port.
+      String.starts_with?(uri, "[") ->
+        case Regex.run(~r/^\[([^\]]+)\]:(\d+)$/, uri) do
+          [_, host, port_str] ->
+            parse_port(port_str, host, uri)
 
           _ ->
-            invalid_option("invalid port in URI #{inspect(uri)}: expected an integer 1-65535")
+            invalid_option(
+              "invalid URI #{inspect(uri)}: IPv6 addresses must use the form [host]:port"
+            )
         end
 
-      [host] ->
-        # No port supplied — use the Flight SQL default.
-        {:ok, {host, 31_337}}
+      # Hostname or IPv4 with optional port: "host:port" or "host".
+      true ->
+        case String.split(uri, ":", parts: 2) do
+          [host, port_str] ->
+            parse_port(port_str, host, uri)
+
+          [host] ->
+            # No port supplied — use the Flight SQL default.
+            {:ok, {host, 31_337}}
+        end
+    end
+  end
+
+  defp parse_port(port_str, host, uri) do
+    case Integer.parse(port_str) do
+      {port, ""} when port > 0 and port <= 65_535 ->
+        {:ok, {host, port}}
 
       _ ->
-        invalid_option("invalid URI #{inspect(uri)}: expected \"host:port\" or \"host\"")
+        invalid_option("invalid port in URI #{inspect(uri)}: expected an integer 1-65535")
     end
   end
 

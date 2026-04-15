@@ -118,13 +118,7 @@ defmodule ExArrow.FlightSQL.Client do
   @spec query(t(), String.t()) :: {:ok, Result.t()} | {:error, Error.t()}
   def query(%__MODULE__{} = client, sql) when is_binary(sql) do
     with {:ok, stream} <- impl().query(client, sql, []) do
-      case Result.from_stream(stream) do
-        {:ok, result} ->
-          {:ok, result}
-
-        {:error, msg} ->
-          {:error, Error.from_string(:transport_error, msg)}
-      end
+      Result.from_stream(stream)
     end
   end
 
@@ -153,6 +147,11 @@ defmodule ExArrow.FlightSQL.Client do
   stream is exhausted or the stream resource is garbage-collected.
 
   Prefer this over `query/2` for large result sets.
+
+  > #### Concurrency {: .warning}
+  > Concurrent calls on the **same** client handle are serialised — the underlying
+  > gRPC client requires exclusive access per call.  For parallel queries, create
+  > separate client handles with `connect/2`.
 
   ## Examples
 

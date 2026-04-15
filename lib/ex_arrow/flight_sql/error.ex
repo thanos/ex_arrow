@@ -51,7 +51,7 @@ defmodule ExArrow.FlightSQL.Error do
   @type t :: %__MODULE__{
           code: code(),
           message: String.t(),
-          grpc_status: non_neg_integer() | nil,
+          grpc_status: integer() | nil,
           details: term() | nil
         }
 
