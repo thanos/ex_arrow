@@ -22,7 +22,11 @@ defmodule ExArrow.FlightSQL.MetadataTest do
   defp restore(key, val), do: Application.put_env(:ex_arrow, key, val)
 
   defp use_ok_native do
-    Application.put_env(:ex_arrow, :flight_sql_client_native, ExArrow.FlightSQL.TestNativeMetadataOk)
+    Application.put_env(
+      :ex_arrow,
+      :flight_sql_client_native,
+      ExArrow.FlightSQL.TestNativeMetadataOk
+    )
   end
 
   defp use_unimplemented_native do
@@ -206,5 +210,4 @@ defmodule ExArrow.FlightSQL.MetadataTest do
       assert {:error, %Error{code: :unimplemented}} = Client.get_sql_info(client)
     end
   end
-
 end

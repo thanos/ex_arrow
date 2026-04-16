@@ -12,7 +12,7 @@ defmodule ExArrow.FlightSQL.ClientBehaviour do
   #
   #     Mox.defmock(MyMock, for: ExArrow.FlightSQL.ClientBehaviour)
 
-  alias ExArrow.{FlightSQL.Error, Stream}
+  alias ExArrow.{FlightSQL.Error, FlightSQL.Statement, Stream}
 
   @type client :: ExArrow.FlightSQL.Client.t()
   @type sql :: String.t()
@@ -37,4 +37,7 @@ defmodule ExArrow.FlightSQL.ClientBehaviour do
 
   @callback get_sql_info(client(), opts :: keyword()) ::
               {:ok, Stream.t()} | {:error, Error.t()}
+
+  @callback prepare(client(), sql(), opts :: keyword()) ::
+              {:ok, Statement.t()} | {:error, Error.t()}
 end

@@ -3,7 +3,7 @@ defmodule ExArrow.FlightSQL.ClientImpl do
 
   @behaviour ExArrow.FlightSQL.ClientBehaviour
 
-  alias ExArrow.FlightSQL.{Client, Error, Options}
+  alias ExArrow.FlightSQL.{Client, Error, Options, Statement}
   alias ExArrow.Stream
 
   require Logger
@@ -80,6 +80,14 @@ defmodule ExArrow.FlightSQL.ClientImpl do
   def get_sql_info(%Client{resource: ref}, _opts) do
     case native().flight_sql_get_sql_info(ref) do
       {:ok, stream_ref} -> {:ok, %Stream{resource: stream_ref, backend: :flight_sql}}
+      {:error, nif_err} -> {:error, wrap_nif_error(nif_err)}
+    end
+  end
+
+  @impl true
+  def prepare(%Client{resource: ref}, sql, _opts) do
+    case native().flight_sql_prepare(ref, sql) do
+      {:ok, stmt_ref} -> {:ok, %Statement{resource: stmt_ref}}
       {:error, nif_err} -> {:error, wrap_nif_error(nif_err)}
     end
   end

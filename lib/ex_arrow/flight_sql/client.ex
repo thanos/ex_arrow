@@ -57,7 +57,7 @@ defmodule ExArrow.FlightSQL.Client do
   Transaction operations (`BEGIN`, `COMMIT`, `ROLLBACK`) are deferred to v0.6.0.
   """
 
-  alias ExArrow.FlightSQL.{ClientBehaviour, Error, Result}
+  alias ExArrow.FlightSQL.{ClientBehaviour, Error, Result, Statement}
   alias ExArrow.Stream
 
   @opaque t :: %__MODULE__{resource: reference()}
@@ -190,6 +190,42 @@ defmodule ExArrow.FlightSQL.Client do
           {:ok, non_neg_integer() | :unknown} | {:error, Error.t()}
   def execute(%__MODULE__{} = client, sql) when is_binary(sql) do
     impl().execute(client, sql, [])
+  end
+
+  # ── Prepared statements ───────────────────────────────────────────────────────
+
+  @doc """
+  Prepare a SQL query on the server and return a reusable statement handle.
+
+  Sends `CreatePreparedStatement` to the server, which parses and plans the
+  query and returns an opaque handle.  The handle can be executed one or more
+  times with `ExArrow.FlightSQL.Statement.execute/1` (for SELECT-like queries)
+  or `ExArrow.FlightSQL.Statement.execute_update/1` (for DML/DDL).
+
+  Returns `{:ok, %ExArrow.FlightSQL.Statement{}}` or
+  `{:error, %ExArrow.FlightSQL.Error{}}`.
+
+  ## Compatibility
+
+  Prepared statement support is optional in the Flight SQL specification.
+  Servers that do not implement `CreatePreparedStatement` return
+  `{:error, %Error{code: :unimplemented}}`.
+
+  Parameter binding (passing `?` placeholders with Arrow data) is not
+  supported in v0.5.0.
+
+  ## Examples
+
+      {:ok, stmt} = ExArrow.FlightSQL.Client.prepare(client, "SELECT * FROM t")
+      {:ok, stream} = ExArrow.FlightSQL.Statement.execute(stmt)
+      batches = Enum.to_list(stream)
+
+      # Re-execute the same statement without re-preparing
+      {:ok, stream2} = ExArrow.FlightSQL.Statement.execute(stmt)
+  """
+  @spec prepare(t(), String.t()) :: {:ok, Statement.t()} | {:error, Error.t()}
+  def prepare(%__MODULE__{} = client, sql) when is_binary(sql) do
+    impl().prepare(client, sql, [])
   end
 
   # ── Metadata ─────────────────────────────────────────────────────────────────

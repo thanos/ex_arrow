@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use arrow::datatypes::Schema;
 use arrow_flight::decode::FlightRecordBatchStream;
 use arrow_flight::error::FlightError;
-use arrow_flight::sql::client::FlightSqlServiceClient;
+use arrow_flight::sql::client::{FlightSqlServiceClient, PreparedStatement};
 use arrow_flight::sql::{CommandGetDbSchemas, CommandGetTables};
 use arrow_flight::{FlightInfo, IpcMessage};
 use arrow_schema::SchemaRef;
@@ -48,9 +48,13 @@ rustler::atoms! {
 // ── Resource types ────────────────────────────────────────────────────────────
 
 /// Opaque handle for an active Flight SQL connection.
+///
+/// The client is wrapped in `Arc<Mutex<>>` so the same channel can be shared
+/// cheaply with `FlightSqlPreparedStatementResource` for DoGet calls after
+/// `PreparedStatement::execute` returns a `FlightInfo`.
 pub struct FlightSqlClientHandle {
     pub rt: Arc<tokio::runtime::Runtime>,
-    pub client: Mutex<FlightSqlServiceClient<Channel>>,
+    pub client: Arc<Mutex<FlightSqlServiceClient<Channel>>>,
 }
 
 #[rustler::resource_impl]
@@ -67,6 +71,22 @@ pub struct FlightSqlStreamResource {
 
 #[rustler::resource_impl]
 impl rustler::Resource for FlightSqlStreamResource {}
+
+/// A prepared statement handle returned by `flight_sql_prepare`.
+///
+/// Holds:
+/// - A `Mutex`-guarded `PreparedStatement<Channel>` for serialised execute calls.
+/// - An `Arc` clone of the original connection's client, used for the `DoGet`
+///   request that streams result batches after `PreparedStatement::execute`
+///   returns a `FlightInfo`.
+pub struct FlightSqlPreparedStatementResource {
+    pub rt: Arc<tokio::runtime::Runtime>,
+    pub client: Arc<Mutex<FlightSqlServiceClient<Channel>>>,
+    pub stmt: Mutex<PreparedStatement<Channel>>,
+}
+
+#[rustler::resource_impl]
+impl rustler::Resource for FlightSqlPreparedStatementResource {}
 
 // ── Tokio runtime ─────────────────────────────────────────────────────────────
 
@@ -263,7 +283,7 @@ pub fn flight_sql_connect<'a>(
 
     let handle = FlightSqlClientHandle {
         rt,
-        client: Mutex::new(client),
+        client: Arc::new(Mutex::new(client)),
     };
     ok_encode(env, ResourceArc::new(handle))
 }
@@ -430,7 +450,7 @@ pub fn flight_sql_stream_next<'a>(
 fn flight_info_to_stream<'a>(
     env: Env<'a>,
     rt: &Arc<tokio::runtime::Runtime>,
-    client_ref: &FlightSqlClientHandle,
+    client: &Arc<Mutex<FlightSqlServiceClient<Channel>>>,
     flight_info: FlightInfo,
 ) -> Term<'a> {
     // Enforce single-endpoint constraint (same as flight_sql_query).
@@ -462,7 +482,7 @@ fn flight_info_to_stream<'a>(
     };
 
     let stream = {
-        let mut guard = match client_ref.client.lock() {
+        let mut guard = match client.lock() {
             Ok(g) => g,
             Err(_) => return err_encode(env, "client lock poisoned"),
         };
@@ -520,7 +540,7 @@ pub fn flight_sql_get_tables<'a>(
         }
     };
 
-    flight_info_to_stream(env, &rt, &client_ref, flight_info)
+    flight_info_to_stream(env, &rt, &client_ref.client, flight_info)
 }
 
 /// List database schemas visible to the connected user.
@@ -553,7 +573,7 @@ pub fn flight_sql_get_db_schemas<'a>(
         }
     };
 
-    flight_info_to_stream(env, &rt, &client_ref, flight_info)
+    flight_info_to_stream(env, &rt, &client_ref.client, flight_info)
 }
 
 /// Retrieve server capability and dialect information.
@@ -582,5 +602,95 @@ pub fn flight_sql_get_sql_info<'a>(
         }
     };
 
-    flight_info_to_stream(env, &rt, &client_ref, flight_info)
+    flight_info_to_stream(env, &rt, &client_ref.client, flight_info)
+}
+
+// ── Prepared statement NIFs ───────────────────────────────────────────────────
+
+/// Prepare a SQL query on the server and return an opaque statement handle.
+///
+/// The server parses and plans the query, returning a
+/// `FlightSqlPreparedStatementResource` that can be executed one or more
+/// times via `flight_sql_prepared_execute` or
+/// `flight_sql_prepared_execute_update`.
+///
+/// Returns `{:ok, stmt_ref}` or `{:error, {code, grpc_status, message}}`.
+///
+/// Parameter binding is not supported in v0.5.0 — the statement executes
+/// with no bound parameters.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_sql_prepare<'a>(
+    env: Env<'a>,
+    client_ref: ResourceArc<FlightSqlClientHandle>,
+    sql: String,
+) -> Term<'a> {
+    let rt = client_ref.rt.clone();
+
+    let stmt = {
+        let mut guard = match client_ref.client.lock() {
+            Ok(g) => g,
+            Err(_) => return err_encode(env, "client lock poisoned"),
+        };
+        match rt.block_on(guard.prepare(sql, None)) {
+            Ok(s) => s,
+            Err(e) => return flight_error_to_term(env, FlightError::Arrow(e)),
+        }
+    };
+
+    let resource = FlightSqlPreparedStatementResource {
+        rt,
+        client: client_ref.client.clone(),
+        stmt: Mutex::new(stmt),
+    };
+    ok_encode(env, ResourceArc::new(resource))
+}
+
+/// Execute a prepared statement and return a lazy record-batch stream.
+///
+/// Performs `ExecutePreparedStatement` followed by `DoGet` on the returned
+/// endpoint.
+///
+/// Returns `{:ok, stream_ref}` or `{:error, {code, grpc_status, message}}`.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_sql_prepared_execute<'a>(
+    env: Env<'a>,
+    stmt_ref: ResourceArc<FlightSqlPreparedStatementResource>,
+) -> Term<'a> {
+    let rt = stmt_ref.rt.clone();
+
+    let flight_info = {
+        let mut guard = match stmt_ref.stmt.lock() {
+            Ok(g) => g,
+            Err(_) => return err_encode(env, "statement lock poisoned"),
+        };
+        match rt.block_on(guard.execute()) {
+            Ok(info) => info,
+            Err(e) => return flight_error_to_term(env, FlightError::Arrow(e)),
+        }
+    };
+
+    flight_info_to_stream(env, &rt, &stmt_ref.client, flight_info)
+}
+
+/// Execute a prepared DML/DDL statement and return the affected row count.
+///
+/// Returns `{:ok, n}` where `n` is the number of affected rows, or
+/// `{:ok, :unknown}` when the server does not report a count.
+/// Returns `{:error, {code, grpc_status, message}}` on failure.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_sql_prepared_execute_update<'a>(
+    env: Env<'a>,
+    stmt_ref: ResourceArc<FlightSqlPreparedStatementResource>,
+) -> Term<'a> {
+    let rt = stmt_ref.rt.clone();
+    let mut guard = match stmt_ref.stmt.lock() {
+        Ok(g) => g,
+        Err(_) => return err_encode(env, "statement lock poisoned"),
+    };
+
+    match rt.block_on(guard.execute_update()) {
+        Ok(n) if n < 0 => (ok(), unknown()).encode(env),
+        Ok(n) => (ok(), n as u64).encode(env),
+        Err(e) => flight_error_to_term(env, FlightError::Arrow(e)),
+    }
 }

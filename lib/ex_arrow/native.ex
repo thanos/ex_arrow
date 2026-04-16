@@ -171,5 +171,12 @@ defmodule ExArrow.Native do
     do: :erlang.nif_error(:nif_not_loaded)
 
   def flight_sql_get_sql_info(_client_ref), do: :erlang.nif_error(:nif_not_loaded)
+
+  def flight_sql_prepare(_client_ref, _sql), do: :erlang.nif_error(:nif_not_loaded)
+  def flight_sql_prepared_execute(_stmt_ref), do: :erlang.nif_error(:nif_not_loaded)
+
+  def flight_sql_prepared_execute_update(_stmt_ref),
+    do: :erlang.nif_error(:nif_not_loaded)
+
   # coveralls-ignore-stop
 end

@@ -275,6 +275,47 @@ end)
 
 ---
 
+## Prepared statements
+
+Prepared statements allow the server to parse and plan a query once, then
+execute it one or more times.  This is useful for repeated queries and for
+getting early syntax errors before execution.
+
+```elixir
+# Prepare the query (server parses and plans it)
+{:ok, stmt} = ExArrow.FlightSQL.Client.prepare(client, "SELECT * FROM events WHERE ts > '2024-01-01'")
+
+# Execute as a streaming query
+{:ok, stream} = ExArrow.FlightSQL.Statement.execute(stmt)
+batches = Enum.to_list(stream)
+
+# Re-execute the same statement (reuses the server plan)
+{:ok, stream2} = ExArrow.FlightSQL.Statement.execute(stmt)
+
+# Or execute as DML
+{:ok, dml_stmt} = ExArrow.FlightSQL.Client.prepare(client, "DELETE FROM logs WHERE ts < '2020-01-01'")
+{:ok, 1042}     = ExArrow.FlightSQL.Statement.execute_update(dml_stmt)
+```
+
+### Lifecycle
+
+The server-side handle is released when the `Statement` struct is
+garbage-collected.  There is no explicit `close/1` in v0.5.0.
+
+### Parameter binding
+
+Parameter binding (passing `?` placeholders with Arrow record batch values)
+is not supported in v0.5.0.  Parameterized queries can be prepared and
+executed, but parameter values cannot be set from Elixir in this release.
+
+### Server compatibility
+
+Prepared statement support is optional in the Arrow Flight SQL specification.
+Servers that do not implement `CreatePreparedStatement` return
+`{:error, %Error{code: :unimplemented}}`.
+
+---
+
 ## Metadata discovery
 
 ### List tables — `get_tables/2`
@@ -354,7 +395,9 @@ end
 
 - Ad-hoc SQL query execution (`query/2`, `query!/2`, `stream_query/2`)
 - DML execution with affected-row count (`execute/2`)
-- Lazy streaming of large result sets
+- Lazy streaming of large result sets with `Enumerable` support
+- Prepared statements (`prepare/2`, `Statement.execute/1`, `Statement.execute_update/1`)
+- Metadata discovery: `get_tables/2`, `get_db_schemas/2`, `get_sql_info/1`
 - TLS connections — plaintext, OS trust store, or custom CA certificate
 - Bearer-token and arbitrary gRPC header injection
 - Mox-compatible `ClientBehaviour` for unit testing without a server
@@ -365,6 +408,7 @@ end
 - Bulk ingestion (`DoPut`)
 - Transactions (`BEGIN`, `COMMIT`, `ROLLBACK`)
 - Multi-endpoint distributed `FlightInfo` responses
+- Parameter binding for prepared statements (v0.6.0)
 - Filtering `get_sql_info` by specific info code (returns all codes)
 
 ---
