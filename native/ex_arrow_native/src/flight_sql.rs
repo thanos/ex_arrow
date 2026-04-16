@@ -167,39 +167,12 @@ fn encode_sql_error<'a>(
 }
 
 fn flight_error_to_term<'a>(env: Env<'a>, err: FlightError) -> Term<'a> {
-    use tonic::Code;
-
     match &err {
         FlightError::Tonic(status) => {
-            let (code, grpc_code) = match status.code() {
-                // Transport / availability errors
-                Code::Cancelled => (transport_error(), 1i32),
-                Code::Unavailable => (transport_error(), 14i32),
-                Code::DeadlineExceeded => (transport_error(), 4i32),
-                // Auth errors
-                Code::Unauthenticated => (unauthenticated(), 16i32),
-                Code::PermissionDenied => (permission_denied(), 7i32),
-                // Lookup / argument errors
-                Code::NotFound => (not_found(), 5i32),
-                Code::InvalidArgument => (invalid_argument(), 3i32),
-                Code::OutOfRange => (invalid_argument(), 11i32),
-                // Feature availability
-                Code::Unimplemented => (unimplemented(), 12i32),
-                // Server-side errors
-                Code::Internal => (server_error(), 13i32),
-                Code::Unknown => (server_error(), 2i32),
-                Code::ResourceExhausted => (server_error(), 8i32),
-                Code::FailedPrecondition => (server_error(), 9i32),
-                Code::Aborted => (server_error(), 10i32),
-                Code::AlreadyExists => (server_error(), 6i32),
-                Code::DataLoss => (server_error(), 15i32),
-                other => (server_error(), other as i32),
-            };
+            let (code, grpc_code) = tonic_code_to_atom(status.code());
             encode_sql_error(env, code, grpc_code, status.message())
         }
-        FlightError::Arrow(inner) => {
-            encode_sql_error(env, transport_error(), 0, &inner.to_string())
-        }
+        FlightError::Arrow(inner) => arrow_error_to_term(env, inner),
         FlightError::DecodeError(msg) => {
             encode_sql_error(env, protocol_error(), 0, msg)
         }
@@ -208,6 +181,130 @@ fn flight_error_to_term<'a>(env: Env<'a>, err: FlightError) -> Term<'a> {
         }
         other => encode_sql_error(env, transport_error(), 0, &other.to_string()),
     }
+}
+
+/// Map a `tonic::Code` to the corresponding Elixir atom and gRPC integer.
+fn tonic_code_to_atom(code: tonic::Code) -> (rustler::Atom, i32) {
+    use tonic::Code;
+    match code {
+        // Transport / availability errors
+        Code::Cancelled => (transport_error(), 1),
+        Code::Unavailable => (transport_error(), 14),
+        Code::DeadlineExceeded => (transport_error(), 4),
+        // Auth errors
+        Code::Unauthenticated => (unauthenticated(), 16),
+        Code::PermissionDenied => (permission_denied(), 7),
+        // Lookup / argument errors
+        Code::NotFound => (not_found(), 5),
+        Code::InvalidArgument => (invalid_argument(), 3),
+        Code::OutOfRange => (invalid_argument(), 11),
+        // Feature availability
+        Code::Unimplemented => (unimplemented(), 12),
+        // Server-side errors
+        Code::Internal => (server_error(), 13),
+        Code::Unknown => (server_error(), 2),
+        Code::ResourceExhausted => (server_error(), 8),
+        Code::FailedPrecondition => (server_error(), 9),
+        Code::Aborted => (server_error(), 10),
+        Code::AlreadyExists => (server_error(), 6),
+        Code::DataLoss => (server_error(), 15),
+        other => (server_error(), other as i32),
+    }
+}
+
+/// Encode an `ArrowError` as a structured Elixir error term.
+///
+/// `arrow-flight`'s `status_to_arrow_error` wraps every tonic `Status` as
+/// `ArrowError::IpcError(format!("{status:?}"))`, which discards the gRPC code
+/// as a side effect.  This function recovers the code by parsing the Debug
+/// string: tonic formats `Status` as
+/// `Status { code: VariantName, message: "...", ... }`.
+///
+/// If the string matches that pattern the structured `(code, grpc_status, msg)`
+/// triple is recovered.  Otherwise the raw string is returned as
+/// `:transport_error`.
+fn arrow_error_to_term<'a>(env: Env<'a>, err: &arrow::error::ArrowError) -> Term<'a> {
+    use arrow::error::ArrowError;
+    if let ArrowError::IpcError(ref s) = err {
+        if let Some((atom, grpc_int, msg)) = parse_tonic_status_debug(s) {
+            return encode_sql_error(env, atom, grpc_int, &msg);
+        }
+    }
+    encode_sql_error(env, transport_error(), 0, &err.to_string())
+}
+
+/// Try to recover `(code_atom, grpc_int, message)` from a `tonic::Status`
+/// debug string.
+///
+/// tonic's derived `Debug` format is stable:
+/// `Status { code: VariantName, message: "...", metadata: ..., source: ... }`
+fn parse_tonic_status_debug(s: &str) -> Option<(rustler::Atom, i32, String)> {
+    if !s.starts_with("Status {") {
+        return None;
+    }
+    // Extract the code variant name: text after "code: " up to the next ", "
+    let code_str = extract_field(s, "code: ", ",")?;
+    let (atom, grpc_int) = tonic_code_name_to_atom(code_str.trim());
+    // Extract the message: quoted string after `message: "`
+    let message = extract_quoted_field(s, "message: \"").unwrap_or_default();
+    Some((atom, grpc_int, message))
+}
+
+/// Map a tonic `Code` variant name (as it appears in `{:?}` output) to the
+/// corresponding Elixir atom and gRPC integer.
+fn tonic_code_name_to_atom(name: &str) -> (rustler::Atom, i32) {
+    match name {
+        "Ok" => (ok(), 0),
+        "Cancelled" => (transport_error(), 1),
+        "Unknown" => (server_error(), 2),
+        "InvalidArgument" => (invalid_argument(), 3),
+        "DeadlineExceeded" => (transport_error(), 4),
+        "NotFound" => (not_found(), 5),
+        "AlreadyExists" => (server_error(), 6),
+        "PermissionDenied" => (permission_denied(), 7),
+        "ResourceExhausted" => (server_error(), 8),
+        "FailedPrecondition" => (server_error(), 9),
+        "Aborted" => (server_error(), 10),
+        "OutOfRange" => (invalid_argument(), 11),
+        "Unimplemented" => (unimplemented(), 12),
+        "Internal" => (server_error(), 13),
+        "Unavailable" => (transport_error(), 14),
+        "DataLoss" => (server_error(), 15),
+        "Unauthenticated" => (unauthenticated(), 16),
+        _ => (server_error(), 2),
+    }
+}
+
+/// Extract the substring between `prefix` and the next occurrence of `suffix`.
+fn extract_field<'a>(s: &'a str, prefix: &str, suffix: &str) -> Option<&'a str> {
+    let start = s.find(prefix)? + prefix.len();
+    let end = start + s[start..].find(suffix)?;
+    Some(&s[start..end])
+}
+
+/// Extract a quoted string value that follows `prefix` (i.e. `prefix` ends
+/// just before the opening `"`).  Handles `\"`, `\\`, `\n`, `\t` escapes.
+fn extract_quoted_field(s: &str, prefix: &str) -> Option<String> {
+    let start = s.find(prefix)? + prefix.len();
+    let mut result = String::new();
+    let mut chars = s[start..].chars();
+    loop {
+        match chars.next()? {
+            '"' => break,
+            '\\' => match chars.next()? {
+                '"' => result.push('"'),
+                'n' => result.push('\n'),
+                't' => result.push('\t'),
+                '\\' => result.push('\\'),
+                c => {
+                    result.push('\\');
+                    result.push(c);
+                }
+            },
+            c => result.push(c),
+        }
+    }
+    Some(result)
 }
 
 // ── Schema decode helper ──────────────────────────────────────────────────────
@@ -318,7 +415,7 @@ pub fn flight_sql_query<'a>(
         };
         match rt.block_on(guard.execute(sql, None)) {
             Ok(info) => info,
-            Err(e) => return flight_error_to_term(env, FlightError::Arrow(e)),
+            Err(e) => return arrow_error_to_term(env, &e),
         }
     };
 
@@ -360,7 +457,7 @@ pub fn flight_sql_query<'a>(
         };
         match rt.block_on(guard.do_get(ticket)) {
             Ok(s) => s,
-            Err(e) => return flight_error_to_term(env, FlightError::Arrow(e)),
+            Err(e) => return arrow_error_to_term(env, &e),
         }
     };
 
@@ -391,7 +488,7 @@ pub fn flight_sql_execute<'a>(
     match rt.block_on(guard.execute_update(sql, None)) {
         Ok(n) if n < 0 => (ok(), unknown()).encode(env),
         Ok(n) => (ok(), n as u64).encode(env),
-        Err(e) => flight_error_to_term(env, FlightError::Arrow(e)),
+        Err(e) => arrow_error_to_term(env, &e),
     }
 }
 
@@ -488,7 +585,7 @@ fn flight_info_to_stream<'a>(
         };
         match rt.block_on(guard.do_get(ticket)) {
             Ok(s) => s,
-            Err(e) => return flight_error_to_term(env, FlightError::Arrow(e)),
+            Err(e) => return arrow_error_to_term(env, &e),
         }
     };
 
@@ -536,7 +633,7 @@ pub fn flight_sql_get_tables<'a>(
         };
         match rt.block_on(guard.get_tables(cmd)) {
             Ok(info) => info,
-            Err(e) => return flight_error_to_term(env, FlightError::Arrow(e)),
+            Err(e) => return arrow_error_to_term(env, &e),
         }
     };
 
@@ -569,7 +666,7 @@ pub fn flight_sql_get_db_schemas<'a>(
         };
         match rt.block_on(guard.get_db_schemas(cmd)) {
             Ok(info) => info,
-            Err(e) => return flight_error_to_term(env, FlightError::Arrow(e)),
+            Err(e) => return arrow_error_to_term(env, &e),
         }
     };
 
@@ -598,7 +695,7 @@ pub fn flight_sql_get_sql_info<'a>(
         };
         match rt.block_on(guard.get_sql_info(vec![])) {
             Ok(info) => info,
-            Err(e) => return flight_error_to_term(env, FlightError::Arrow(e)),
+            Err(e) => return arrow_error_to_term(env, &e),
         }
     };
 
@@ -633,7 +730,7 @@ pub fn flight_sql_prepare<'a>(
         };
         match rt.block_on(guard.prepare(sql, None)) {
             Ok(s) => s,
-            Err(e) => return flight_error_to_term(env, FlightError::Arrow(e)),
+            Err(e) => return arrow_error_to_term(env, &e),
         }
     };
 
@@ -665,7 +762,7 @@ pub fn flight_sql_prepared_execute<'a>(
         };
         match rt.block_on(guard.execute()) {
             Ok(info) => info,
-            Err(e) => return flight_error_to_term(env, FlightError::Arrow(e)),
+            Err(e) => return arrow_error_to_term(env, &e),
         }
     };
 
@@ -691,6 +788,6 @@ pub fn flight_sql_prepared_execute_update<'a>(
     match rt.block_on(guard.execute_update()) {
         Ok(n) if n < 0 => (ok(), unknown()).encode(env),
         Ok(n) => (ok(), n as u64).encode(env),
-        Err(e) => flight_error_to_term(env, FlightError::Arrow(e)),
+        Err(e) => arrow_error_to_term(env, &e),
     }
 }
