@@ -99,7 +99,7 @@ defmodule ExArrow.FlightSQL.Result do
   """
   @spec to_dataframe(t()) :: {:ok, term()} | {:error, Error.t()}
   def to_dataframe(%__MODULE__{} = result) do
-    if Code.ensure_loaded?(ExArrow.Explorer) do
+    if Code.ensure_loaded?(Explorer.DataFrame) do
       try do
         # Serialise to IPC binary, read back as a stream, then delegate to Explorer bridge.
         with {:ok, binary} <- Writer.to_binary(result.schema, result.batches),
@@ -150,7 +150,7 @@ defmodule ExArrow.FlightSQL.Result do
   end
 
   def to_tensor(%__MODULE__{batches: [batch | _]}, column) when is_binary(column) do
-    if Code.ensure_loaded?(ExArrow.Nx) do
+    if Code.ensure_loaded?(Nx) do
       try do
         case ExArrow.Nx.to_tensors(batch) do
           {:ok, tensors} ->
