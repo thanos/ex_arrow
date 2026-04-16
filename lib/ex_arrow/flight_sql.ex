@@ -31,16 +31,20 @@ defmodule ExArrow.FlightSQL do
 
   - Ad-hoc SQL query execution (`query/2`, `query!/2`, `stream_query/2`)
   - DML execution with affected-row count (`execute/2`)
-  - Lazy streaming of large result sets (`stream_query/2`)
+  - Lazy streaming of large result sets with `Enumerable` support (`stream_query/2`)
+  - Prepared statements (`Client.prepare/2`, `Statement.execute/1`, `Statement.execute_update/1`)
+  - Metadata discovery: `get_tables/2`, `get_db_schemas/2`, `get_sql_info/1`
   - TLS connections (plaintext, OS trust store, custom CA)
   - Bearer-token and custom gRPC header injection
+  - Explorer and Nx integration via `Result.to_dataframe/1`, `Result.to_tensor/2`
+  - Mox-compatible `ClientBehaviour` for unit testing without a server
 
   The following are **not** supported in v0.5.0 and are deferred:
 
-  - Prepared statements (v0.6.0)
   - Bulk ingestion (`DoPut`)
   - Transactions (`BEGIN`, `COMMIT`, `ROLLBACK`)
   - Multi-endpoint distributed query results
+  - Parameter binding for prepared statements (v0.6.0)
   - Flight SQL server-side implementation (ExArrow is a client library only)
 
   ## Ecosystem integration

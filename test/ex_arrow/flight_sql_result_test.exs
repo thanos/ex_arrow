@@ -127,4 +127,89 @@ defmodule ExArrow.FlightSQL.ResultTest do
       assert %ExArrow.Schema{} = result.schema
     end
   end
+
+  # ── Explorer integration ─────────────────────────────────────────────────────
+
+  if Code.ensure_loaded?(Explorer.DataFrame) do
+    # Build a real Result from the IPC test fixture (id: int64, name: utf8, 2 rows).
+    defp real_result do
+      {:ok, ipc_bin} = ExArrow.Native.ipc_test_fixture_binary()
+      {:ok, stream_ref} = ExArrow.Native.ipc_reader_from_binary(ipc_bin)
+      stream = %ExArrow.Stream{resource: stream_ref, backend: :ipc}
+      {:ok, result} = Result.from_stream(stream)
+      result
+    end
+
+    describe "to_dataframe/1 — real NIF round-trip" do
+      @tag :nif
+      @tag :explorer
+      test "returns {:ok, Explorer.DataFrame} from a real result" do
+        result = real_result()
+        assert {:ok, df} = Result.to_dataframe(result)
+        assert is_struct(df, Explorer.DataFrame)
+      end
+
+      @tag :nif
+      @tag :explorer
+      test "DataFrame has the correct row count" do
+        result = real_result()
+        {:ok, df} = Result.to_dataframe(result)
+        assert Explorer.DataFrame.n_rows(df) == result.num_rows
+      end
+
+      @tag :nif
+      @tag :explorer
+      test "DataFrame has the correct column names" do
+        result = real_result()
+        schema_names = ExArrow.Schema.field_names(result.schema)
+        {:ok, df} = Result.to_dataframe(result)
+        assert Enum.sort(Explorer.DataFrame.names(df)) == Enum.sort(schema_names)
+      end
+    end
+  end
+
+  # ── Nx integration ───────────────────────────────────────────────────────────
+
+  if Code.ensure_loaded?(Nx) do
+    defp real_result_nx do
+      {:ok, ipc_bin} = ExArrow.Native.ipc_test_fixture_binary()
+      {:ok, stream_ref} = ExArrow.Native.ipc_reader_from_binary(ipc_bin)
+      stream = %ExArrow.Stream{resource: stream_ref, backend: :ipc}
+      {:ok, result} = Result.from_stream(stream)
+      result
+    end
+
+    describe "to_tensor/2 — real NIF round-trip" do
+      @tag :nif
+      @tag :nx
+      test "returns {:ok, Nx.Tensor} for a numeric column" do
+        result = real_result_nx()
+        assert {:ok, tensor} = Result.to_tensor(result, "id")
+        assert Nx.type(tensor) == {:s, 64}
+        assert Nx.size(tensor) == result.num_rows
+      end
+
+      @tag :nif
+      @tag :nx
+      test "returns conversion_error for a non-numeric column" do
+        result = real_result_nx()
+
+        assert {:error, %Error{code: :conversion_error, message: msg}} =
+                 Result.to_tensor(result, "name")
+
+        assert msg =~ "not found in batch"
+      end
+
+      @tag :nif
+      @tag :nx
+      test "returns conversion_error for an unknown column" do
+        result = real_result_nx()
+
+        assert {:error, %Error{code: :conversion_error, message: msg}} =
+                 Result.to_tensor(result, "no_such_col")
+
+        assert msg =~ "not found in batch"
+      end
+    end
+  end
 end

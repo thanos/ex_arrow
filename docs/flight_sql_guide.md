@@ -400,11 +400,12 @@ end
 - Metadata discovery: `get_tables/2`, `get_db_schemas/2`, `get_sql_info/1`
 - TLS connections — plaintext, OS trust store, or custom CA certificate
 - Bearer-token and arbitrary gRPC header injection
+- Explorer integration: `Result.to_dataframe/1`, `ExArrow.Explorer.from_stream/1`
+- Nx integration: `Result.to_tensor/2`
 - Mox-compatible `ClientBehaviour` for unit testing without a server
 
 **Not supported in v0.5.0 (deferred):**
 
-- Prepared statements (v0.6.0)
 - Bulk ingestion (`DoPut`)
 - Transactions (`BEGIN`, `COMMIT`, `ROLLBACK`)
 - Multi-endpoint distributed `FlightInfo` responses
