@@ -44,6 +44,46 @@ defmodule ExArrow.FlightSQL.ClientImpl do
     :ok
   end
 
+  @impl true
+  def get_tables(%Client{resource: ref}, opts) do
+    catalog = Keyword.get(opts, :catalog)
+    db_schema_filter = Keyword.get(opts, :db_schema_filter)
+    table_name_filter = Keyword.get(opts, :table_name_filter)
+    table_types = Keyword.get(opts, :table_types, [])
+    include_schema = Keyword.get(opts, :include_schema, false)
+
+    case native().flight_sql_get_tables(
+           ref,
+           catalog,
+           db_schema_filter,
+           table_name_filter,
+           table_types,
+           include_schema
+         ) do
+      {:ok, stream_ref} -> {:ok, %Stream{resource: stream_ref, backend: :flight_sql}}
+      {:error, nif_err} -> {:error, wrap_nif_error(nif_err)}
+    end
+  end
+
+  @impl true
+  def get_db_schemas(%Client{resource: ref}, opts) do
+    catalog = Keyword.get(opts, :catalog)
+    db_schema_filter = Keyword.get(opts, :db_schema_filter)
+
+    case native().flight_sql_get_db_schemas(ref, catalog, db_schema_filter) do
+      {:ok, stream_ref} -> {:ok, %Stream{resource: stream_ref, backend: :flight_sql}}
+      {:error, nif_err} -> {:error, wrap_nif_error(nif_err)}
+    end
+  end
+
+  @impl true
+  def get_sql_info(%Client{resource: ref}, _opts) do
+    case native().flight_sql_get_sql_info(ref) do
+      {:ok, stream_ref} -> {:ok, %Stream{resource: stream_ref, backend: :flight_sql}}
+      {:error, nif_err} -> {:error, wrap_nif_error(nif_err)}
+    end
+  end
+
   defp native, do: Application.get_env(:ex_arrow, :flight_sql_client_native, ExArrow.Native)
 
   # ── Error helpers ─────────────────────────────────────────────────────────────

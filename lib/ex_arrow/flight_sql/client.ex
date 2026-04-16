@@ -192,6 +192,119 @@ defmodule ExArrow.FlightSQL.Client do
     impl().execute(client, sql, [])
   end
 
+  # ── Metadata ─────────────────────────────────────────────────────────────────
+
+  @doc """
+  List tables visible to the connected user.
+
+  Returns a lazy `ExArrow.Stream` of record batches.  The result schema
+  follows the Arrow Flight SQL specification:
+
+  | Column | Type | Description |
+  |--------|------|-------------|
+  | `catalog_name` | `utf8` | Catalog name (nullable) |
+  | `db_schema_name` | `utf8` | Schema name (nullable) |
+  | `table_name` | `utf8` | Table name |
+  | `table_type` | `utf8` | Table type, e.g. `"TABLE"`, `"VIEW"` |
+
+  When `:include_schema` is `true`, an additional `table_schema` column
+  containing the IPC-encoded Arrow schema of each table is also included.
+
+  ## Options
+
+  - `:catalog` — filter by exact catalog name (default: no filter)
+  - `:db_schema_filter` — SQL `LIKE` pattern for schema names (default: no filter)
+  - `:table_name_filter` — SQL `LIKE` pattern for table names (default: no filter)
+  - `:table_types` — list of type strings to include, e.g. `["TABLE", "VIEW"]`
+    (default: all types)
+  - `:include_schema` — `true` to include IPC-encoded column schema in results
+    (default: `false`)
+
+  ## Server compatibility
+
+  Server support for filter parameters is optional.  A server that does not
+  implement a particular filter may ignore it and return unfiltered results
+  or return `{:error, %Error{code: :unimplemented}}`.
+
+  ## Examples
+
+      {:ok, stream} = ExArrow.FlightSQL.Client.get_tables(client)
+      batches = Enum.to_list(stream)
+
+      {:ok, stream} = ExArrow.FlightSQL.Client.get_tables(client,
+        db_schema_filter: "public",
+        table_types: ["TABLE"]
+      )
+  """
+  @spec get_tables(t(), keyword()) :: {:ok, ExArrow.Stream.t()} | {:error, Error.t()}
+  def get_tables(%__MODULE__{} = client, opts \\ []) do
+    impl().get_tables(client, opts)
+  end
+
+  @doc """
+  List database schemas visible to the connected user.
+
+  Returns a lazy `ExArrow.Stream` of record batches.  The result schema
+  follows the Arrow Flight SQL specification:
+
+  | Column | Type | Description |
+  |--------|------|-------------|
+  | `catalog_name` | `utf8` | Catalog name (nullable) |
+  | `db_schema_name` | `utf8` | Schema name |
+
+  ## Options
+
+  - `:catalog` — filter by exact catalog name (default: no filter)
+  - `:db_schema_filter` — SQL `LIKE` pattern for schema names (default: no filter)
+
+  ## Server compatibility
+
+  Server support for filter parameters is optional.  A server that does not
+  implement `GetDbSchemas` will return
+  `{:error, %Error{code: :unimplemented}}`.
+
+  ## Examples
+
+      {:ok, stream} = ExArrow.FlightSQL.Client.get_db_schemas(client)
+      batches = Enum.to_list(stream)
+
+      {:ok, stream} = ExArrow.FlightSQL.Client.get_db_schemas(client, catalog: "main")
+  """
+  @spec get_db_schemas(t(), keyword()) :: {:ok, ExArrow.Stream.t()} | {:error, Error.t()}
+  def get_db_schemas(%__MODULE__{} = client, opts \\ []) do
+    impl().get_db_schemas(client, opts)
+  end
+
+  @doc """
+  Retrieve server capability and SQL dialect information.
+
+  Returns a lazy `ExArrow.Stream` of record batches.  Each row encodes a
+  single `SqlInfo` entry as defined by the Arrow Flight SQL specification.
+  The result schema has two columns:
+
+  | Column | Type | Description |
+  |--------|------|-------------|
+  | `info_name` | `uint32` | Numeric `SqlInfo` code |
+  | `value` | `dense_union(...)` | Value — type depends on the info code |
+
+  All available `SqlInfo` entries are returned.  The exact set depends on the
+  server; not all servers expose all codes.
+
+  ## Server compatibility
+
+  A server that does not implement `GetSqlInfo` will return
+  `{:error, %Error{code: :unimplemented}}`.
+
+  ## Examples
+
+      {:ok, stream} = ExArrow.FlightSQL.Client.get_sql_info(client)
+      batches = Enum.to_list(stream)
+  """
+  @spec get_sql_info(t()) :: {:ok, ExArrow.Stream.t()} | {:error, Error.t()}
+  def get_sql_info(%__MODULE__{} = client) do
+    impl().get_sql_info(client, [])
+  end
+
   # ── Behaviour delegation check ────────────────────────────────────────────────
 
   @doc false

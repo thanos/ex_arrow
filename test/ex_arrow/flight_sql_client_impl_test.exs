@@ -121,4 +121,34 @@ defmodule ExArrow.FlightSQL.ClientImplTest do
       end
     end
   end
+
+  describe "get_tables/2 with invalid resource" do
+    test "raises ArgumentError when client ref is a plain Erlang ref" do
+      fake_client = %Client{resource: make_ref()}
+
+      assert_raise ArgumentError, fn ->
+        ClientImpl.get_tables(fake_client, [])
+      end
+    end
+  end
+
+  describe "get_db_schemas/2 with invalid resource" do
+    test "raises ArgumentError when client ref is a plain Erlang ref" do
+      fake_client = %Client{resource: make_ref()}
+
+      assert_raise ArgumentError, fn ->
+        ClientImpl.get_db_schemas(fake_client, [])
+      end
+    end
+  end
+
+  describe "get_sql_info/2 with invalid resource" do
+    test "raises ArgumentError when client ref is a plain Erlang ref" do
+      fake_client = %Client{resource: make_ref()}
+
+      assert_raise ArgumentError, fn ->
+        ClientImpl.get_sql_info(fake_client, [])
+      end
+    end
+  end
 end

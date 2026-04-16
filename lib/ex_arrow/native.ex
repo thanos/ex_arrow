@@ -156,5 +156,20 @@ defmodule ExArrow.Native do
   def flight_sql_execute(_client_ref, _sql), do: :erlang.nif_error(:nif_not_loaded)
   def flight_sql_stream_schema(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
   def flight_sql_stream_next(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
+
+  def flight_sql_get_tables(
+        _client_ref,
+        _catalog,
+        _db_schema_filter,
+        _table_name_filter,
+        _table_types,
+        _include_schema
+      ),
+      do: :erlang.nif_error(:nif_not_loaded)
+
+  def flight_sql_get_db_schemas(_client_ref, _catalog, _db_schema_filter),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  def flight_sql_get_sql_info(_client_ref), do: :erlang.nif_error(:nif_not_loaded)
   # coveralls-ignore-stop
 end

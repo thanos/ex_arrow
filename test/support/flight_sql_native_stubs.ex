@@ -23,3 +23,29 @@ defmodule ExArrow.FlightSQL.TestNativeFallbackError do
   def flight_sql_connect(_host, _port, _tls_mode, _headers),
     do: {:error, :unexpected_atom}
 end
+
+# Returns a successful stream ref for metadata calls — used to test get_tables,
+# get_db_schemas, and get_sql_info without a live server.
+defmodule ExArrow.FlightSQL.TestNativeMetadataOk do
+  @moduledoc false
+  def flight_sql_get_tables(_ref, _cat, _db_filter, _tbl_filter, _types, _schema),
+    do: {:ok, :fake_stream_ref}
+
+  def flight_sql_get_db_schemas(_ref, _catalog, _db_filter),
+    do: {:ok, :fake_stream_ref}
+
+  def flight_sql_get_sql_info(_ref), do: {:ok, :fake_stream_ref}
+end
+
+# Returns an :unimplemented gRPC error — simulates a server that does not support
+# metadata discovery (common for minimal or older Flight SQL implementations).
+defmodule ExArrow.FlightSQL.TestNativeMetadataUnimplemented do
+  @moduledoc false
+  def flight_sql_get_tables(_ref, _cat, _db_filter, _tbl_filter, _types, _schema),
+    do: {:error, {:unimplemented, 12, "not supported"}}
+
+  def flight_sql_get_db_schemas(_ref, _catalog, _db_filter),
+    do: {:error, {:unimplemented, 12, "not supported"}}
+
+  def flight_sql_get_sql_info(_ref), do: {:error, {:unimplemented, 12, "not supported"}}
+end

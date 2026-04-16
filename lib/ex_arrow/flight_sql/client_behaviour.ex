@@ -28,4 +28,13 @@ defmodule ExArrow.FlightSQL.ClientBehaviour do
               {:ok, affected_rows()} | {:error, Error.t()}
 
   @callback close(client()) :: :ok
+
+  @callback get_tables(client(), opts :: keyword()) ::
+              {:ok, Stream.t()} | {:error, Error.t()}
+
+  @callback get_db_schemas(client(), opts :: keyword()) ::
+              {:ok, Stream.t()} | {:error, Error.t()}
+
+  @callback get_sql_info(client(), opts :: keyword()) ::
+              {:ok, Stream.t()} | {:error, Error.t()}
 end

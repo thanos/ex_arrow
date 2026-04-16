@@ -275,6 +275,79 @@ end)
 
 ---
 
+## Metadata discovery
+
+### List tables — `get_tables/2`
+
+Returns a lazy stream of record batches describing the tables visible to the connected user.
+
+```elixir
+{:ok, stream} = ExArrow.FlightSQL.Client.get_tables(client)
+batches = Enum.to_list(stream)
+
+# With filters
+{:ok, stream} = ExArrow.FlightSQL.Client.get_tables(client,
+  db_schema_filter: "public",
+  table_types: ["TABLE", "VIEW"]
+)
+```
+
+Result columns (per the Arrow Flight SQL specification):
+- `catalog_name` — utf8 (nullable)
+- `db_schema_name` — utf8 (nullable)
+- `table_name` — utf8
+- `table_type` — utf8
+
+Options:
+- `:catalog` — exact catalog name filter
+- `:db_schema_filter` — SQL `LIKE` pattern for schema names
+- `:table_name_filter` — SQL `LIKE` pattern for table names
+- `:table_types` — list of type strings, e.g. `["TABLE", "VIEW"]`
+- `:include_schema` — `true` adds an IPC-encoded schema column per table (default: `false`)
+
+### List schemas — `get_db_schemas/2`
+
+Returns a lazy stream of record batches describing the database schemas.
+
+```elixir
+{:ok, stream} = ExArrow.FlightSQL.Client.get_db_schemas(client)
+batches = Enum.to_list(stream)
+
+{:ok, stream} = ExArrow.FlightSQL.Client.get_db_schemas(client, catalog: "main")
+```
+
+Result columns: `catalog_name` (nullable), `db_schema_name`.
+
+### Server capabilities — `get_sql_info/1`
+
+Returns a lazy stream of record batches encoding server capability flags and SQL dialect information as defined by the Flight SQL specification.
+
+```elixir
+{:ok, stream} = ExArrow.FlightSQL.Client.get_sql_info(client)
+batches = Enum.to_list(stream)
+```
+
+Each row has two columns:
+- `info_name` — uint32 (the numeric `SqlInfo` code)
+- `value` — dense_union (the value; type depends on the code)
+
+### Server compatibility note
+
+Metadata support is optional in the Flight SQL specification.  Servers that
+do not implement a particular metadata command return
+`{:error, %ExArrow.FlightSQL.Error{code: :unimplemented}}`.  Always pattern-match on
+the error code rather than assuming all metadata APIs are available:
+
+```elixir
+case ExArrow.FlightSQL.Client.get_tables(client) do
+  {:ok, stream}                               -> Enum.to_list(stream)
+  {:error, %Error{code: :unimplemented}}      -> []        # server doesn't support it
+  {:error, err}                               -> raise err
+end
+```
+
+---
+
 ## v0.5.0 scope
 
 **Supported:**
@@ -292,7 +365,7 @@ end)
 - Bulk ingestion (`DoPut`)
 - Transactions (`BEGIN`, `COMMIT`, `ROLLBACK`)
 - Multi-endpoint distributed `FlightInfo` responses
-- Schema / catalog metadata queries (`GetTables`, `GetCatalogs`, etc.)
+- Filtering `get_sql_info` by specific info code (returns all codes)
 
 ---
 

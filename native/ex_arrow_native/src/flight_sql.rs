@@ -1,4 +1,4 @@
-//! Flight SQL NIFs: connect, query, DML execute, and lazy stream iteration.
+//! Flight SQL NIFs: connect, query, DML execute, metadata, and lazy stream iteration.
 //!
 //! All public NIF functions are prefixed `flight_sql_*` and scheduled on the
 //! dirty-IO thread pool so they never block the BEAM scheduler.
@@ -10,7 +10,8 @@ use arrow::datatypes::Schema;
 use arrow_flight::decode::FlightRecordBatchStream;
 use arrow_flight::error::FlightError;
 use arrow_flight::sql::client::FlightSqlServiceClient;
-use arrow_flight::IpcMessage;
+use arrow_flight::sql::{CommandGetDbSchemas, CommandGetTables};
+use arrow_flight::{FlightInfo, IpcMessage};
 use arrow_schema::SchemaRef;
 use futures::StreamExt;
 use rustler::{Encoder, Env, ResourceArc, Term};
@@ -416,4 +417,170 @@ pub fn flight_sql_stream_next<'a>(
         }
         Some(Err(e)) => flight_error_to_term(env, e),
     }
+}
+
+// ── Metadata helpers ──────────────────────────────────────────────────────────
+
+/// Shared post-processing for any `FlightInfo`-returning metadata call.
+///
+/// Validates the single-endpoint constraint, extracts the ticket, decodes
+/// the schema, issues `DoGet`, and wraps the result in a
+/// `FlightSqlStreamResource`.  Returns an encoded Elixir term on both
+/// success and failure so callers can return it directly.
+fn flight_info_to_stream<'a>(
+    env: Env<'a>,
+    rt: &Arc<tokio::runtime::Runtime>,
+    client_ref: &FlightSqlClientHandle,
+    flight_info: FlightInfo,
+) -> Term<'a> {
+    // Enforce single-endpoint constraint (same as flight_sql_query).
+    let endpoint_count = flight_info.endpoint.len();
+    if endpoint_count != 1 {
+        let msg = format!(
+            "expected exactly 1 endpoint, got {}; \
+             multi-endpoint distribution is not supported in v0.5.0",
+            endpoint_count
+        );
+        return encode_sql_error(env, multi_endpoint(), 0, &msg);
+    }
+
+    let ticket = match flight_info.endpoint[0].ticket.clone() {
+        Some(t) => t,
+        None => {
+            return encode_sql_error(
+                env,
+                protocol_error(),
+                0,
+                "FlightEndpoint has no ticket",
+            )
+        }
+    };
+
+    let schema = match decode_flight_schema(flight_info.schema) {
+        Ok(s) => s,
+        Err(e) => return encode_sql_error(env, protocol_error(), 0, &e),
+    };
+
+    let stream = {
+        let mut guard = match client_ref.client.lock() {
+            Ok(g) => g,
+            Err(_) => return err_encode(env, "client lock poisoned"),
+        };
+        match rt.block_on(guard.do_get(ticket)) {
+            Ok(s) => s,
+            Err(e) => return flight_error_to_term(env, FlightError::Arrow(e)),
+        }
+    };
+
+    let resource = FlightSqlStreamResource {
+        schema,
+        stream: Mutex::new(Box::pin(stream)),
+    };
+    ok_encode(env, ResourceArc::new(resource))
+}
+
+// ── Metadata NIFs ─────────────────────────────────────────────────────────────
+
+/// List tables visible to the connected user.
+///
+/// All filter parameters are optional (`nil` means no filter).  `table_types`
+/// is a list of type name strings, e.g. `["TABLE", "VIEW"]`; an empty list
+/// means no type filter.  `include_schema` controls whether the IPC-encoded
+/// column schema is embedded in the result batches.
+///
+/// Returns `{:ok, stream_ref}` or `{:error, {code, grpc_status, message}}`.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_sql_get_tables<'a>(
+    env: Env<'a>,
+    client_ref: ResourceArc<FlightSqlClientHandle>,
+    catalog: Option<String>,
+    db_schema_filter: Option<String>,
+    table_name_filter: Option<String>,
+    table_types: Vec<String>,
+    include_schema: bool,
+) -> Term<'a> {
+    let rt = client_ref.rt.clone();
+
+    let cmd = CommandGetTables {
+        catalog,
+        db_schema_filter_pattern: db_schema_filter,
+        table_name_filter_pattern: table_name_filter,
+        table_types,
+        include_schema,
+    };
+
+    let flight_info = {
+        let mut guard = match client_ref.client.lock() {
+            Ok(g) => g,
+            Err(_) => return err_encode(env, "client lock poisoned"),
+        };
+        match rt.block_on(guard.get_tables(cmd)) {
+            Ok(info) => info,
+            Err(e) => return flight_error_to_term(env, FlightError::Arrow(e)),
+        }
+    };
+
+    flight_info_to_stream(env, &rt, &client_ref, flight_info)
+}
+
+/// List database schemas visible to the connected user.
+///
+/// Both filter parameters are optional (`nil` means no filter).
+///
+/// Returns `{:ok, stream_ref}` or `{:error, {code, grpc_status, message}}`.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_sql_get_db_schemas<'a>(
+    env: Env<'a>,
+    client_ref: ResourceArc<FlightSqlClientHandle>,
+    catalog: Option<String>,
+    db_schema_filter: Option<String>,
+) -> Term<'a> {
+    let rt = client_ref.rt.clone();
+
+    let cmd = CommandGetDbSchemas {
+        catalog,
+        db_schema_filter_pattern: db_schema_filter,
+    };
+
+    let flight_info = {
+        let mut guard = match client_ref.client.lock() {
+            Ok(g) => g,
+            Err(_) => return err_encode(env, "client lock poisoned"),
+        };
+        match rt.block_on(guard.get_db_schemas(cmd)) {
+            Ok(info) => info,
+            Err(e) => return flight_error_to_term(env, FlightError::Arrow(e)),
+        }
+    };
+
+    flight_info_to_stream(env, &rt, &client_ref, flight_info)
+}
+
+/// Retrieve server capability and dialect information.
+///
+/// Returns all available `SqlInfo` entries.  The result is a lazy
+/// record-batch stream; each batch encodes info codes and their values in
+/// Arrow format as defined by the Flight SQL specification.
+///
+/// Returns `{:ok, stream_ref}` or `{:error, {code, grpc_status, message}}`.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_sql_get_sql_info<'a>(
+    env: Env<'a>,
+    client_ref: ResourceArc<FlightSqlClientHandle>,
+) -> Term<'a> {
+    let rt = client_ref.rt.clone();
+
+    // Passing an empty Vec requests all available SQL info from the server.
+    let flight_info = {
+        let mut guard = match client_ref.client.lock() {
+            Ok(g) => g,
+            Err(_) => return err_encode(env, "client lock poisoned"),
+        };
+        match rt.block_on(guard.get_sql_info(vec![])) {
+            Ok(info) => info,
+            Err(e) => return flight_error_to_term(env, FlightError::Arrow(e)),
+        }
+    };
+
+    flight_info_to_stream(env, &rt, &client_ref, flight_info)
 }
