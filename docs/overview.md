@@ -10,6 +10,7 @@ This doc set covers:
 | Handles, copying, NIF scheduling | [Memory model](memory_model.md) |
 | IPC stream and file read/write | [IPC guide](ipc_guide.md) |
 | Arrow Flight client and server | [Flight guide](flight_guide.md) |
+| Arrow Flight SQL remote query client | [Flight SQL guide](flight_sql_guide.md) |
 | ADBC database connectivity | [ADBC guide](adbc_guide.md) |
 | Parquet read and write | [Parquet guide](parquet_guide.md) |
 | Compute kernels (filter, project, sort) | [Compute guide](compute_guide.md) |
@@ -21,6 +22,8 @@ This doc set covers:
 
 | Module | Requires | What it does |
 |--------|----------|--------------|
+| `ExArrow.FlightSQL.Client` | (none — built-in) | Connect to Arrow Flight SQL servers; query, stream, DML, prepared statements, metadata |
+| `ExArrow.FlightSQL.Result` | (none — built-in) | Materialised Flight SQL result with `to_dataframe/1` and `to_tensor/2` |
 | `ExArrow.Explorer` | `{:explorer, "~> 0.11"}` | Convert between `ExArrow.Stream`/`RecordBatch` and `Explorer.DataFrame` |
 | `ExArrow.Nx` | `{:nx, "~> 0.9"}` | Convert numeric Arrow columns to/from `Nx.Tensor`; build multi-column batches from a tensor map |
 | `ExArrow.CDI` | (none — built-in) | Zero-copy Arrow C Data Interface: export/import record batches as raw C struct pointers |

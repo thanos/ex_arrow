@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-04-16
+
+### Added
+
+- **Arrow Flight SQL client** — `ExArrow.FlightSQL.Client` connects to any
+  Arrow Flight SQL server (DuckDB, DataFusion, Dremio, InfluxDB v3) and
+  exposes a full query API:
+  - `connect/1`, `connect/2` — plaintext or TLS (OS trust store or custom CA PEM);
+    bearer-token and arbitrary gRPC header injection via `:headers`.
+  - `query/2`, `query!/2` — materialise all result batches into an
+    `ExArrow.FlightSQL.Result` struct.
+  - `stream_query/2` — return a lazy `ExArrow.Stream` that implements
+    `Enumerable`; batches are fetched one at a time and the gRPC connection
+    is released when the stream is garbage-collected.
+  - `execute/2` — DML/DDL with affected-row count; returns `{:ok, n}` or
+    `{:ok, :unknown}`.
+  - `prepare/2` — server-side prepared statements returning
+    `ExArrow.FlightSQL.Statement`.
+  - `get_tables/2`, `get_db_schemas/2`, `get_sql_info/1` — metadata discovery
+    via the Flight SQL wire protocol.
+- **`ExArrow.FlightSQL.Statement`** — executes a prepared statement as a lazy
+  stream (`execute/1`) or as a DML update (`execute_update/1`).
+- **`ExArrow.FlightSQL.Result`** — materialised result struct (`schema`,
+  `batches`, `num_rows`); `to_dataframe/1` (requires Explorer) and
+  `to_tensor/2` (requires Nx) for ecosystem integration.
+- **`ExArrow.FlightSQL.Error`** — structured error type with `:code` atom,
+  `:grpc_status` integer, and `:message` string.
+- **`ExArrow.FlightSQL.ClientBehaviour`** — Mox-compatible behaviour for all
+  client functions; inject a mock via
+  `Application.put_env(:ex_arrow, :flight_sql_client_impl, MyMock)`.
+- **`ExArrow.Stream` implements `Enumerable`** — all `Enum.*` and `Stream.*`
+  functions now work directly on any `ExArrow.Stream` handle (IPC, Parquet,
+  ADBC, Flight SQL).  Early termination (e.g. `Enum.take/2`) is safe — the
+  resource is released when the stream variable goes out of scope.
+- **`docs/flight_sql_guide.md`** — comprehensive guide covering connection
+  options, TLS, authentication, query patterns, DML, prepared statements,
+  metadata discovery, Explorer/Nx integration, Mox-based unit testing, and
+  integration test setup.
+
+### Changed
+
+- **`ExArrow.FlightSQL` module doc** — v0.5.0 scope section updated to reflect
+  all new capabilities; stale "not yet supported" items removed.
+- **`docs/overview.md`** — Flight SQL guide added to the guide table and
+  optional-integration table.
+
+### Fixed
+
+- **`deps/adbc/lib/adbc/result.ex` Elixir 1.17+ typing warning** — the
+  `{:ok, stream_ref, capsule}` clause in `Adbc.Result.from_py/1` was
+  unreachable when `Pythonx` is not loaded (only the `{:error, ...}` branch
+  is reachable without Pythonx).  Both `from_py/1` and `from_py!/1` are now
+  wrapped with `if Code.ensure_loaded?(Pythonx)` guards matching the
+  pattern already used in `Adbc.Helper`.
+
+---
+
 ## [0.4.0] - 2026-03-17
 
 ### Added
