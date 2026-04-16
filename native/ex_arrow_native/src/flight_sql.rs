@@ -64,7 +64,12 @@ impl rustler::Resource for FlightSqlClientHandle {}
 ///
 /// The stream is pinned on the heap so it can be driven from multiple
 /// NIF calls without requiring a stable stack address.
+///
+/// `rt` is the Tokio runtime that owns the gRPC channel — stored here so
+/// `flight_sql_stream_next` uses the same runtime as the one that opened the
+/// connection, keeping stream I/O isolated from any other runtime.
 pub struct FlightSqlStreamResource {
+    pub rt: Arc<tokio::runtime::Runtime>,
     pub schema: SchemaRef,
     pub stream: Mutex<Pin<Box<FlightRecordBatchStream>>>,
 }
@@ -407,16 +412,17 @@ pub fn flight_sql_query<'a>(
 ) -> Term<'a> {
     let rt = client_ref.rt.clone();
 
+    // Acquire the lock once and hold it across GetFlightInfo + DoGet so no
+    // interleaved RPC from another caller can slip between the two calls.
+    let mut guard = match client_ref.client.lock() {
+        Ok(g) => g,
+        Err(_) => return err_encode(env, "client lock poisoned"),
+    };
+
     // Step 1: GetFlightInfo → FlightInfo
-    let flight_info = {
-        let mut guard = match client_ref.client.lock() {
-            Ok(g) => g,
-            Err(_) => return err_encode(env, "client lock poisoned"),
-        };
-        match rt.block_on(guard.execute(sql, None)) {
-            Ok(info) => info,
-            Err(e) => return arrow_error_to_term(env, &e),
-        }
+    let flight_info = match rt.block_on(guard.execute(sql, None)) {
+        Ok(info) => info,
+        Err(e) => return arrow_error_to_term(env, &e),
     };
 
     // Step 2: Enforce single-endpoint constraint
@@ -449,19 +455,16 @@ pub fn flight_sql_query<'a>(
         Err(e) => return encode_sql_error(env, protocol_error(), 0, &e),
     };
 
-    // Step 5: DoGet → FlightRecordBatchStream
-    let stream = {
-        let mut guard = match client_ref.client.lock() {
-            Ok(g) => g,
-            Err(_) => return err_encode(env, "client lock poisoned"),
-        };
-        match rt.block_on(guard.do_get(ticket)) {
-            Ok(s) => s,
-            Err(e) => return arrow_error_to_term(env, &e),
-        }
+    // Step 5: DoGet → FlightRecordBatchStream (guard still held)
+    let stream = match rt.block_on(guard.do_get(ticket)) {
+        Ok(s) => s,
+        Err(e) => return arrow_error_to_term(env, &e),
     };
+    // Release the lock — the stream owns its own connection internally.
+    drop(guard);
 
     let resource = FlightSqlStreamResource {
+        rt,
         schema,
         stream: Mutex::new(Box::pin(stream)),
     };
@@ -520,7 +523,7 @@ pub fn flight_sql_stream_next<'a>(
     env: Env<'a>,
     stream_ref: ResourceArc<FlightSqlStreamResource>,
 ) -> Term<'a> {
-    let rt = sql_runtime();
+    let rt = stream_ref.rt.clone();
     let mut guard = match stream_ref.stream.lock() {
         Ok(g) => g,
         Err(_) => return err_encode(env, "stream lock poisoned"),
@@ -590,6 +593,7 @@ fn flight_info_to_stream<'a>(
     };
 
     let resource = FlightSqlStreamResource {
+        rt: rt.clone(),
         schema,
         stream: Mutex::new(Box::pin(stream)),
     };

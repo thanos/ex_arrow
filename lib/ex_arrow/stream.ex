@@ -42,8 +42,8 @@ defmodule ExArrow.Stream do
 
   Each element yielded by the enumerator is an `ExArrow.RecordBatch.t()`.
   The batch count is not known up front, so `Enum.count/1` traverses the
-  entire stream.  Prefer `ExArrow.FlightSQL.Result.num_rows` when the result
-  has already been materialised.
+  entire stream.  Prefer the `:num_rows` field on `ExArrow.FlightSQL.Result`
+  when the result has already been materialised.
 
   Enumeration raises on a transport or server error.  For recoverable error
   handling iterate manually with `next/1`.
@@ -95,8 +95,21 @@ defmodule ExArrow.Stream do
   @doc """
   Returns the next record batch from the stream, or nil when done.
   Returns `{:error, message}` on read error.
+
+  For `:flight_sql` streams, read errors carry a structured 3-tuple so callers
+  can distinguish gRPC codes:
+
+      {:error, {code_atom, grpc_status_integer, message}} |
+      {:error, string_message}
+
+  `Enum.*` / `Stream.*` functions raise on any error shape.  For recoverable
+  error handling iterate with `next/1` directly.
   """
-  @spec next(t()) :: RecordBatch.t() | nil | {:error, String.t()}
+  @spec next(t()) ::
+          RecordBatch.t()
+          | nil
+          | {:error, String.t()}
+          | {:error, {atom(), non_neg_integer(), String.t()}}
   def next(%__MODULE__{resource: ref, backend: :adbc}) do
     case native().adbc_stream_next(ref) do
       :done -> nil
@@ -125,7 +138,8 @@ defmodule ExArrow.Stream do
     case native().flight_sql_stream_next(ref) do
       :done -> nil
       {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
-      {:error, {code, _status, msg}} -> {:error, "[#{code}] #{msg}"}
+      # Pass the structured triple through so callers retain the gRPC code and status.
+      {:error, {_code, _grpc_status, _msg} = triple} -> {:error, triple}
       {:error, msg} -> {:error, msg}
     end
   end
@@ -146,6 +160,7 @@ defmodule ExArrow.Stream do
   defp do_collect(stream, acc) do
     case next(stream) do
       nil -> Enum.reverse(acc)
+      {:error, {code, _status, msg}} -> raise "ExArrow.Stream.to_list/1 failed: [#{code}] #{msg}"
       {:error, msg} -> raise "ExArrow.Stream.to_list/1 failed: #{msg}"
       batch -> do_collect(stream, [batch | acc])
     end
@@ -169,6 +184,9 @@ defimpl Enumerable, for: ExArrow.Stream do
     case ExArrow.Stream.next(stream) do
       nil ->
         {:done, acc}
+
+      {:error, {code, _status, msg}} ->
+        raise "ExArrow.Stream enumeration error: [#{code}] #{msg}"
 
       {:error, msg} ->
         raise "ExArrow.Stream enumeration error: #{msg}"

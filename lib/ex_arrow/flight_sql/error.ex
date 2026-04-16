@@ -67,7 +67,7 @@ defmodule ExArrow.FlightSQL.Error do
   @doc false
   # Build an Error from the 3-tuple `{code_atom, grpc_status_integer, message}` that
   # the NIF encodes for every gRPC-level failure.
-  @spec from_nif({atom(), integer(), String.t()}) :: t()
+  @spec from_nif({atom(), non_neg_integer(), String.t()}) :: t()
   def from_nif({code, grpc_status, message}) do
     status = if grpc_status == 0, do: nil, else: grpc_status
     %__MODULE__{code: code, message: message, grpc_status: status}

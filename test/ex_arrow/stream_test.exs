@@ -128,9 +128,9 @@ defmodule ExArrow.StreamTest do
       assert {:error, "flight_sql stream next error"} = Stream.next(stream(:flight_sql))
     end
 
-    test "formats gRPC triple error as [code] message" do
+    test "passes gRPC triple error through as a structured tuple" do
       Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeFlightSqlTriple)
-      assert {:error, "[unavailable] server gone"} = Stream.next(stream(:flight_sql))
+      assert {:error, {:unavailable, 14, "server gone"}} = Stream.next(stream(:flight_sql))
     end
   end
 
@@ -161,11 +161,29 @@ defmodule ExArrow.StreamTest do
   end
 
   describe "Enumerable — error propagation (stub)" do
-    test "Enum.to_list/1 raises on a stream error" do
+    test "Enum.to_list/1 raises on a plain string error" do
       Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeError)
 
       assert_raise RuntimeError, ~r/ExArrow.Stream enumeration error/, fn ->
         Enum.to_list(stream(:flight_sql))
+      end
+    end
+
+    test "Enum.to_list/1 raises on a gRPC triple error with [code] prefix" do
+      Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeFlightSqlTriple)
+
+      assert_raise RuntimeError, ~r/\[unavailable\] server gone/, fn ->
+        Enum.to_list(stream(:flight_sql))
+      end
+    end
+  end
+
+  describe "to_list/1 triple error" do
+    test "raises with [code] prefix when next/1 returns a gRPC triple" do
+      Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeFlightSqlTriple)
+
+      assert_raise RuntimeError, ~r/\[unavailable\] server gone/, fn ->
+        Stream.to_list(stream(:flight_sql))
       end
     end
   end

@@ -57,7 +57,7 @@ defmodule ExArrow.FlightSQL.Client do
   Transaction operations (`BEGIN`, `COMMIT`, `ROLLBACK`) are deferred to v0.6.0.
   """
 
-  alias ExArrow.FlightSQL.{ClientBehaviour, Error, Result, Statement}
+  alias ExArrow.FlightSQL.{Error, Result, Statement}
   alias ExArrow.Stream
 
   @opaque t :: %__MODULE__{resource: reference()}
@@ -113,6 +113,11 @@ defmodule ExArrow.FlightSQL.Client do
 
   Returns `{:ok, %ExArrow.FlightSQL.Result{}}` or `{:error, %ExArrow.FlightSQL.Error{}}`.
 
+  > #### Concurrency {: .warning}
+  > Concurrent calls on the **same** client handle are serialised — the underlying
+  > gRPC client requires exclusive access per call.  For parallel queries, create
+  > separate client handles with `connect/2`.
+
   ## Examples
 
       {:ok, result} = ExArrow.FlightSQL.Client.query(client, "SELECT * FROM t")
@@ -120,6 +125,9 @@ defmodule ExArrow.FlightSQL.Client do
       result.schema     #=> %ExArrow.Schema{...}
   """
   @spec query(t(), String.t()) :: {:ok, Result.t()} | {:error, Error.t()}
+  # sobelow_skip ["SQL.Query"]
+  # False positive: SQL is forwarded to a remote Flight SQL server over gRPC and
+  # is never executed locally in this process.
   def query(%__MODULE__{} = client, sql) when is_binary(sql) do
     with {:ok, stream} <- impl().query(client, sql, []) do
       Result.from_stream(stream)
@@ -136,9 +144,6 @@ defmodule ExArrow.FlightSQL.Client do
       result = ExArrow.FlightSQL.Client.query!(client, "SELECT * FROM t")
   """
   @spec query!(t(), String.t()) :: Result.t()
-  # sobelow_skip ["SQL.Query"]
-  # False positive: this module is a *client* library; SQL is sent to a remote
-  # Flight SQL server over gRPC and is never executed locally in this process.
   def query!(%__MODULE__{} = client, sql) when is_binary(sql) do
     case query(client, sql) do
       {:ok, result} -> result
@@ -167,6 +172,9 @@ defmodule ExArrow.FlightSQL.Client do
       ExArrow.Stream.to_list(stream)  # collect all — or iterate lazily with next/1
   """
   @spec stream_query(t(), String.t()) :: {:ok, Stream.t()} | {:error, Error.t()}
+  # sobelow_skip ["SQL.Query"]
+  # False positive: SQL is forwarded to a remote Flight SQL server over gRPC and
+  # is never executed locally in this process.
   def stream_query(%__MODULE__{} = client, sql) when is_binary(sql) do
     impl().query(client, sql, [])
   end
@@ -180,6 +188,10 @@ defmodule ExArrow.FlightSQL.Client do
   or `{:ok, :unknown}` when the server does not report a row count.
 
   Returns `{:error, %ExArrow.FlightSQL.Error{}}` on failure.
+
+  > #### Concurrency {: .warning}
+  > Concurrent calls on the **same** client handle are serialised.
+  > Create separate handles with `connect/2` for parallel workloads.
 
   ## Examples
 
@@ -204,6 +216,10 @@ defmodule ExArrow.FlightSQL.Client do
 
   Returns `{:ok, %ExArrow.FlightSQL.Statement{}}` or
   `{:error, %ExArrow.FlightSQL.Error{}}`.
+
+  > #### Concurrency {: .warning}
+  > Concurrent calls on the **same** client handle are serialised.
+  > Create separate handles with `connect/2` for parallel workloads.
 
   ## Compatibility
 
@@ -340,10 +356,4 @@ defmodule ExArrow.FlightSQL.Client do
   def get_sql_info(%__MODULE__{} = client) do
     impl().get_sql_info(client, [])
   end
-
-  # ── Behaviour delegation check ────────────────────────────────────────────────
-
-  @doc false
-  @spec __behaviour__ :: module()
-  def __behaviour__, do: ClientBehaviour
 end

@@ -103,14 +103,13 @@ defmodule ExArrow.FlightSQL.ResultTest do
   end
 
   describe "from_stream/1 — batch read error" do
-    test "returns {:error, %Error{code: :transport_error}} when a batch read fails" do
-      # TestNativeFlightSqlTriple returns {:ok, schema} then {:error, {triple}} for next.
+    test "propagates structured gRPC triple as a typed Error" do
+      # TestNativeFlightSqlTriple returns {:ok, schema} then {:error, {:unavailable, 14, "server gone"}} for next.
       Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeFlightSqlTriple)
       stream = %ExArrow.Stream{resource: make_ref(), backend: :flight_sql}
 
-      assert {:error, %Error{code: :transport_error, message: msg}} = Result.from_stream(stream)
-      assert msg =~ "unavailable"
-      assert msg =~ "server gone"
+      assert {:error, %Error{code: :unavailable, grpc_status: 14, message: "server gone"}} =
+               Result.from_stream(stream)
     end
   end
 

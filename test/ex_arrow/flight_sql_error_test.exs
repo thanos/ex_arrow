@@ -84,4 +84,37 @@ defmodule ExArrow.FlightSQL.ErrorTest do
       end
     end
   end
+
+  describe "message/1 edge cases" do
+    test "nil details branch is not reached when details is nil (struct default)" do
+      err = %Error{code: :transport_error, message: "oops"}
+      assert Error.message(err) == "[transport_error] oops"
+    end
+
+    test "details branch renders when details is a map" do
+      err = %Error{code: :server_error, message: "boom", details: %{code: 500}}
+      msg = Error.message(err)
+      assert msg =~ "[server_error]"
+      assert msg =~ "boom"
+      assert msg =~ "500"
+    end
+
+    test "details branch renders when details is a string" do
+      err = %Error{code: :not_found, message: "table missing", details: "extra context"}
+      msg = Error.message(err)
+      assert msg =~ "extra context"
+    end
+  end
+
+  describe "from_nif/1 grpc_status handling" do
+    test "grpc_status 0 maps to nil" do
+      err = Error.from_nif({:transport_error, 0, "channel closed"})
+      assert err.grpc_status == nil
+    end
+
+    test "non-zero grpc_status is preserved" do
+      err = Error.from_nif({:invalid_argument, 3, "bad sql"})
+      assert err.grpc_status == 3
+    end
+  end
 end

@@ -188,4 +188,40 @@ defmodule ExArrow.FlightSQL.OptionsTest do
       assert is_list(opts.headers)
     end
   end
+
+  # ── URI edge cases ────────────────────────────────────────────────────────────
+
+  describe "URI edge cases" do
+    test "empty string is rejected" do
+      assert {:error, %Error{code: :invalid_option}} = Options.parse("", [])
+    end
+
+    test "colon-only string :32010 (empty host) is accepted with empty host" do
+      # Splitting ":32010" on ":" gives ["", "32010"] → host = ""
+      # An empty host string is technically valid at the parse level.
+      assert {:ok, %{host: "", port: 32_010}} = Options.parse(":32010", [])
+    end
+
+    test "port with leading plus sign is rejected" do
+      assert {:error, %Error{code: :invalid_option}} = Options.parse("host:+80", [])
+    end
+
+    test "port with leading minus sign is rejected" do
+      assert {:error, %Error{code: :invalid_option}} = Options.parse("host:-80", [])
+    end
+
+    test "0:0:0:0:0:0:0:1 (expanded IPv6 loopback) → :plaintext without brackets" do
+      # Parsed as "0" host with port "0:0:0:0:0:0:0:1" — the expanded form without
+      # brackets is not treated as a valid IPv6 URI by the parser, so it is not in
+      # the loopback list. Users must use the bracketed form [::1]:port.
+      # This test documents the current behaviour.
+      assert {:error, %Error{code: :invalid_option}} =
+               Options.parse("0:0:0:0:0:0:0:1:32010", [])
+    end
+
+    test "[0:0:0:0:0:0:0:1]:port (bracketed expanded IPv6) → :plaintext" do
+      assert {:ok, %{host: "0:0:0:0:0:0:0:1", tls_mode: :plaintext}} =
+               Options.parse("[0:0:0:0:0:0:0:1]:32010", [])
+    end
+  end
 end

@@ -41,6 +41,9 @@ defmodule ExArrow.Native do
   end
 
   # coveralls-ignore-start
+  # The stubs below are only reached when the NIF is not loaded (EX_ARROW_SKIP_NIF=1).
+  # They exist solely to prevent UndefinedFunctionError; coverage of these clauses
+  # requires running without the NIF and is not part of the standard suite.
   def nif_version, do: :erlang.nif_error(:nif_not_loaded)
   def ipc_test_fixture_binary, do: :erlang.nif_error(:nif_not_loaded)
   def ipc_test_fixture_file_binary, do: :erlang.nif_error(:nif_not_loaded)

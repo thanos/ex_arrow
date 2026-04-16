@@ -76,9 +76,19 @@ defmodule ExArrow.FlightSQL.Result do
   # Consume the stream batch-by-batch, returning {:ok, batches} or {:error, %Error{}}.
   defp collect_batches(stream, acc) do
     case Stream.next(stream) do
-      nil -> {:ok, Enum.reverse(acc)}
-      {:error, msg} -> {:error, Error.from_string(:transport_error, msg)}
-      batch -> collect_batches(stream, [batch | acc])
+      nil ->
+        {:ok, Enum.reverse(acc)}
+
+      # Structured triple from a :flight_sql stream — preserve code and grpc_status.
+      {:error, {code, grpc_status, msg}} when is_atom(code) and is_integer(grpc_status) ->
+        status = if grpc_status == 0, do: nil, else: grpc_status
+        {:error, %Error{code: code, message: msg, grpc_status: status}}
+
+      {:error, msg} ->
+        {:error, Error.from_string(:transport_error, msg)}
+
+      batch ->
+        collect_batches(stream, [batch | acc])
     end
   end
 
@@ -89,6 +99,12 @@ defmodule ExArrow.FlightSQL.Result do
   round-trip through `ExArrow.IPC.Writer` and `ExArrow.Explorer.from_stream/1`.
   Type support is determined by Explorer/Polars; columns with types that Polars
   does not support (e.g. `decimal128`, nested `map`) may cause a conversion error.
+
+  > #### Performance note {: .info}
+  > This function serialises all batches to an in-memory IPC binary then reads
+  > them back through the Explorer bridge.  For very large results consider
+  > converting the lazy stream directly with `ExArrow.Explorer.from_stream/1`
+  > after `stream_query/2`, which avoids materialising the full result first.
 
   Returns `{:error, %ExArrow.FlightSQL.Error{code: :conversion_error}}` if Explorer
   is not available or if conversion fails.

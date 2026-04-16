@@ -19,6 +19,7 @@ columnar `RecordBatch` data — the same Arrow format used everywhere in ExArrow
 | Module | Purpose |
 |--------|---------|
 | `ExArrow.FlightSQL.Client` | Connect, query, and execute DML |
+| `ExArrow.FlightSQL.Statement` | Reusable server-side prepared statement handle |
 | `ExArrow.FlightSQL.Result` | Materialised result (schema + batches + row count) |
 | `ExArrow.FlightSQL.Error` | Structured error type for all Flight SQL failures |
 
@@ -417,11 +418,13 @@ end
 ## Integration tests
 
 Integration tests require a running Flight SQL server and are excluded from
-`mix test` by default:
+`mix test` by default.  The suite lives in
+`test/ex_arrow/flight_sql_integration_test.exs` and is tagged
+`:flight_sql_integration`:
 
 ```bash
 mix test test/ex_arrow/flight_sql_integration_test.exs --include flight_sql_integration
 ```
 
-DuckDB can be started as a Flight SQL server using the
-[`duckdb_flight_sql`](https://duckdb.org/docs/api/flight_sql.html) extension.
+DuckDB can be started as a Flight SQL server using its
+[`flight_sql` extension](https://duckdb.org/docs/extensions/flight_sql.html).
