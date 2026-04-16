@@ -25,10 +25,9 @@ defmodule ExArrow.FlightSQL.IntegrationTest do
   """
 
   use ExUnit.Case
+  alias ExArrow.FlightSQL.{Client, Error}
 
   @moduletag :flight_sql_integration
-
-  alias ExArrow.FlightSQL.{Client, Error}
 
   @server_uri System.get_env("FLIGHT_SQL_HOST", "localhost:32010")
 
@@ -97,7 +96,10 @@ defmodule ExArrow.FlightSQL.IntegrationTest do
     test "creates a table and returns :unknown affected-row count" do
       client = connect()
       _ = Client.execute(client, "DROP TABLE IF EXISTS ex_arrow_integration_test")
-      assert {:ok, count} = Client.execute(client, "CREATE TABLE ex_arrow_integration_test (id INT)")
+
+      assert {:ok, count} =
+               Client.execute(client, "CREATE TABLE ex_arrow_integration_test (id INT)")
+
       assert count in [0, :unknown]
       _ = Client.execute(client, "DROP TABLE IF EXISTS ex_arrow_integration_test")
     end

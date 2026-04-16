@@ -144,6 +144,8 @@ defmodule ExArrow.FlightSQL.Client do
       result = ExArrow.FlightSQL.Client.query!(client, "SELECT * FROM t")
   """
   @spec query!(t(), String.t()) :: Result.t()
+  # sobelow_skip ["SQL.Query"]
+  # False positive: delegates to query/2, which forwards SQL to a remote Flight SQL server over gRPC.
   def query!(%__MODULE__{} = client, sql) when is_binary(sql) do
     case query(client, sql) do
       {:ok, result} -> result
