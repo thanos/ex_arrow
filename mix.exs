@@ -1,7 +1,7 @@
 defmodule ExArrow.MixProject do
   use Mix.Project
 
-  @version "0.4.0"
+  @version "0.5.0"
   @source_url "https://github.com/thanos/ex_arrow"
 
   def project do
@@ -105,6 +105,7 @@ defmodule ExArrow.MixProject do
         "docs/parquet_guide.md",
         "docs/compute_guide.md",
         "docs/flight_guide.md",
+        "docs/flight_sql_guide.md",
         "docs/adbc_guide.md",
         "docs/cdi_guide.md",
         "docs/nx_guide.md",
@@ -119,6 +120,12 @@ defmodule ExArrow.MixProject do
           ExArrow.Flight.Server,
           ExArrow.Flight.FlightInfo,
           ExArrow.Flight.ActionType
+        ],
+        "Flight SQL": [
+          ExArrow.FlightSQL,
+          ExArrow.FlightSQL.Client,
+          ExArrow.FlightSQL.Result,
+          ExArrow.FlightSQL.Error
         ],
         ADBC: [
           ExArrow.ADBC.Database,

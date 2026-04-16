@@ -108,6 +108,32 @@ defmodule ExArrow.StreamTest do
     end
   end
 
+  # ── :flight_sql backend ──────────────────────────────────────────────────────
+
+  describe "schema/1 :flight_sql backend" do
+    test "returns {:error, msg} when native returns error" do
+      Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeError)
+      assert {:error, "flight_sql stream schema error"} = Stream.schema(stream(:flight_sql))
+    end
+  end
+
+  describe "next/1 :flight_sql backend" do
+    test "returns nil when native returns :done" do
+      Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeDone)
+      assert nil == Stream.next(stream(:flight_sql))
+    end
+
+    test "returns {:error, msg} for plain string error" do
+      Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeError)
+      assert {:error, "flight_sql stream next error"} = Stream.next(stream(:flight_sql))
+    end
+
+    test "passes gRPC triple error through as a structured tuple" do
+      Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeFlightSqlTriple)
+      assert {:error, {:unavailable, 14, "server gone"}} = Stream.next(stream(:flight_sql))
+    end
+  end
+
   # ── to_list/1 error (do_collect raise) ───────────────────────────────────────
 
   describe "to_list/1" do
@@ -117,6 +143,126 @@ defmodule ExArrow.StreamTest do
       assert_raise RuntimeError, ~r/ExArrow.Stream.to_list\/1 failed/, fn ->
         Stream.to_list(stream(:adbc))
       end
+    end
+  end
+
+  # ── Enumerable ────────────────────────────────────────────────────────────────
+
+  describe "Enumerable — empty stream (stub)" do
+    test "Enum.to_list/1 returns [] for an empty stream" do
+      Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeDone)
+      assert [] == Enum.to_list(stream(:flight_sql))
+    end
+
+    test "Enum.count/1 returns 0 for an empty stream" do
+      Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeDone)
+      assert 0 == Enum.count(stream(:flight_sql))
+    end
+  end
+
+  describe "Enumerable — error propagation (stub)" do
+    test "Enum.to_list/1 raises on a plain string error" do
+      Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeError)
+
+      assert_raise RuntimeError, ~r/ExArrow.Stream enumeration error/, fn ->
+        Enum.to_list(stream(:flight_sql))
+      end
+    end
+
+    test "Enum.to_list/1 raises on a gRPC triple error with [code] prefix" do
+      Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeFlightSqlTriple)
+
+      assert_raise RuntimeError, ~r/\[unavailable\] server gone/, fn ->
+        Enum.to_list(stream(:flight_sql))
+      end
+    end
+  end
+
+  describe "to_list/1 triple error" do
+    test "raises with [code] prefix when next/1 returns a gRPC triple" do
+      Application.put_env(:ex_arrow, :stream_native, ExArrow.Stream.TestNativeFlightSqlTriple)
+
+      assert_raise RuntimeError, ~r/\[unavailable\] server gone/, fn ->
+        Stream.to_list(stream(:flight_sql))
+      end
+    end
+  end
+
+  describe "Enumerable — single batch (real NIF)" do
+    @tag :nif
+    test "Enum.to_list/1 collects batches from an IPC stream" do
+      {:ok, ipc_bin} = ExArrow.Native.ipc_test_fixture_binary()
+      {:ok, stream_ref} = ExArrow.Native.ipc_reader_from_binary(ipc_bin)
+      s = %Stream{resource: stream_ref, backend: :ipc}
+
+      batches = Enum.to_list(s)
+      assert length(batches) >= 1
+      assert Enum.all?(batches, &match?(%ExArrow.RecordBatch{}, &1))
+    end
+
+    @tag :nif
+    test "Enum.take/2 stops after N batches without consuming the rest" do
+      # Build a 2-batch IPC stream by writing the same batch twice.
+      {:ok, ipc_bin} = ExArrow.Native.ipc_test_fixture_binary()
+      {:ok, reader} = ExArrow.Native.ipc_reader_from_binary(ipc_bin)
+      schema_ref = ExArrow.Native.ipc_stream_schema(reader)
+      {:ok, batch_ref} = ExArrow.Native.ipc_stream_next(reader)
+
+      {:ok, two_batch_bin} =
+        ExArrow.Native.ipc_writer_to_binary(schema_ref, [batch_ref, batch_ref])
+
+      {:ok, stream_ref} = ExArrow.Native.ipc_reader_from_binary(two_batch_bin)
+      s = %Stream{resource: stream_ref, backend: :ipc}
+
+      result = Enum.take(s, 1)
+      assert length(result) == 1
+      assert match?(%ExArrow.RecordBatch{}, hd(result))
+    end
+
+    @tag :nif
+    test "Enum.map/2 transforms each batch" do
+      {:ok, ipc_bin} = ExArrow.Native.ipc_test_fixture_binary()
+      {:ok, stream_ref} = ExArrow.Native.ipc_reader_from_binary(ipc_bin)
+      s = %Stream{resource: stream_ref, backend: :ipc}
+
+      row_counts = Enum.map(s, &ExArrow.RecordBatch.num_rows/1)
+      assert Enum.all?(row_counts, fn n -> is_integer(n) and n > 0 end)
+    end
+  end
+
+  describe "Enumerable — multiple batches (real NIF)" do
+    @tag :nif
+    test "Enum.to_list/1 collects all batches from a multi-batch IPC stream" do
+      {:ok, ipc_bin} = ExArrow.Native.ipc_test_fixture_binary()
+      {:ok, reader} = ExArrow.Native.ipc_reader_from_binary(ipc_bin)
+      schema_ref = ExArrow.Native.ipc_stream_schema(reader)
+      {:ok, batch_ref} = ExArrow.Native.ipc_stream_next(reader)
+
+      {:ok, two_batch_bin} =
+        ExArrow.Native.ipc_writer_to_binary(schema_ref, [batch_ref, batch_ref])
+
+      {:ok, stream_ref} = ExArrow.Native.ipc_reader_from_binary(two_batch_bin)
+      s = %Stream{resource: stream_ref, backend: :ipc}
+
+      batches = Enum.to_list(s)
+      assert length(batches) == 2
+      assert Enum.all?(batches, &match?(%ExArrow.RecordBatch{}, &1))
+    end
+
+    @tag :nif
+    test "Enum.count/1 traverses all batches and returns the count" do
+      {:ok, ipc_bin} = ExArrow.Native.ipc_test_fixture_binary()
+      {:ok, reader} = ExArrow.Native.ipc_reader_from_binary(ipc_bin)
+      schema_ref = ExArrow.Native.ipc_stream_schema(reader)
+      {:ok, batch_ref} = ExArrow.Native.ipc_stream_next(reader)
+
+      {:ok, three_batch_bin} =
+        ExArrow.Native.ipc_writer_to_binary(schema_ref, [batch_ref, batch_ref, batch_ref])
+
+      {:ok, stream_ref} = ExArrow.Native.ipc_reader_from_binary(three_batch_bin)
+      s = %Stream{resource: stream_ref, backend: :ipc}
+
+      assert Enum.count(s) == 3
     end
   end
 

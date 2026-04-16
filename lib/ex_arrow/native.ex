@@ -41,6 +41,9 @@ defmodule ExArrow.Native do
   end
 
   # coveralls-ignore-start
+  # The stubs below are only reached when the NIF is not loaded (EX_ARROW_SKIP_NIF=1).
+  # They exist solely to prevent UndefinedFunctionError; coverage of these clauses
+  # requires running without the NIF and is not part of the standard suite.
   def nif_version, do: :erlang.nif_error(:nif_not_loaded)
   def ipc_test_fixture_binary, do: :erlang.nif_error(:nif_not_loaded)
   def ipc_test_fixture_file_binary, do: :erlang.nif_error(:nif_not_loaded)
@@ -147,5 +150,36 @@ defmodule ExArrow.Native do
   def cdi_import(_handle_ref), do: :erlang.nif_error(:nif_not_loaded)
   def cdi_pointers(_handle_ref), do: :erlang.nif_error(:nif_not_loaded)
   def cdi_mark_consumed(_handle_ref), do: :erlang.nif_error(:nif_not_loaded)
+
+  # Flight SQL client
+  def flight_sql_connect(_host, _port, _tls_mode, _headers),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  def flight_sql_query(_client_ref, _sql), do: :erlang.nif_error(:nif_not_loaded)
+  def flight_sql_execute(_client_ref, _sql), do: :erlang.nif_error(:nif_not_loaded)
+  def flight_sql_stream_schema(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
+  def flight_sql_stream_next(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
+
+  def flight_sql_get_tables(
+        _client_ref,
+        _catalog,
+        _db_schema_filter,
+        _table_name_filter,
+        _table_types,
+        _include_schema
+      ),
+      do: :erlang.nif_error(:nif_not_loaded)
+
+  def flight_sql_get_db_schemas(_client_ref, _catalog, _db_schema_filter),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  def flight_sql_get_sql_info(_client_ref), do: :erlang.nif_error(:nif_not_loaded)
+
+  def flight_sql_prepare(_client_ref, _sql), do: :erlang.nif_error(:nif_not_loaded)
+  def flight_sql_prepared_execute(_stmt_ref), do: :erlang.nif_error(:nif_not_loaded)
+
+  def flight_sql_prepared_execute_update(_stmt_ref),
+    do: :erlang.nif_error(:nif_not_loaded)
+
   # coveralls-ignore-stop
 end

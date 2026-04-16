@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 
-Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, and ADBC database bindings. Column data lives in Rust buffers; Elixir holds lightweight opaque handles. Precompiled NIFs for Linux, macOS, and Windows — no Rust required to use.
+Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, Arrow Flight SQL, and ADBC database bindings. Column data lives in Rust buffers; Elixir holds lightweight opaque handles. Precompiled NIFs for Linux, macOS, and Windows — no Rust required to use.
 
 ---
 
@@ -23,6 +23,7 @@ Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, and ADBC database
 - [Livebook tutorials](#livebook-tutorials)
 - [IPC: stream and file](#ipc-stream-and-file)
 - [Arrow Flight: client and server](#arrow-flight-client-and-server)
+- [Arrow Flight SQL: remote query servers](#arrow-flight-sql-remote-query-servers)
 - [ADBC: database to Arrow streams](#adbc-database-to-arrow-streams)
 - [Parquet: read and write](#parquet-read-and-write)
 - [Arrow compute kernels](#arrow-compute-kernels)
@@ -36,6 +37,7 @@ Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, and ADBC database
   - [Shipped (v0.2.0)](#shipped-v020)
   - [Shipped (v0.3.0)](#shipped-v030)
   - [Shipped (v0.4.0)](#shipped-v040)
+  - [Shipped (v0.5.0)](#shipped-v050)
 - [FAQ](#faq)
 - [License](#license)
 
@@ -75,6 +77,10 @@ Pandas; write a file for the same consumers. No format conversion needed.
 - **Arrow Flight client and server** — Connect to Dremio, InfluxDB IOx,
 Snowflake Flight endpoints, or any custom Flight service. Run an in-process
 echo server for testing. Transfer Arrow streams over gRPC with one API call.
+- **Arrow Flight SQL client** — Execute SQL against remote Flight SQL servers
+(DuckDB, DataFusion, Dremio, InfluxDB v3) and receive results as lazy Arrow
+streams. Supports TLS, bearer-token auth, prepared statements, and metadata
+discovery.
 - **ADBC database connectivity** — Execute SQL against any ADBC-compatible
 database (SQLite, PostgreSQL, DuckDB, BigQuery, Snowflake, and more) and
 receive the results as a lazy Arrow stream — never materialising rows into
@@ -121,11 +127,13 @@ flowchart TB
 
     ExArrow --> IPC("Arrow IPC\nstream & file")
     ExArrow --> FlightSvr("Arrow Flight\ngRPC server")
+    ExArrow --> FlightSQL("Arrow Flight SQL\nremote query server")
     ExArrow --> ADBCDrv("ADBC\ndriver")
 
     IPC -. "interop via IPC binary" .-> Explorer
 
-    FlightSvr --> FlightSvcs("Dremio · InfluxDB IOx\nDuckDB · Snowflake")
+    FlightSvr --> FlightSvcs("Dremio · InfluxDB IOx\nCustom Flight services")
+    FlightSQL --> SQLSvcs("DuckDB · DataFusion\nDremio · InfluxDB v3")
     ADBCDrv   --> Databases("PostgreSQL · SQLite\nDuckDB · BigQuery")
 
     classDef app      fill:#1a1a2e,stroke:#4a90d9,color:#e0e0e0,rx:6
@@ -135,8 +143,8 @@ flowchart TB
 
     class App app
     class Explorer,Nx,ExArrow,ExZarr lib
-    class IPC,FlightSvr,ADBCDrv proto
-    class FlightSvcs,Databases external
+    class IPC,FlightSvr,FlightSQL,ADBCDrv proto
+    class FlightSvcs,SQLSvcs,Databases external
 ```
 
 ExArrow sits at the boundary between the BEAM and the Arrow ecosystem. It
@@ -179,7 +187,7 @@ Add the dependency:
 
 ```elixir
 def deps do
-  [{:ex_arrow, "~> 0.4.0"}]
+  [{:ex_arrow, "~> 0.5.0"}]
 end
 ```
 
@@ -212,7 +220,7 @@ Mix.install([
 ```
 
 Alternatively, use the published Hex package so the precompiled NIF is used
-and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.4.0"}])`.
+and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.5.0"}])`.
 
 ---
 
@@ -239,6 +247,18 @@ end
 {:ok, stream} = ExArrow.Flight.Client.do_get(client, "my_ticket")
 {:ok, schema} = ExArrow.Stream.schema(stream)
 batch = ExArrow.Stream.next(stream)
+```
+
+**Query a remote Flight SQL server (DuckDB, DataFusion, Dremio):**
+
+```elixir
+{:ok, client} = ExArrow.FlightSQL.Client.connect("localhost:32010")
+{:ok, result} = ExArrow.FlightSQL.Client.query(client, "SELECT id, name FROM users")
+result.num_rows  #=> 42
+
+# Lazy streaming for large result sets
+{:ok, stream} = ExArrow.FlightSQL.Client.stream_query(client, "SELECT * FROM events")
+Enum.each(stream, fn batch -> process(batch) end)
 ```
 
 **Query a database with ADBC:**
@@ -355,6 +375,86 @@ batch = ExArrow.Stream.next(stream)
 
 Plaintext continues to work as before. Products that speak Arrow Flight
 include Dremio, InfluxDB IOx, and custom analytics servers.
+
+---
+
+## Arrow Flight SQL: remote query servers
+
+Arrow Flight SQL layers SQL semantics on top of Arrow Flight.  Use it to
+connect to remote query servers — DuckDB over the network, DataFusion,
+Dremio, or InfluxDB v3.  For in-process databases, use ADBC instead.
+
+**Connect and query:**
+
+```elixir
+{:ok, client} = ExArrow.FlightSQL.Client.connect("localhost:32010")
+
+# Materialised — all batches collected
+{:ok, result} = ExArrow.FlightSQL.Client.query(client, "SELECT * FROM orders LIMIT 1000")
+result.num_rows  #=> 1000
+result.schema    #=> %ExArrow.Schema{...}
+result.batches   #=> [%ExArrow.RecordBatch{...}, ...]
+
+# Lazy — stream one batch at a time (Enumerable)
+{:ok, stream} = ExArrow.FlightSQL.Client.stream_query(client, "SELECT * FROM big_table")
+batches = Enum.to_list(stream)
+first_two = Enum.take(stream, 2)
+
+# DML
+{:ok, 5}        = ExArrow.FlightSQL.Client.execute(client, "DELETE FROM logs WHERE old = true")
+{:ok, :unknown} = ExArrow.FlightSQL.Client.execute(client, "CREATE TABLE t (id INT)")
+```
+
+**TLS and authentication:**
+
+```elixir
+# Remote host — TLS with OS trust store (automatic)
+{:ok, client} = ExArrow.FlightSQL.Client.connect("dremio.example.com:32010")
+
+# Custom CA certificate
+pem = File.read!("priv/ca.pem")
+{:ok, client} = ExArrow.FlightSQL.Client.connect("secure.server:32010",
+  tls: [ca_cert_pem: pem])
+
+# Bearer token
+{:ok, client} = ExArrow.FlightSQL.Client.connect("dremio.example.com:32010",
+  tls: true,
+  headers: [{"authorization", "Bearer my-pat-token"}])
+```
+
+**Prepared statements:**
+
+```elixir
+{:ok, stmt}   = ExArrow.FlightSQL.Client.prepare(client, "SELECT * FROM events WHERE ts > '2024-01-01'")
+{:ok, stream} = ExArrow.FlightSQL.Statement.execute(stmt)
+batches = Enum.to_list(stream)
+```
+
+**Metadata discovery:**
+
+```elixir
+{:ok, stream} = ExArrow.FlightSQL.Client.get_tables(client,
+  db_schema_filter: "public", table_types: ["TABLE", "VIEW"])
+{:ok, stream} = ExArrow.FlightSQL.Client.get_db_schemas(client)
+{:ok, stream} = ExArrow.FlightSQL.Client.get_sql_info(client)
+```
+
+**Explorer and Nx integration:**
+
+```elixir
+{:ok, result} = ExArrow.FlightSQL.Client.query(client, "SELECT * FROM sales")
+{:ok, df}     = ExArrow.FlightSQL.Result.to_dataframe(result)   # requires Explorer
+{:ok, tensor} = ExArrow.FlightSQL.Result.to_tensor(result, "price")  # requires Nx
+```
+
+**Unit testing with Mox** (no server needed):
+
+```elixir
+Mox.defmock(MyApp.FlightSQLMock, for: ExArrow.FlightSQL.ClientBehaviour)
+Application.put_env(:ex_arrow, :flight_sql_client_impl, MyApp.FlightSQLMock)
+```
+
+See [docs/flight_sql_guide.md](docs/flight_sql_guide.md) for the full guide.
 
 ---
 
@@ -705,6 +805,7 @@ The CI workflow posts a PR alert comment when any scenario regresses more than
 - [Parquet guide](docs/parquet_guide.md) — read/write Parquet, streaming, comparison with IPC
 - [Compute guide](docs/compute_guide.md) — filter, project, sort, chaining kernels
 - [Flight guide](docs/flight_guide.md) — server, client, timeouts, security
+- [Flight SQL guide](docs/flight_sql_guide.md) — connection, TLS, queries, DML, prepared statements, metadata, Explorer/Nx, Mox testing
 - [ADBC guide](docs/adbc_guide.md) — driver loading, metadata, binding
 - [Benchmarks guide](docs/benchmarks.md) — suites, CI publishing, interpreting results
 
@@ -770,17 +871,29 @@ welcome for any of them.
   of eagerly loading the entire file, dramatically reducing peak memory for
   large Parquet files.
 
-### Near-term (v0.5)
+### Shipped (v0.5.0)
+
+- **Arrow Flight SQL client** — `ExArrow.FlightSQL.Client`: connect to DuckDB,
+  DataFusion, Dremio, InfluxDB v3, and any Arrow Flight SQL server.  Full query
+  API: materialised (`query/2`), lazy streaming (`stream_query/2`), DML
+  (`execute/2`), prepared statements (`prepare/2`), and metadata discovery
+  (`get_tables/2`, `get_db_schemas/2`, `get_sql_info/1`).
+- **`ExArrow.Stream` implements `Enumerable`** — all `Enum.*` / `Stream.*`
+  functions work directly on any stream handle.  Early termination is safe.
+- **Structured errors** — `ExArrow.FlightSQL.Error` with `:code` atom and
+  `:grpc_status` integer, covering 11 error categories.
+- **Mox-compatible `ClientBehaviour`** — full test isolation without a live server.
+- **Explorer and Nx integration** — `Result.to_dataframe/1`, `Result.to_tensor/2`.
 
 ### Longer-term
 
-- **Flight SQL** — the Flight SQL protocol for databases that expose it
-(DuckDB, CockroachDB, Dremio).
+- **Parameter binding for prepared statements** — pass `?` placeholders with
+  Arrow record batch values (v0.6.0).
 - **Streaming writes to Delta Lake** — sink for data pipeline nodes.
 - **OTel / telemetry integration** — `:telemetry` events for IPC read/write
-throughput, Flight request latency, and ADBC query duration.
+  throughput, Flight request latency, and ADBC query duration.
 - **Windows aarch64 precompiled NIF** — once GitHub-hosted Windows arm64
-runners are generally available.
+  runners are generally available.
 
 ---
 
