@@ -18,5 +18,6 @@ defmodule ExArrow.Field do
 
   @doc false
   @spec new(String.t(), term(), boolean()) :: t()
-  def new(name, type, nullable \\ true), do: %__MODULE__{name: name, type: type, nullable: nullable}
+  def new(name, type, nullable \\ true),
+    do: %__MODULE__{name: name, type: type, nullable: nullable}
 end

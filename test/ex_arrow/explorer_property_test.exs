@@ -5,21 +5,32 @@ defmodule ExArrow.ExplorerPropertyTest do
   @moduletag :explorer
 
   if Code.ensure_loaded?(Explorer.DataFrame) do
+    @safe_atoms ~w[x y z a b c d e f g h]a
+
     property "from_dataframe/to_dataframe round-trip preserves column names and row count" do
       check all(
               n <- integer(1..50),
-              col_names <- list_of(string(:alphanumeric, min_length: 1, max_length: 8), min_length: 1, max_length: 5),
+              num_cols <- integer(1..5),
+              col_names <-
+                list_of(member_of(@safe_atoms), min_length: num_cols, max_length: num_cols),
               max_runs: 20
             ) do
-        unique_names = col_names |> Enum.uniq() |> Enum.take(5)
-        data = Enum.map(unique_names, fn name -> {String.to_existing_atom(name), Enum.to_list(1..n//1)} end)
+        unique_names = col_names |> Enum.uniq() |> Enum.take(num_cols)
+
+        data =
+          Enum.map(unique_names, fn name ->
+            {name, Enum.to_list(1..n//1)}
+          end)
+
         df = Explorer.DataFrame.new(data)
 
         {:ok, batch} = ExArrow.from_dataframe(df)
         {:ok, df2} = ExArrow.to_dataframe(batch)
 
         assert Explorer.DataFrame.n_rows(df2) == n
-        assert Enum.sort(Explorer.DataFrame.names(df2)) == Enum.sort(unique_names)
+
+        assert Enum.sort(Explorer.DataFrame.names(df2)) ==
+                 Enum.sort(Enum.map(unique_names, &Atom.to_string/1))
       end
     end
 
@@ -46,6 +57,7 @@ defmodule ExArrow.ExplorerPropertyTest do
         {:ok, df2} = ExArrow.to_dataframe(batch)
         recovered = Explorer.Series.to_list(Explorer.DataFrame.pull(df2, "x"))
         assert length(recovered) == length(values)
+
         for {a, b} <- Enum.zip(recovered, values) do
           assert_in_delta a, b, 0.001
         end

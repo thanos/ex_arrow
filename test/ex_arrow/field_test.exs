@@ -15,11 +15,13 @@ defmodule ExArrow.FieldTest do
     end
 
     test "new/2 returns struct with given name and type, nullable defaults to true" do
-      assert %ExArrow.Field{name: "x", type: :utf8, nullable: true} = ExArrow.Field.new("x", :utf8)
+      assert %ExArrow.Field{name: "x", type: :utf8, nullable: true} =
+               ExArrow.Field.new("x", :utf8)
     end
 
     test "new/3 returns struct with explicit nullable" do
-      assert %ExArrow.Field{name: "x", type: :int64, nullable: false} = ExArrow.Field.new("x", :int64, false)
+      assert %ExArrow.Field{name: "x", type: :int64, nullable: false} =
+               ExArrow.Field.new("x", :int64, false)
     end
 
     @tag :ipc

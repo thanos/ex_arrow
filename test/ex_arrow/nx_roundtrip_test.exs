@@ -71,8 +71,23 @@ defmodule ExArrow.NxRoundtripTest do
         {:ok, recovered} = ExArrow.to_nx(batch)
         assert Nx.shape(recovered) == Nx.shape(tensor)
         assert Nx.type(recovered) == Nx.type(tensor)
-        assert Nx.to_flat_list(recovered) |> Enum.map(&Nx.to_number/1) ==
-                 Nx.to_flat_list(tensor) |> Enum.map(&Nx.to_number/1)
+
+        assert recovered |> Nx.to_flat_list() |> Enum.map(&Nx.to_number/1) ==
+                 tensor |> Nx.to_flat_list() |> Enum.map(&Nx.to_number/1)
+      end
+
+      # Regression for issue #200 (C2): with more than 10 columns, naive
+      # column naming (c0..cN) plus map-based ordering reordered columns
+      # lexicographically ("c10" < "c2") and corrupted the data.
+      for cols <- [11, 12, 25, 100, 256] do
+        test "rank-2 round-trip preserves column order with #{cols} columns" do
+          tensor = Nx.iota({3, unquote(cols)}, type: {:s, 64})
+          {:ok, batch} = ExArrow.from_nx(tensor)
+          assert ExArrow.RecordBatch.num_columns(batch) == unquote(cols)
+          {:ok, recovered} = ExArrow.to_nx(batch)
+          assert Nx.shape(recovered) == {3, unquote(cols)}
+          assert Nx.to_list(recovered) == Nx.to_list(tensor)
+        end
       end
     end
 
@@ -88,6 +103,14 @@ defmodule ExArrow.NxRoundtripTest do
         assert {:error, msg} = ExArrow.from_nx(tensor)
         assert msg =~ "rank"
       end
+
+      # Regression for issue #200 (C3): the :as option was silently dropped
+      # for rank-2 tensors, producing UInt8 columns instead of Boolean.
+      test "rejects as: :boolean for rank-2 tensors" do
+        tensor = Nx.tensor([[1, 0], [0, 1]], type: {:u, 8})
+        assert {:error, msg} = ExArrow.from_nx(tensor, as: :boolean)
+        assert msg =~ "rank-2"
+      end
     end
 
     describe "ExArrow.to_nx/1 — multi-column batch to rank-2" do
@@ -96,6 +119,7 @@ defmodule ExArrow.NxRoundtripTest do
           "a" => Nx.tensor([1, 2, 3], type: {:s, 64}),
           "b" => Nx.tensor([4, 5, 6], type: {:s, 64})
         }
+
         {:ok, batch} = ExArrow.Nx.from_tensors(tensors)
         {:ok, result} = ExArrow.to_nx(batch)
         assert tuple_size(Nx.shape(result)) == 2
@@ -106,6 +130,7 @@ defmodule ExArrow.NxRoundtripTest do
           "a" => Nx.tensor([1, 2, 3], type: {:s, 64}),
           "b" => Nx.tensor([1.0, 2.0, 3.0], type: {:f, 64})
         }
+
         {:ok, batch} = ExArrow.Nx.from_tensors(tensors)
         assert {:error, msg} = ExArrow.to_nx(batch)
         assert msg =~ "uniform"

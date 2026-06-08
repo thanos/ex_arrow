@@ -19,7 +19,8 @@ defmodule ExArrow.MixProject do
       test_coverage: [tool: ExCoveralls],
       dialyzer: [
         plt_file: {:no_warn, "priv/plts/project.plt"},
-        plt_add_apps: [:mix]
+        plt_add_apps: [:mix],
+        ignore_warnings: "dialyzer_ignore.exs"
       ],
       preferred_cli_env: [
         coveralls: :test,
@@ -143,7 +144,14 @@ defmodule ExArrow.MixProject do
         ],
         "C Data Interface": [ExArrow.CDI],
         "Optional bridges": [ExArrow.Explorer, ExArrow.Nx],
-        "Core types": [ExArrow.Stream, ExArrow.RecordBatch, ExArrow.Schema, ExArrow.Field, ExArrow.Array, ExArrow.Table]
+        "Core types": [
+          ExArrow.Stream,
+          ExArrow.RecordBatch,
+          ExArrow.Schema,
+          ExArrow.Field,
+          ExArrow.Array,
+          ExArrow.Table
+        ]
       ]
     ]
   end

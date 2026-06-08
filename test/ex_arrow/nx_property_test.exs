@@ -29,6 +29,7 @@ defmodule ExArrow.NxPropertyTest do
         {:ok, recovered} = ExArrow.to_nx(batch)
         assert Nx.shape(recovered) == Nx.shape(tensor)
         assert Nx.type(recovered) == {:f, 64}
+
         for {a, b} <- Enum.zip(Nx.to_list(recovered), values) do
           assert_in_delta a, b, 0.001
         end
@@ -70,7 +71,12 @@ defmodule ExArrow.NxPropertyTest do
               values <- list_of(boolean(), min_length: 1, max_length: 50),
               max_runs: 20
             ) do
-        int_values = Enum.map(values, fn true -> 1; false -> 0 end)
+        int_values =
+          Enum.map(values, fn
+            true -> 1
+            false -> 0
+          end)
+
         tensor = Nx.tensor(int_values, type: {:u, 8})
         {:ok, batch} = ExArrow.from_nx(tensor, as: :boolean)
         {:ok, recovered} = ExArrow.to_nx(batch)
@@ -81,18 +87,19 @@ defmodule ExArrow.NxPropertyTest do
 
     property "Schema.Mapper round-trip: nx_dtype -> arrow -> nx_dtype is identity" do
       check all(
-              nx_dtype <- one_of([
-                constant({:s, 8}),
-                constant({:s, 16}),
-                constant({:s, 32}),
-                constant({:s, 64}),
-                constant({:u, 8}),
-                constant({:u, 16}),
-                constant({:u, 32}),
-                constant({:u, 64}),
-                constant({:f, 32}),
-                constant({:f, 64})
-              ]),
+              nx_dtype <-
+                one_of([
+                  constant({:s, 8}),
+                  constant({:s, 16}),
+                  constant({:s, 32}),
+                  constant({:s, 64}),
+                  constant({:u, 8}),
+                  constant({:u, 16}),
+                  constant({:u, 32}),
+                  constant({:u, 64}),
+                  constant({:f, 32}),
+                  constant({:f, 64})
+                ]),
               max_runs: 20
             ) do
         {:ok, arrow} = ExArrow.Schema.Mapper.nx_dtype_to_arrow(nx_dtype)

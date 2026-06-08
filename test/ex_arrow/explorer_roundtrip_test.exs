@@ -39,6 +39,7 @@ defmodule ExArrow.ExplorerRoundtripTest do
         df = Explorer.DataFrame.new(flags: [true, false, true], name: ["a", "b", "c"])
         {:ok, batch} = ExArrow.from_dataframe(df)
         {:ok, df2} = ExArrow.to_dataframe(batch)
+
         assert Explorer.Series.to_list(Explorer.DataFrame.pull(df2, "flags")) ==
                  Explorer.Series.to_list(Explorer.DataFrame.pull(df, "flags"))
       end

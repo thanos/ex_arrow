@@ -54,6 +54,8 @@ defmodule ExArrow.DataFrame do
     """
     @spec from_arrow(RecordBatch.t() | Stream.t()) ::
             {:ok, Explorer.DataFrame.t()} | {:error, String.t()}
+    # dialyzer: pattern matching on opaque structs is intentional here —
+    # we dispatch to the correct bridge function based on the struct type.
     def from_arrow(%Stream{} = stream) do
       ExArrowExplorer.from_stream(stream)
     end
@@ -63,13 +65,13 @@ defmodule ExArrow.DataFrame do
     end
 
     @doc """
-    Convert an `Explorer.DataFrame` to an `ExArrow.RecordBatch`.
+    Convert an `Explorer.DataFrame` to a single `ExArrow.RecordBatch`.
 
     The dataframe is serialised to Arrow IPC via
-    `Explorer.DataFrame.dump_ipc_stream!/1`, then read back as a native Arrow
-    batch handle.  For dataframes that produce multiple batches in the IPC
-    representation, the first batch is returned (the common case for
-    in-memory data is a single batch).
+    `Explorer.DataFrame.dump_ipc_stream!/1`, then read back as native Arrow
+    batches.  Explorer may split a large dataframe into multiple IPC batches;
+    these are concatenated into a single `RecordBatch` so that the full row
+    count and all values are preserved.
 
     Returns `{:ok, batch}` or `{:error, message}`.
 
@@ -83,9 +85,19 @@ defmodule ExArrow.DataFrame do
             {:ok, RecordBatch.t()} | {:error, String.t()}
     def to_arrow(df) do
       case ExArrowExplorer.to_record_batches(df) do
-        {:ok, [batch | _]} -> {:ok, batch}
         {:ok, []} -> {:error, "no batches produced from dataframe"}
+        {:ok, [batch]} -> {:ok, batch}
+        {:ok, batches} -> concat_batches(batches)
         {:error, _} = err -> err
+      end
+    end
+
+    defp concat_batches(batches) do
+      refs = Enum.map(batches, &RecordBatch.resource_ref/1)
+
+      case ExArrow.Native.record_batch_concat(refs) do
+        {:ok, ref} -> {:ok, RecordBatch.from_ref(ref)}
+        {:error, msg} -> {:error, msg}
       end
     end
   else

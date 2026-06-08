@@ -571,6 +571,28 @@ pub fn record_batch_from_column_binaries<'a>(
     }
 }
 
+/// Concatenate multiple record batches that share a schema into a single batch.
+///
+/// All input batches must have identical schemas. Returns {:ok, batch_ref} or
+/// {:error, msg}. An empty list returns an error.
+#[rustler::nif(schedule = "DirtyCpu")]
+pub fn record_batch_concat<'a>(
+    env: Env<'a>,
+    batches: Vec<ResourceArc<ExArrowRecordBatch>>,
+) -> Term<'a> {
+    let Some(first) = batches.first() else {
+        return err_encode(env, "cannot concatenate an empty list of batches");
+    };
+
+    let schema = first.batch.schema();
+    let owned: Vec<RecordBatch> = batches.iter().map(|b| b.batch.clone()).collect();
+
+    match arrow::compute::concat_batches(&schema, &owned) {
+        Ok(batch) => ok_encode(env, ResourceArc::new(ExArrowRecordBatch { batch })),
+        Err(e) => err_encode(env, &e.to_string()),
+    }
+}
+
 // ── Column-array builder (shared by single-column and multi-column NIFs) ─────
 
 macro_rules! build_col {

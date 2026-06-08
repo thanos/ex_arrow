@@ -29,7 +29,9 @@ defmodule ExArrow.Schema do
   def fields(%__MODULE__{resource: ref}) do
     ref
     |> Native.schema_fields()
-    |> Enum.map(fn {name, type, nullable} -> %Field{name: name, type: type, nullable: nullable} end)
+    |> Enum.map(fn {name, type, nullable} ->
+      %Field{name: name, type: type, nullable: nullable}
+    end)
   end
 
   @doc """

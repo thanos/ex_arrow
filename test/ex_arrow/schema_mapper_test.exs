@@ -83,7 +83,7 @@ defmodule ExArrow.Schema.MapperTest do
     end
 
     test "returns error for :nil" do
-      assert {:error, msg} = Mapper.explorer_dtype_to_arrow(:nil)
+      assert {:error, msg} = Mapper.explorer_dtype_to_arrow(nil)
       assert msg =~ "unsupported"
     end
   end

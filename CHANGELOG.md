@@ -63,6 +63,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   improved with hierarchy context and usage guidance.
 - **Version** — bumped from 0.5.0 to 0.6.0.
 
+### Fixed
+
+- **`ExArrow.from_dataframe/1` dropped rows for large dataframes** (#200) — when
+  Explorer split a dataframe into multiple Arrow IPC batches, only the first
+  batch was returned, silently discarding the rest.  Batches are now
+  concatenated into a single `RecordBatch` via the new `record_batch_concat`
+  NIF, preserving the full row count and all values.
+- **Rank-2 `ExArrow.from_nx/1` corrupted column order for more than 10 columns**
+  (#200) — columns were named `c0..cN` and reordered lexicographically
+  (`"c10"` before `"c2"`).  Column names are now zero-padded and
+  `ExArrow.to_nx/1` reconstructs columns in a deterministic sorted order, so
+  round-trips are correct for any column count.
+- **Rank-2 `ExArrow.from_nx/1` silently ignored `as: :boolean`** (#200) — the
+  option was dropped for rank-2 tensors, producing UInt8 columns.  The
+  combination now returns a clear error.
+
 ## [0.5.0] - 2026-04-16
 
 ### Added

@@ -80,10 +80,17 @@ defmodule ExArrow do
 
   if @explorer_available do
     @doc """
-    Convert an `Explorer.DataFrame` to an `ExArrow.RecordBatch`.
+    Convert an `Explorer.DataFrame` to a single `ExArrow.RecordBatch`.
 
-    The dataframe is serialised to Arrow IPC and read back as a native batch
-    handle.  Schema, nullability, row count, and values are preserved.
+    The dataframe is serialised to Arrow IPC and read back as native batches.
+    When Explorer splits a large dataframe into multiple IPC batches they are
+    concatenated into one batch, so the full row count and all values are
+    preserved.
+
+    Schema and values are preserved.  Nullability is not guaranteed to survive
+    the Explorer IPC round-trip: Explorer does not distinguish nullable from
+    non-nullable columns, so columns may be reported as nullable regardless of
+    the source data.
 
     Returns `{:ok, batch}` or `{:error, message}`.
 
@@ -101,7 +108,8 @@ defmodule ExArrow do
     Convert an `ExArrow.RecordBatch` or `ExArrow.Stream` to an
     `Explorer.DataFrame`.
 
-    Schema, nullability, row count, and values are preserved.
+    Schema, row count, and values are preserved.  See `from_dataframe/1` for a
+    note on nullability through the Explorer round-trip.
 
     Returns `{:ok, dataframe}` or `{:error, message}`.
 
@@ -116,10 +124,16 @@ defmodule ExArrow do
     def to_dataframe(batch_or_stream), do: ExArrow.DataFrame.from_arrow(batch_or_stream)
   else
     @doc false
-    def from_dataframe(_), do: {:error, "Explorer is not available. Add {:explorer, \"~> 0.11\"} to your mix.exs dependencies."}
+    def from_dataframe(_),
+      do:
+        {:error,
+         "Explorer is not available. Add {:explorer, \"~> 0.11\"} to your mix.exs dependencies."}
 
     @doc false
-    def to_dataframe(_), do: {:error, "Explorer is not available. Add {:explorer, \"~> 0.11\"} to your mix.exs dependencies."}
+    def to_dataframe(_),
+      do:
+        {:error,
+         "Explorer is not available. Add {:explorer, \"~> 0.11\"} to your mix.exs dependencies."}
   end
 
   if @nx_available do
@@ -163,6 +177,9 @@ defmodule ExArrow do
         tuple_size(shape) > 2 ->
           {:error, "tensors of rank > 2 are not supported for Arrow conversion"}
 
+        tuple_size(shape) == 2 and Keyword.get(opts, :as) == :boolean ->
+          {:error, "as: :boolean is not supported for rank-2 tensors"}
+
         tuple_size(shape) == 2 ->
           from_nx_rank2(tensor)
 
@@ -172,17 +189,22 @@ defmodule ExArrow do
       end
     end
 
+    # Column names are zero-padded (c00, c01, ...) so that the lexicographic
+    # ordering used by ExArrow.Nx.from_tensors/1 matches the numeric column
+    # order.  Without padding, "c10" would sort before "c2" and corrupt the
+    # column order for tensors with more than 10 columns.
     defp from_nx_rank2(tensor) do
       {_rows, cols} = Nx.shape(tensor)
       nx_dtype = Nx.type(tensor)
+      width = cols |> Integer.to_string() |> String.length()
 
       column_tensors =
-        for c <- 0..(cols - 1) do
-          slice = Nx.tensor(Nx.to_list(tensor[[.., c]]), type: nx_dtype)
-          {"c#{c}", slice}
+        for c <- 0..(cols - 1), into: %{} do
+          name = "c" <> String.pad_leading(Integer.to_string(c), width, "0")
+          {name, Nx.as_type(tensor[[.., c]], nx_dtype)}
         end
 
-      ExArrow.Nx.from_tensors(Map.new(column_tensors))
+      ExArrow.Nx.from_tensors(column_tensors)
     end
 
     @doc """
@@ -213,10 +235,19 @@ defmodule ExArrow do
       fields = ExArrow.Schema.fields(schema)
 
       case extract_numeric_fields(fields) do
-        {:error, _} = err -> err
-        {:ok, []} -> {:error, "no numeric columns available for Nx conversion"}
+        {:error, _} = err ->
+          err
+
+        {:ok, []} ->
+          {:error, "no numeric columns available for Nx conversion"}
+
         {:ok, numeric_fields} ->
-          columns = Enum.map(numeric_fields, & &1.name)
+          # Sort by column name so multi-column reconstruction is deterministic
+          # and independent of the batch's internal field order (which is not
+          # guaranteed for batches built from a map of tensors).  `from_nx/1`
+          # zero-pads rank-2 column names (c00, c01, ...) so that this
+          # lexicographic sort matches the original numeric column order.
+          columns = numeric_fields |> Enum.map(& &1.name) |> Enum.sort()
           to_nx_from_columns(batch, columns)
       end
     end
@@ -224,19 +255,25 @@ defmodule ExArrow do
     defp extract_numeric_fields(fields) do
       mapper = ExArrow.Schema.Mapper
 
-      Enum.reduce_while(fields, {:ok, []}, fn field, {:ok, acc} ->
-        case mapper.arrow_type_atom_to_dtype(field.type) do
-          {:ok, dtype} ->
-            if mapper.numeric?(dtype) do
-              {:cont, {:ok, acc ++ [field]}}
-            else
-              {:cont, {:ok, acc}}
-            end
+      result =
+        Enum.reduce_while(fields, {:ok, []}, fn field, {:ok, acc} ->
+          case mapper.arrow_type_atom_to_dtype(field.type) do
+            {:ok, dtype} ->
+              if mapper.numeric?(dtype) do
+                {:cont, {:ok, [field | acc]}}
+              else
+                {:cont, {:ok, acc}}
+              end
 
-          {:error, _} ->
-            {:cont, {:ok, acc}}
-        end
-      end)
+            {:error, _} ->
+              {:cont, {:ok, acc}}
+          end
+        end)
+
+      case result do
+        {:ok, fields} -> {:ok, Enum.reverse(fields)}
+        other -> other
+      end
     end
 
     defp to_nx_from_columns(batch, [single_col]) do
@@ -264,9 +301,11 @@ defmodule ExArrow do
     end
   else
     @doc false
-    def from_nx(_tensor, _opts \\ []), do: {:error, "Nx is not available. Add {:nx, \"~> 0.9\"} to your mix.exs dependencies."}
+    def from_nx(_tensor, _opts \\ []),
+      do: {:error, "Nx is not available. Add {:nx, \"~> 0.9\"} to your mix.exs dependencies."}
 
     @doc false
-    def to_nx(_batch), do: {:error, "Nx is not available. Add {:nx, \"~> 0.9\"} to your mix.exs dependencies."}
+    def to_nx(_batch),
+      do: {:error, "Nx is not available. Add {:nx, \"~> 0.9\"} to your mix.exs dependencies."}
   end
 end

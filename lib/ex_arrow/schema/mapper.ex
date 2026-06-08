@@ -38,6 +38,7 @@ defmodule ExArrow.Schema.Mapper do
   The existing targets are grouped by module section below.
   """
 
+  @type nx_dtype :: term()
   @type arrow_dtype :: String.t()
 
   @doc """
@@ -64,7 +65,7 @@ defmodule ExArrow.Schema.Mapper do
   `{:u, 8}` with values 0 and 1.  Arrow Boolean columns map to `{:u, 8}` via
   `arrow_dtype_to_nx/1`.
   """
-  @spec nx_dtype_to_arrow(Nx.dtype()) :: {:ok, arrow_dtype()} | {:error, String.t()}
+  @spec nx_dtype_to_arrow(nx_dtype()) :: {:ok, arrow_dtype()} | {:error, String.t()}
   def nx_dtype_to_arrow({:s, 8}), do: {:ok, "s8"}
   def nx_dtype_to_arrow({:s, 16}), do: {:ok, "s16"}
   def nx_dtype_to_arrow({:s, 32}), do: {:ok, "s32"}
@@ -87,7 +88,7 @@ defmodule ExArrow.Schema.Mapper do
   Boolean columns (`"bool"`) map to `{:u, 8}` because Nx represents booleans
   as unsigned 8-bit integers with values 0 and 1.
   """
-  @spec arrow_dtype_to_nx(arrow_dtype()) :: {:ok, Nx.dtype()} | {:error, String.t()}
+  @spec arrow_dtype_to_nx(arrow_dtype()) :: {:ok, nx_dtype()} | {:error, String.t()}
   def arrow_dtype_to_nx("s8"), do: {:ok, {:s, 8}}
   def arrow_dtype_to_nx("s16"), do: {:ok, {:s, 16}}
   def arrow_dtype_to_nx("s32"), do: {:ok, {:s, 32}}
