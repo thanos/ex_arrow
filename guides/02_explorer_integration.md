@@ -30,14 +30,19 @@ df = Explorer.DataFrame.new(x: [1, 2, 3], y: ["a", "b", "c"])
 - **Column names**: the same names appear on both sides.
 - **Row count**: the number of rows is unchanged.
 - **Values**: integer, float, boolean, and string values are preserved exactly.
-- **Nullability**: null positions in columns survive the round-trip.
+  Null positions survive the round-trip (nil stays nil).
+- **Nullability metadata**: Explorer does not distinguish nullable from
+  non-nullable columns.  All columns may appear as nullable in the Arrow
+  schema regardless of the source data, so nullability *metadata* is not
+  preserved.
 
 ## What is not preserved
 
 Explorer does not distinguish between nullable and non-nullable columns in its
 dtype system.  When an Explorer DataFrame is serialised to Arrow IPC, all
 columns may appear as nullable regardless of whether the source data contained
-nulls.  The actual data values (including nils) are always correct.
+nulls.  The actual data values (including nils) are always correct; only the
+schema's nullable flag may differ from the original.
 
 ## Type mapping
 

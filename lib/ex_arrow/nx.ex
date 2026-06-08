@@ -37,9 +37,12 @@ defmodule ExArrow.Nx do
 
   ### Null handling
 
-  Arrow null positions are treated as zero bytes in the extracted buffer.  If
-  your column contains nulls and you need to distinguish them, inspect the
-  original batch (null support may be added in a future release).
+  Arrow null positions are treated as zero bytes in the extracted buffer.  For
+  numeric columns the null bitmap is irrelevant because the backing buffer holds
+  unspecified bytes at null positions; for Boolean columns the NIF now checks
+  the null bitmap explicitly and writes 0 for null slots.  If you need to
+  distinguish nulls from real zero values, inspect the original batch (full null
+  support may be added in a future release).
 
   ## Public API
 

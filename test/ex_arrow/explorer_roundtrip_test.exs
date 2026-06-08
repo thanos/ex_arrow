@@ -4,6 +4,7 @@ defmodule ExArrow.ExplorerRoundtripTest do
   alias ExArrow.Explorer, as: ExArrowExplorer
 
   @moduletag :explorer
+  @nx_available Code.ensure_loaded?(Nx)
 
   if Code.ensure_loaded?(Explorer.DataFrame) do
     describe "ExArrow.from_dataframe/1 and ExArrow.to_dataframe/1 round-trip" do
@@ -33,6 +34,29 @@ defmodule ExArrow.ExplorerRoundtripTest do
         {:ok, batch} = ExArrow.from_dataframe(df)
         {:ok, df2} = ExArrow.to_dataframe(batch)
         assert Explorer.DataFrame.dtypes(df2) == Explorer.DataFrame.dtypes(df)
+      end
+
+      test "boolean column with nulls round-trips correctly" do
+        df = Explorer.DataFrame.new(flags: [true, nil, false, nil], x: [1, 2, 3, 4])
+        {:ok, batch} = ExArrow.from_dataframe(df)
+        {:ok, df2} = ExArrow.to_dataframe(batch)
+
+        flags_vals = Explorer.Series.to_list(Explorer.DataFrame.pull(df2, "flags"))
+
+        # Nulls come back as nil; non-null booleans are exact
+        assert flags_vals == [true, nil, false, nil]
+      end
+
+      # Regression for issue #201 (L1): boolean NIF extraction previously
+      # ignored the null bitmap, returning arbitrary bits for null slots.
+      # Now null slots always emit 0.
+      test "boolean column with nulls: Nx extraction emits 0 at null positions" do
+        if @nx_available do
+          df = Explorer.DataFrame.new(flags: [true, nil, false], x: [1, 2, 3])
+          {:ok, batch} = ExArrow.from_dataframe(df)
+          {:ok, tensor} = ExArrow.Nx.column_to_tensor(batch, "flags")
+          assert Nx.to_list(tensor) == [1, 0, 0]
+        end
       end
 
       test "preserves boolean column" do

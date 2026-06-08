@@ -78,6 +78,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Rank-2 `ExArrow.from_nx/1` silently ignored `as: :boolean`** (#200) — the
   option was dropped for rank-2 tensors, producing UInt8 columns.  The
   combination now returns a clear error.
+- **Boolean buffer extraction ignored null bitmap** (#201) — `value(i)` on a
+  `BooleanArray` returns an unspecified bit for null slots.  The NIF now checks
+  `is_null(i)` and writes 0 for null positions, matching the documented
+  contract that "null positions are treated as zero bytes."
+- **Nullability documentation contradiction** (#201) — the Explorer integration
+  guide claimed "null positions in columns survive the round-trip" while the
+  top-level docs correctly noted that nullability metadata is not preserved
+  through Explorer.  The guide now explicitly distinguishes data preservation
+  (nil values survive) from schema nullability (which Explorer may relax).
+- **`nx_dtype` typespec was `term()`** (#201) — replaced the overly permissive
+  `@type nx_dtype :: term()` in `ExArrow.Schema.Mapper` with the precise union
+  `{:s | :u | :f, 8 | 16 | 32 | 64}`, restoring meaningful Dialyzer coverage.
 
 ## [0.5.0] - 2026-04-16
 

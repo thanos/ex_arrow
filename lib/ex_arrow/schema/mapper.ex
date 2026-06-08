@@ -38,7 +38,7 @@ defmodule ExArrow.Schema.Mapper do
   The existing targets are grouped by module section below.
   """
 
-  @type nx_dtype :: term()
+  @type nx_dtype :: {:s, 8 | 16 | 32 | 64} | {:u, 8 | 16 | 32 | 64} | {:f, 32 | 64}
   @type arrow_dtype :: String.t()
 
   @doc """
