@@ -187,7 +187,7 @@ Add the dependency:
 
 ```elixir
 def deps do
-  [{:ex_arrow, "~> 0.5.0"}]
+  [{:ex_arrow, "~> 0.6.0"}]
 end
 ```
 
@@ -220,7 +220,7 @@ Mix.install([
 ```
 
 Alternatively, use the published Hex package so the precompiled NIF is used
-and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.5.0"}])`.
+and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.6.0"}])`.
 
 ---
 
@@ -616,6 +616,22 @@ All operations run entirely in native memory. Results are new
 ExArrow handles streaming and transport. Add `{:explorer, "~> 0.11"}` to your
 `mix.exs` to enable the bridge.
 
+**Top-level interchange (v0.6+):**
+
+```elixir
+df = Explorer.DataFrame.new(x: [1, 2, 3], y: ["a", "b", "c"])
+
+# DataFrame → Arrow
+{:ok, batch} = ExArrow.from_dataframe(df)
+
+# Arrow → DataFrame
+{:ok, df2} = ExArrow.to_dataframe(batch)
+
+# DataFrame-oriented API
+{:ok, batch} = ExArrow.DataFrame.to_arrow(df)
+{:ok, df3}   = ExArrow.DataFrame.from_arrow(batch)
+```
+
 **ExArrow → Explorer** (one call, no boilerplate):
 
 ```elixir
@@ -659,6 +675,28 @@ buffers — no list materialisation occurs.
 
 Add `{:nx, "~> 0.9"}` to your `mix.exs` to enable this module.
 
+**Top-level interchange (v0.6+):**
+
+```elixir
+# Tensor → Arrow
+tensor = Nx.tensor([1, 2, 3], type: {:s, 64})
+{:ok, batch} = ExArrow.from_nx(tensor)
+
+# Arrow → Tensor
+{:ok, recovered} = ExArrow.to_nx(batch)
+Nx.to_list(recovered)  #=> [1, 2, 3]
+
+# Rank-2 tensor → multi-column batch → rank-2 tensor
+matrix = Nx.tensor([[1, 2, 3], [4, 5, 6]], type: {:s, 64})
+{:ok, batch} = ExArrow.from_nx(matrix)
+{:ok, back}  = ExArrow.to_nx(batch)
+Nx.shape(back)  #=> {2, 3}
+
+# Boolean tensor
+flags = Nx.tensor([1, 0, 1], type: {:u, 8})
+{:ok, batch} = ExArrow.from_nx(flags, as: :boolean)
+```
+
 **Column to tensor:**
 
 ```elixir
@@ -680,8 +718,9 @@ weights = Nx.tensor([0.1, 0.2, 0.7], type: {:f, 64})
 {:ok, batch} = ExArrow.Nx.from_tensor(weights, "weights")
 ```
 
-Non-numeric columns (strings, booleans, timestamps) are silently skipped by
+Non-numeric columns (strings, timestamps) are silently skipped by
 `to_tensors/1`. Unsupported Nx dtypes (e.g. `:bf16`) return `{:error, ...}`.
+Boolean columns are extracted as `{:u, 8}` tensors.
 
 ---
 
@@ -779,13 +818,15 @@ HTML reports are written to `bench/output/` (gitignored).
 ### Suites
 
 
-| File                  | What it measures                                                               |
-| --------------------- | ------------------------------------------------------------------------------ |
-| `ipc_read_bench.exs`  | Stream handle vs materialise — BEAM memory saved by keeping data native        |
-| `ipc_write_bench.exs` | IPC serialisation vs `:erlang.term_to_binary` — columnar vs row-oriented write |
-| `flight_bench.exs`    | Flight doput / doget / roundtrip latency with in-process server                |
-| `adbc_bench.exs`      | Stream handle vs schema peek vs full collect                                   |
-| `pipeline_bench.exs`  | End-to-end: IPC file on disk to Flight doput without materialising in BEAM     |
+| File                       | What it measures                                                               |
+| -------------------------- | ------------------------------------------------------------------------------ |
+| `ipc_read_bench.exs`       | Stream handle vs materialise — BEAM memory saved by keeping data native        |
+| `ipc_write_bench.exs`      | IPC serialisation vs `:erlang.term_to_binary` — columnar vs row-oriented write |
+| `flight_bench.exs`         | Flight doput / doget / roundtrip latency with in-process server                |
+| `adbc_bench.exs`           | Stream handle vs schema peek vs full collect                                   |
+| `pipeline_bench.exs`       | End-to-end: IPC file on disk to Flight doput without materialising in BEAM     |
+| `explorer_arrow_bench.exs` | Explorer <-> Arrow interchange at 1K/100K/1M rows                             |
+| `nx_arrow_bench.exs`       | Nx <-> Arrow interchange at 1K/100K/1M rows (rank-1 and rank-2)              |
 
 
 ### Published results
@@ -800,6 +841,10 @@ The CI workflow posts a PR alert comment when any scenario regresses more than
 
 ## Documentation
 
+- [Arrow for Elixir Developers](guides/01_arrow_for_elixir_developers.md) — hierarchy, types, memory model
+- [Explorer Integration](guides/02_explorer_integration.md) — from_dataframe, to_dataframe, type mapping, limitations
+- [Nx Integration](guides/03_nx_integration.md) — from_nx, to_nx, boolean tensors, rank-2
+- [Arrow Ecosystem](guides/04_arrow_ecosystem.md) — how ExArrow complements Explorer, Nx, ADBC, Flight, Parquet, ExZarr
 - [Memory model](docs/memory_model.md) — handles, copying rules, NIF scheduling
 - [IPC guide](docs/ipc_guide.md) — stream vs file, types, limitations
 - [Parquet guide](docs/parquet_guide.md) — read/write Parquet, streaming, comparison with IPC
@@ -884,6 +929,25 @@ welcome for any of them.
   `:grpc_status` integer, covering 11 error categories.
 - **Mox-compatible `ClientBehaviour`** — full test isolation without a live server.
 - **Explorer and Nx integration** — `Result.to_dataframe/1`, `Result.to_tensor/2`.
+
+### Shipped (v0.6.0)
+
+- **Top-level Explorer interchange** — `ExArrow.from_dataframe/1`,
+  `to_dataframe/1`, and `ExArrow.DataFrame.from_arrow/1`, `to_arrow/1`.
+- **Top-level Nx interchange** — `ExArrow.from_nx/1`, `to_nx/1` with rank-1
+  and rank-2 support for u8, s64, f32, f64, and boolean.
+- **`ExArrow.Schema.Mapper`** — single authority for Arrow <-> Explorer/Nx type
+  mapping, extensible for future ExZarr and Dataset support.
+- **Field nullability** — `ExArrow.Field` includes `nullable`; NIF returns the
+  flag; schema round-trips preserve nullability.
+- **Boolean tensor support** — `from_nx/1` with `as: :boolean`; `column_to_tensor/2`
+  and `to_tensors/1` handle Boolean columns.
+- **RecordBatch and Table improvements** — `num_columns/1`, `column_names/1`,
+  `Table.from_batches/1` replaces stub.
+- **Benchee benchmarks** — Explorer <-> Arrow and Nx <-> Arrow at 1K/100K/1M.
+- **Educational guides** — `guides/01..04` covering Arrow concepts, Explorer,
+  Nx, and the ecosystem.
+- **Property tests** — StreamData-based round-trip fidelity tests.
 
 ### Longer-term
 

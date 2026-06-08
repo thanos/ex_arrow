@@ -1,7 +1,7 @@
 defmodule ExArrow.MixProject do
   use Mix.Project
 
-  @version "0.5.0"
+  @version "0.6.0"
   @source_url "https://github.com/thanos/ex_arrow"
 
   def project do
@@ -99,6 +99,10 @@ defmodule ExArrow.MixProject do
       source_url: @source_url,
       source_ref: "v#{@version}",
       extras: [
+        "guides/01_arrow_for_elixir_developers.md",
+        "guides/02_explorer_integration.md",
+        "guides/03_nx_integration.md",
+        "guides/04_arrow_ecosystem.md",
         "docs/overview.md",
         "docs/memory_model.md",
         "docs/ipc_guide.md",
@@ -112,6 +116,7 @@ defmodule ExArrow.MixProject do
         "docs/benchmarks.md"
       ],
       groups_for_modules: [
+        "Data interchange": [ExArrow.DataFrame, ExArrow.Schema.Mapper],
         IPC: [ExArrow.IPC.Reader, ExArrow.IPC.Writer, ExArrow.IPC.File],
         Parquet: [ExArrow.Parquet.Reader, ExArrow.Parquet.Writer],
         "Compute kernels": [ExArrow.Compute],
@@ -138,7 +143,7 @@ defmodule ExArrow.MixProject do
         ],
         "C Data Interface": [ExArrow.CDI],
         "Optional bridges": [ExArrow.Explorer, ExArrow.Nx],
-        "Core types": [ExArrow.Stream, ExArrow.RecordBatch, ExArrow.Schema, ExArrow.Field]
+        "Core types": [ExArrow.Stream, ExArrow.RecordBatch, ExArrow.Schema, ExArrow.Field, ExArrow.Array, ExArrow.Table]
       ]
     ]
   end

@@ -3,7 +3,7 @@
 use std::io::Cursor;
 use std::sync::Arc;
 
-use arrow::array::{Int64Array, StringArray};
+use arrow::array::{BooleanArray, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use arrow_array::types::{
     Float32Type, Float64Type, Int16Type, Int32Type, Int64Type, Int8Type, UInt16Type, UInt32Type,
@@ -125,7 +125,9 @@ pub fn ipc_reader_from_file<'a>(env: Env<'a>, path: String) -> Term<'a> {
     ok_encode(env, ResourceArc::new(stream))
 }
 
-/// Return list of fields for a schema: [{name, type_atom}, ...]. type_atom is :int64, :float64, :utf8, :binary, :boolean, :null, etc.
+/// Return list of fields for a schema: [{name, type_atom, nullable}, ...].
+/// type_atom is :int64, :float64, :utf8, :binary, :boolean, :null, etc.
+/// nullable is a boolean indicating whether the field allows null values.
 #[rustler::nif]
 pub fn schema_fields<'a>(env: Env<'a>, schema: ResourceArc<ExArrowSchema>) -> Term<'a> {
     let fields: Vec<Term> = schema
@@ -136,6 +138,7 @@ pub fn schema_fields<'a>(env: Env<'a>, schema: ResourceArc<ExArrowSchema>) -> Te
             (
                 f.name().encode(env),
                 data_type_to_atom(env, f.data_type()).encode(env),
+                f.is_nullable().encode(env),
             )
                 .encode(env)
         })
@@ -147,7 +150,16 @@ fn data_type_to_atom(env: Env, dt: &arrow_schema::DataType) -> rustler::types::a
     let s = match dt {
         arrow_schema::DataType::Null => "null",
         arrow_schema::DataType::Boolean => "boolean",
+        arrow_schema::DataType::Int8 => "int8",
+        arrow_schema::DataType::Int16 => "int16",
+        arrow_schema::DataType::Int32 => "int32",
         arrow_schema::DataType::Int64 => "int64",
+        arrow_schema::DataType::UInt8 => "uint8",
+        arrow_schema::DataType::UInt16 => "uint16",
+        arrow_schema::DataType::UInt32 => "uint32",
+        arrow_schema::DataType::UInt64 => "uint64",
+        arrow_schema::DataType::Float16 => "float16",
+        arrow_schema::DataType::Float32 => "float32",
         arrow_schema::DataType::Float64 => "float64",
         arrow_schema::DataType::Utf8 => "utf8",
         arrow_schema::DataType::LargeUtf8 => "large_utf8",
@@ -157,6 +169,11 @@ fn data_type_to_atom(env: Env, dt: &arrow_schema::DataType) -> rustler::types::a
         arrow_schema::DataType::LargeList(_) => "large_list",
         arrow_schema::DataType::Struct(_) => "struct",
         arrow_schema::DataType::Timestamp(_, _) => "timestamp",
+        arrow_schema::DataType::Date32 => "date32",
+        arrow_schema::DataType::Date64 => "date64",
+        arrow_schema::DataType::Time32(_) => "time32",
+        arrow_schema::DataType::Time64(_) => "time64",
+        arrow_schema::DataType::Duration(_) => "duration",
         arrow_schema::DataType::Decimal128(_, _) => "decimal128",
         arrow_schema::DataType::Decimal256(_, _) => "decimal256",
         arrow_schema::DataType::Dictionary(_, _) => "dictionary",
@@ -461,6 +478,26 @@ fn extract_primitive_buffer<'a>(env: Env<'a>, array: &ArrayRef) -> Term<'a> {
         DataType::UInt64 => primitive_buffer!(env, array, UInt64Type, "u64"),
         DataType::Float32 => primitive_buffer!(env, array, Float32Type, "f32"),
         DataType::Float64 => primitive_buffer!(env, array, Float64Type, "f64"),
+        DataType::Boolean => {
+            let bool_arr: &BooleanArray = match array.as_any().downcast_ref() {
+                Some(a) => a,
+                None => return err_encode(env, "internal: boolean downcast failed"),
+            };
+            let len = bool_arr.len();
+            let mut byte_buf = vec![0u8; len];
+            for i in 0..len {
+                if bool_arr.value(i) {
+                    byte_buf[i] = 1;
+                }
+            }
+            let mut owned = match rustler::OwnedBinary::new(len) {
+                Some(b) => b,
+                None => return err_encode(env, "binary alloc"),
+            };
+            owned.as_mut_slice().copy_from_slice(&byte_buf);
+            let binary = rustler::Binary::from_owned(owned, env);
+            ok_encode(env, (binary, "bool", len as u64))
+        }
         dt => err_encode(env, &format!("unsupported column type for Nx: {:?}", dt)),
     }
 }
@@ -573,6 +610,18 @@ fn build_column_array(bytes: &[u8], dtype_str: &str, length: usize) -> Result<(D
         "u64" => build_col!(bytes, length, u64, DataType::UInt64),
         "f32" => build_col!(bytes, length, f32, DataType::Float32),
         "f64" => build_col!(bytes, length, f64, DataType::Float64),
+        "bool" => {
+            if bytes.len() != length {
+                return Err(format!(
+                    "binary length mismatch for bool: expected {} bytes, got {}",
+                    length,
+                    bytes.len()
+                ));
+            }
+            let bool_vals: Vec<bool> = bytes.iter().map(|&b| b != 0).collect();
+            let array: ArrayRef = Arc::new(BooleanArray::from(bool_vals));
+            (DataType::Boolean, array)
+        }
         other => return Err(format!("unknown dtype '{}' for column creation", other)),
     };
     Ok(pair)

@@ -2,10 +2,10 @@ defmodule ExArrow.Nx do
   @moduledoc """
   Bridge between ExArrow and Nx tensors.
 
-  Converts numeric Arrow columns to `Nx.Tensor` values (and back) by copying
-  the raw byte buffer once from native Arrow memory into an Elixir binary, then
-  handing it directly to `Nx.from_binary/2`.  No intermediate list
-  materialisation occurs.
+  Converts numeric and boolean Arrow columns to `Nx.Tensor` values (and back)
+  by copying the raw byte buffer once from native Arrow memory into an Elixir
+  binary, then handing it directly to `Nx.from_binary/2`.  No intermediate
+  list materialisation occurs.
 
   Requires `{:nx, "~> 0.9"}` in your `mix.exs` dependencies.  When Nx is
   absent every function returns `{:error, "Nx is not available..."}`.
@@ -24,10 +24,16 @@ defmodule ExArrow.Nx do
   | UInt64            | `{:u, 64}`   |
   | Float32           | `{:f, 32}`   |
   | Float64           | `{:f, 64}`   |
+  | Boolean           | `{:u, 8}`    |
 
-  Columns of other types (Utf8, Boolean, Timestamp, …) are not supported for
-  direct buffer extraction and return `{:error, "unsupported column type…"}`.
-  `to_tensors/1` silently skips non-numeric columns.
+  Arrow Boolean columns are materialised as one byte per element (0 or 1) and
+  converted to an `{:u, 8}` Nx tensor.  The reverse path accepts `{:u, 8}`
+  tensors and builds an Arrow Boolean column when the `as: :boolean` option is
+  passed to `from_tensor/3`.
+
+  Columns of other types (Utf8, Timestamp, etc.) are not supported for direct
+  buffer extraction and return `{:error, "unsupported column type..."}`.
+  `to_tensors/1` silently skips unsupported columns.
 
   ### Null handling
 
@@ -39,8 +45,8 @@ defmodule ExArrow.Nx do
 
   | Function | Direction | Description |
   |----------|-----------|-------------|
-  | `column_to_tensor/2` | Arrow → Nx | Extract one named numeric column as an `Nx.Tensor` |
-  | `to_tensors/1` | Arrow → Nx | Extract all numeric columns as `%{name => Nx.Tensor}` |
+  | `column_to_tensor/2` | Arrow → Nx | Extract one named numeric/boolean column as an `Nx.Tensor` |
+  | `to_tensors/1` | Arrow → Nx | Extract all numeric/boolean columns as `%{name => Nx.Tensor}` |
   | `from_tensor/2` | Nx → Arrow | Single tensor → single-column `RecordBatch` |
   | `from_tensors/1` | Nx → Arrow | Map of tensors → multi-column `RecordBatch` (single NIF call) |
 
@@ -63,16 +69,20 @@ defmodule ExArrow.Nx do
   alias ExArrow.Native
   alias ExArrow.RecordBatch
   alias ExArrow.Schema
+  alias ExArrow.Schema.Mapper
 
   @nx_available Code.ensure_loaded?(Nx)
 
   if @nx_available do
     @doc """
-    Convert a named numeric column from `batch` to an `Nx.Tensor`.
+    Convert a named numeric or boolean column from `batch` to an `Nx.Tensor`.
 
     The column's raw byte buffer is copied once from native Arrow memory into an
     Elixir binary, then passed to `Nx.from_binary/2`.  No list materialisation
     occurs.
+
+    Boolean columns are extracted as one byte per element (0 or 1) and returned
+    as an `{:u, 8}` tensor.
 
     Returns `{:ok, tensor}` or `{:error, message}`.
 
@@ -86,6 +96,10 @@ defmodule ExArrow.Nx do
         # Extract a float64 column and compute the mean
         {:ok, prices} = ExArrow.Nx.column_to_tensor(batch, "price")
         Nx.mean(prices) |> Nx.to_number()
+
+        # Extract a boolean column
+        {:ok, flags} = ExArrow.Nx.column_to_tensor(batch, "active")
+        Nx.type(flags)  #=> {:u, 8}
 
         # Non-numeric column returns an error
         {:error, msg} = ExArrow.Nx.column_to_tensor(batch, "name")
@@ -101,7 +115,7 @@ defmodule ExArrow.Nx do
 
       case Native.record_batch_column_buffer(ref, col_name) do
         {:ok, {binary, dtype_str, _length}} ->
-          case parse_nx_dtype(dtype_str) do
+          case Mapper.arrow_dtype_to_nx(dtype_str) do
             {:ok, nx_dtype} -> {:ok, Nx.from_binary(binary, nx_dtype)}
             {:error, msg} -> {:error, msg}
           end
@@ -112,9 +126,10 @@ defmodule ExArrow.Nx do
     end
 
     @doc """
-    Convert all numeric columns from `batch` to a map of `Nx.Tensor` values.
+    Convert all numeric and boolean columns from `batch` to a map of
+    `Nx.Tensor` values.
 
-    Non-numeric columns (Utf8, Boolean, Timestamp, etc.) are silently skipped.
+    Non-numeric columns (Utf8, Timestamp, etc.) are silently skipped.
 
     Returns `{:ok, %{column_name => tensor}}` or `{:error, message}`.
 
@@ -123,7 +138,7 @@ defmodule ExArrow.Nx do
         {:ok, tensors} = ExArrow.Nx.to_tensors(batch)
         # tensors is a map: %{"price" => #Nx.Tensor<...>, "qty" => #Nx.Tensor<...>}
         tensors["price"] |> Nx.sort()
-        Map.keys(tensors)  # only numeric columns are present
+        Map.keys(tensors)  # only numeric/boolean columns are present
     """
     @spec to_tensors(RecordBatch.t()) ::
             {:ok, %{String.t() => Nx.Tensor.t()}} | {:error, String.t()}
@@ -136,7 +151,7 @@ defmodule ExArrow.Nx do
           {:ok, tensor} ->
             {:cont, {:ok, Map.put(acc, field.name, tensor)}}
 
-          {:error, "unsupported column type" <> _} ->
+          {:error, "unsupported" <> _} ->
             {:cont, {:ok, acc}}
 
           {:error, msg} ->
@@ -154,7 +169,12 @@ defmodule ExArrow.Nx do
 
     Supported Nx dtypes: `{:s, 8|16|32|64}`, `{:u, 8|16|32|64}`,
     `{:f, 32|64}`.  Other dtypes (e.g. `{:bf, 16}`, `{:c, 64}`) return
-    `{:error, "unsupported Nx dtype…"}`.
+    `{:error, "unsupported Nx dtype..."}`.
+
+    ## Options
+
+    - `:as` — when set to `:boolean`, the column is created as an Arrow Boolean
+      array instead of UInt8.  Only valid when the tensor dtype is `{:u, 8}`.
 
     Returns `{:ok, batch}` or `{:error, message}`.
 
@@ -171,25 +191,42 @@ defmodule ExArrow.Nx do
         {:ok, recovered} = ExArrow.Nx.column_to_tensor(batch, "vals")
         Nx.to_list(recovered)  #=> [10, 20, 30]
 
+        # Boolean tensor → Arrow Boolean column
+        flags = Nx.tensor([1, 0, 1], type: {:u, 8})
+        {:ok, batch} = ExArrow.Nx.from_tensor(flags, "active", as: :boolean)
+
         # Unsupported dtype
         {:error, msg} = ExArrow.Nx.from_tensor(Nx.tensor([1, 2], type: {:bf, 16}), "x")
     """
-    @spec from_tensor(Nx.Tensor.t(), String.t()) ::
+    @spec from_tensor(Nx.Tensor.t(), String.t(), keyword()) ::
             {:ok, RecordBatch.t()} | {:error, String.t()}
-    def from_tensor(tensor, col_name) when is_binary(col_name) do
+    def from_tensor(tensor, col_name, opts \\ []) when is_binary(col_name) do
       nx_dtype = Nx.type(tensor)
       binary = Nx.to_binary(tensor)
       length = Nx.size(tensor)
+      as = Keyword.get(opts, :as, :numeric)
 
-      case nx_dtype_to_arrow(nx_dtype) do
-        {:ok, dtype_str} ->
-          case Native.record_batch_from_column_binary(col_name, binary, dtype_str, length) do
+      cond do
+        as == :boolean and nx_dtype != {:u, 8} ->
+          {:error, "as: :boolean is only valid for {:u, 8} tensors, got: #{inspect(nx_dtype)}"}
+
+        as == :boolean ->
+          case Native.record_batch_from_column_binary(col_name, binary, "bool", length) do
             {:ok, ref} -> {:ok, RecordBatch.from_ref(ref)}
             {:error, msg} -> {:error, msg}
           end
 
-        {:error, msg} ->
-          {:error, msg}
+        true ->
+          case Mapper.nx_dtype_to_arrow(nx_dtype) do
+            {:ok, dtype_str} ->
+              case Native.record_batch_from_column_binary(col_name, binary, dtype_str, length) do
+                {:ok, ref} -> {:ok, RecordBatch.from_ref(ref)}
+                {:error, msg} -> {:error, msg}
+              end
+
+            {:error, msg} ->
+              {:error, msg}
+          end
       end
     end
 
@@ -246,7 +283,7 @@ defmodule ExArrow.Nx do
 
     defp collect_one_column(name, tensor, ns, ds, bs, ls) do
       if is_binary(name) do
-        case nx_dtype_to_arrow(Nx.type(tensor)) do
+        case Mapper.nx_dtype_to_arrow(Nx.type(tensor)) do
           {:ok, dtype_str} ->
             {:cont,
              {:ok, [name | ns], [dtype_str | ds], [Nx.to_binary(tensor) | bs],
@@ -280,34 +317,6 @@ defmodule ExArrow.Nx do
         end
       end
     end
-
-    # ── dtype helpers ────────────────────────────────────────────────────────
-
-    defp parse_nx_dtype("s8"), do: {:ok, {:s, 8}}
-    defp parse_nx_dtype("s16"), do: {:ok, {:s, 16}}
-    defp parse_nx_dtype("s32"), do: {:ok, {:s, 32}}
-    defp parse_nx_dtype("s64"), do: {:ok, {:s, 64}}
-    defp parse_nx_dtype("u8"), do: {:ok, {:u, 8}}
-    defp parse_nx_dtype("u16"), do: {:ok, {:u, 16}}
-    defp parse_nx_dtype("u32"), do: {:ok, {:u, 32}}
-    defp parse_nx_dtype("u64"), do: {:ok, {:u, 64}}
-    defp parse_nx_dtype("f32"), do: {:ok, {:f, 32}}
-    defp parse_nx_dtype("f64"), do: {:ok, {:f, 64}}
-    defp parse_nx_dtype(other), do: {:error, "unknown Arrow dtype string: #{other}"}
-
-    defp nx_dtype_to_arrow({:s, 8}), do: {:ok, "s8"}
-    defp nx_dtype_to_arrow({:s, 16}), do: {:ok, "s16"}
-    defp nx_dtype_to_arrow({:s, 32}), do: {:ok, "s32"}
-    defp nx_dtype_to_arrow({:s, 64}), do: {:ok, "s64"}
-    defp nx_dtype_to_arrow({:u, 8}), do: {:ok, "u8"}
-    defp nx_dtype_to_arrow({:u, 16}), do: {:ok, "u16"}
-    defp nx_dtype_to_arrow({:u, 32}), do: {:ok, "u32"}
-    defp nx_dtype_to_arrow({:u, 64}), do: {:ok, "u64"}
-    defp nx_dtype_to_arrow({:f, 32}), do: {:ok, "f32"}
-    defp nx_dtype_to_arrow({:f, 64}), do: {:ok, "f64"}
-
-    defp nx_dtype_to_arrow(dt),
-      do: {:error, "unsupported Nx dtype for Arrow conversion: #{inspect(dt)}"}
   else
     @doc false
     def column_to_tensor(_batch, _col_name), do: {:error, nx_missing_message()}
@@ -316,7 +325,7 @@ defmodule ExArrow.Nx do
     def to_tensors(_batch), do: {:error, nx_missing_message()}
 
     @doc false
-    def from_tensor(_tensor, _col_name), do: {:error, nx_missing_message()}
+    def from_tensor(_tensor, _col_name, _opts \\ []), do: {:error, nx_missing_message()}
 
     @doc false
     def from_tensors(_tensors), do: {:error, nx_missing_message()}

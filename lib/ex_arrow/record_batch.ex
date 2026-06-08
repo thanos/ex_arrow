@@ -2,8 +2,18 @@ defmodule ExArrow.RecordBatch do
   @moduledoc """
   Arrow record batch handle (opaque reference to native record batch).
 
-  A batch is a collection of arrays (columns) with a shared row count.
-  Data stays in native memory; accessors return handles or small metadata.
+  A batch is a collection of column arrays with a shared schema and row count.
+  It sits between `ExArrow.Array` (one column) and `ExArrow.Table` / 
+  `ExArrow.Stream` (multiple batches).  Data stays in native memory; accessors
+  return handles or small metadata.
+
+  ## Position in the hierarchy
+
+      Schema ── Field (metadata)
+                  │
+      RecordBatch ── Array (one per column)
+                        │
+      Table / Stream ── RecordBatch (one or more)
   """
   alias ExArrow.Native
   alias ExArrow.Schema
@@ -33,5 +43,40 @@ defmodule ExArrow.RecordBatch do
   @spec num_rows(t()) :: non_neg_integer()
   def num_rows(%__MODULE__{resource: ref}) do
     Native.record_batch_num_rows(ref)
+  end
+
+  @doc """
+  Returns the number of columns in this batch.
+
+  Derived from the batch's schema — no separate NIF call is needed.
+
+  ## Examples
+
+      {:ok, ipc_bin} = ExArrow.Native.ipc_test_fixture_binary()
+      {:ok, stream}  = ExArrow.IPC.Reader.from_binary(ipc_bin)
+      batch = ExArrow.Stream.next(stream)
+      ExArrow.RecordBatch.num_columns(batch)  #=> 2
+  """
+  @spec num_columns(t()) :: non_neg_integer()
+  def num_columns(%__MODULE__{} = batch) do
+    batch |> schema() |> Schema.fields() |> length()
+  end
+
+  @doc """
+  Returns the column names of this batch.
+
+  Derived from the batch's schema.  Equivalent to
+  `ExArrow.Schema.field_names(ExArrow.RecordBatch.schema(batch))`.
+
+  ## Examples
+
+      {:ok, ipc_bin} = ExArrow.Native.ipc_test_fixture_binary()
+      {:ok, stream}  = ExArrow.IPC.Reader.from_binary(ipc_bin)
+      batch = ExArrow.Stream.next(stream)
+      ExArrow.RecordBatch.column_names(batch)  #=> ["id", "name"]
+  """
+  @spec column_names(t()) :: [String.t()]
+  def column_names(%__MODULE__{} = batch) do
+    batch |> schema() |> Schema.field_names()
   end
 end

@@ -5,6 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-06-08
+
+### Added
+
+- **Top-level Explorer interchange API** — `ExArrow.from_dataframe/1` and
+  `ExArrow.to_dataframe/1` convert between Explorer DataFrames and Arrow
+  RecordBatches with preserved schema, nullability, row count, and values.
+- **`ExArrow.DataFrame`** — `from_arrow/1` and `to_arrow/1` provide a
+  DataFrame-oriented naming convention.  `from_arrow/1` accepts both
+  `ExArrow.RecordBatch` and `ExArrow.Stream`.
+- **Top-level Nx interchange API** — `ExArrow.from_nx/1` and `ExArrow.to_nx/1`
+  convert between Nx tensors and Arrow RecordBatches.  Supports rank-1 and
+  rank-2 tensors over u8, s64, f32, f64, and boolean dtypes.  Rank-2 tensors
+  map to N-column batches (`c0..c{N-1}`) and round-trip with shape, dtype, and
+  value fidelity.
+- **`ExArrow.Schema.Mapper`** — single authority for bidirectional type mapping
+  between Arrow dtype strings and Explorer/Nx type systems.  Extensible for
+  future ExZarr and Dataset support.
+- **Field nullability** — `ExArrow.Field` now includes a `nullable` field.  The
+  `schema_fields` NIF returns `{name, type_atom, nullable}` tuples.  Schema
+  round-trips preserve nullability information.
+- **Boolean tensor support** — `ExArrow.Nx.from_tensor/3` accepts `as:
+  :boolean` to create Arrow Boolean columns.  `column_to_tensor/2` and
+  `to_tensors/1` now extract Boolean columns as `{:u, 8}` Nx tensors.
+- **`ExArrow.RecordBatch.num_columns/1`** and **`column_names/1`** — convenient
+  schema-derived accessors.
+- **`ExArrow.Table.from_batches/1`** — create a Table from a list of
+  RecordBatches.  Replaces the previous stub implementation with a real
+  Elixir-side aggregation providing `schema/1`, `num_rows/1`, and `batches/1`.
+- **Benchee benchmarks** — `bench/explorer_arrow_bench.exs` and
+  `bench/nx_arrow_bench.exs` measure Explorer and Nx interchange throughput at
+  1K, 100K, and 1M rows.
+- **Educational guides** — `guides/01_arrow_for_elixir_developers.md`,
+  `guides/02_explorer_integration.md`, `guides/03_nx_integration.md`,
+  `guides/04_arrow_ecosystem.md`.
+- **Property tests** — StreamData-based property tests for Explorer and Nx
+  round-trip fidelity.
+- **Arrow type coverage** — the `data_type_to_atom` NIF function now covers the
+  full integer/float range (Int8, Int16, Int32, UInt8, UInt16, UInt32, UInt64,
+  Float16, Float32) and additional types (Date32, Date64, Time32, Time64,
+  Duration).
+
+### Changed
+
+- **`ExArrow.Nx` delegates to `ExArrow.Schema.Mapper`** — dtype mapping logic
+  that was inlined in the Nx module now calls the Mapper, eliminating a
+  duplicated source of truth.  Public API unchanged.
+- **`ExArrow.Nx.from_tensor/3`** — now accepts an optional `opts` keyword list
+  (was arity 2).  The `as: :boolean` option creates Arrow Boolean columns.
+  Calling `from_tensor/2` (no opts) still works.
+- **`ExArrow.Table`** — replaced stub implementation (returning `nil`/`0`) with
+  a real Elixir-side aggregation struct holding `schema` and `batches`.
+- **`ExArrow` moduledoc** — expanded with Arrow hierarchy explanation, data
+  interchange API outline, and Schema.Mapper reference.
+- **`ExArrow.Array`, `ExArrow.RecordBatch`, `ExArrow.Table` moduledocs** —
+  improved with hierarchy context and usage guidance.
+- **Version** — bumped from 0.5.0 to 0.6.0.
+
 ## [0.5.0] - 2026-04-16
 
 ### Added
