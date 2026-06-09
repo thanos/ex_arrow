@@ -15,7 +15,9 @@ scripts = [
   "bench/ipc_write_bench.exs",
   "bench/flight_bench.exs",
   "bench/adbc_bench.exs",
-  "bench/pipeline_bench.exs"
+  "bench/pipeline_bench.exs",
+  "bench/explorer_arrow_bench.exs",
+  "bench/nx_arrow_bench.exs"
 ]
 
 for script <- scripts do

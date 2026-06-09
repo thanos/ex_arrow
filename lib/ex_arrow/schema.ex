@@ -2,7 +2,7 @@ defmodule ExArrow.Schema do
   @moduledoc """
   Arrow schema handle (opaque reference to native schema).
 
-  Holds metadata (field names and types) for a table or record batch.
+  Holds metadata (field names, types, and nullability) for a table or record batch.
   Data lives in native memory; this module provides a stable handle and
   Elixir-friendly accessors for small metadata.
   """
@@ -22,12 +22,16 @@ defmodule ExArrow.Schema do
 
   @doc """
   Returns the list of fields in the schema (Elixir structs).
+
+  Each field includes `name`, `type`, and `nullable`.
   """
   @spec fields(t()) :: [Field.t()]
   def fields(%__MODULE__{resource: ref}) do
     ref
     |> Native.schema_fields()
-    |> Enum.map(fn {name, type} -> %Field{name: name, type: type} end)
+    |> Enum.map(fn {name, type, nullable} ->
+      %Field{name: name, type: type, nullable: nullable}
+    end)
   end
 
   @doc """

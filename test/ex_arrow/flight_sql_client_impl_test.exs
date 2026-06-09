@@ -1,6 +1,8 @@
 defmodule ExArrow.FlightSQL.ClientImplTest do
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias ExArrow.FlightSQL.{Client, ClientImpl, Error}
 
   setup do
@@ -83,11 +85,16 @@ defmodule ExArrow.FlightSQL.ClientImplTest do
         ExArrow.FlightSQL.TestNativeFallbackError
       )
 
-      assert {:error, %Error{code: :transport_error, message: msg}} =
-               ClientImpl.connect("localhost:32010", [])
+      log =
+        capture_log(fn ->
+          assert {:error, %Error{code: :transport_error, message: msg}} =
+                   ClientImpl.connect("localhost:32010", [])
 
-      # The fallback clause calls inspect/1 on the unrecognised term.
-      assert msg =~ "unexpected_atom"
+          # The fallback clause calls inspect/1 on the unrecognised term.
+          assert msg =~ "unexpected_atom"
+        end)
+
+      assert log =~ "unexpected NIF error shape"
     end
   end
 

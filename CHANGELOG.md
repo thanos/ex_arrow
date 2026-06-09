@@ -5,6 +5,123 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-06-08
+
+### Added
+
+- **Top-level Explorer interchange API** — `ExArrow.from_dataframe/1` and
+  `ExArrow.to_dataframe/1` convert between Explorer DataFrames and Arrow
+  RecordBatches with preserved column names, row count, and values. Arrow value
+  types are preserved; nullability metadata is not guaranteed through Explorer.
+- **`ExArrow.DataFrame`** — `from_arrow/1` and `to_arrow/1` provide a
+  DataFrame-oriented naming convention.  `from_arrow/1` accepts both
+  `ExArrow.RecordBatch` and `ExArrow.Stream`.
+- **Top-level Nx interchange API** — `ExArrow.from_nx/1` and `ExArrow.to_nx/1`
+  convert between Nx tensors and Arrow RecordBatches.  Supports rank-1 and
+  rank-2 tensors over u8, s64, f32, f64, and boolean dtypes.  Rank-2 tensors
+  map to N-column batches (`c0..c{N-1}`) and round-trip with shape, dtype, and
+  value fidelity.
+- **`ExArrow.Schema.Mapper`** — single authority for bidirectional type mapping
+  between Arrow dtype strings and Explorer/Nx type systems.  Extensible for
+  future ExZarr and Dataset support.
+- **Field nullability** — `ExArrow.Field` now includes a `nullable` field.  The
+  `schema_fields` NIF returns `{name, type_atom, nullable}` tuples.  Schema
+  round-trips preserve nullability information for Arrow-native data. Explorer
+  IPC round-trips may relax nullable flags.
+- **Boolean tensor support** — `ExArrow.Nx.from_tensor/3` accepts `as:
+  :boolean` to create Arrow Boolean columns.  `column_to_tensor/2` and
+  `to_tensors/1` now extract Boolean columns as `{:u, 8}` Nx tensors.
+- **`ExArrow.RecordBatch.num_columns/1`** and **`column_names/1`** — convenient
+  schema-derived accessors.
+- **`ExArrow.Table.from_batches/1`** — create a Table from a list of
+  RecordBatches.  Replaces the previous stub implementation with a real
+  Elixir-side aggregation providing `schema/1`, `num_rows/1`, and `batches/1`.
+- **Benchee benchmarks** — `bench/explorer_arrow_bench.exs` and
+  `bench/nx_arrow_bench.exs` measure Explorer and Nx interchange throughput at
+  1K, 100K, and 1M rows.
+- **Educational guides** — `guides/01_arrow_for_elixir_developers.md`,
+  `guides/02_explorer_integration.md`, `guides/03_nx_integration.md`,
+  `guides/04_arrow_ecosystem.md`.
+- **Property tests** — StreamData-based property tests for Explorer and Nx
+  round-trip fidelity.
+- **Arrow type coverage** — the `data_type_to_atom` NIF function now covers the
+  full integer/float range (Int8, Int16, Int32, UInt8, UInt16, UInt32, UInt64,
+  Float16, Float32) and additional types (Date32, Date64, Time32, Time64,
+  Duration).
+
+### Changed
+
+- **`ExArrow.Nx` delegates to `ExArrow.Schema.Mapper`** — dtype mapping logic
+  that was inlined in the Nx module now calls the Mapper, eliminating a
+  duplicated source of truth.  Public API unchanged.
+- **`ExArrow.Nx.from_tensor/3`** — now accepts an optional `opts` keyword list
+  (was arity 2).  The `as: :boolean` option creates Arrow Boolean columns.
+  Calling `from_tensor/2` (no opts) still works.
+- **`ExArrow.Table`** — replaced stub implementation (returning `nil`/`0`) with
+  a real Elixir-side aggregation struct holding `schema` and `batches`.
+- **`ExArrow` moduledoc** — expanded with Arrow hierarchy explanation, data
+  interchange API outline, and Schema.Mapper reference.
+- **`ExArrow.Array`, `ExArrow.RecordBatch`, `ExArrow.Table` moduledocs** —
+  improved with hierarchy context and usage guidance.
+- **Version** — bumped from 0.5.0 to 0.6.0.
+
+### Fixed
+
+- **`ExArrow.from_dataframe/1` dropped rows for large dataframes** (#200) — when
+  Explorer split a dataframe into multiple Arrow IPC batches, only the first
+  batch was returned, silently discarding the rest.  Batches are now
+  concatenated into a single `RecordBatch` via the new `record_batch_concat`
+  NIF, preserving the full row count and all values.
+- **Rank-2 `ExArrow.from_nx/1` corrupted column order for more than 10 columns**
+  (#200) — columns were named `c0..cN` and reordered lexicographically
+  (`"c10"` before `"c2"`).  Column names are now zero-padded and
+  `ExArrow.to_nx/1` reconstructs columns in a deterministic sorted order, so
+  round-trips are correct for any column count.
+- **Rank-2 `ExArrow.from_nx/1` silently ignored `as: :boolean`** (#200) — the
+  option was dropped for rank-2 tensors, producing UInt8 columns.  The
+  combination now returns a clear error.
+- **Boolean buffer extraction ignored null bitmap** (#201) — `value(i)` on a
+  `BooleanArray` returns an unspecified bit for null slots.  The NIF now checks
+  `is_null(i)` and writes 0 for null positions, matching the documented
+  contract that "null positions are treated as zero bytes."
+- **Nullability documentation contradiction** (#201) — the Explorer integration
+  guide claimed "null positions in columns survive the round-trip" while the
+  top-level docs correctly noted that nullability metadata is not preserved
+  through Explorer.  The guide now explicitly distinguishes data preservation
+  (nil values survive) from schema nullability (which Explorer may relax).
+- **`nx_dtype` typespec was `term()`** (#201) — replaced the overly permissive
+  `@type nx_dtype :: term()` in `ExArrow.Schema.Mapper` with the precise union
+  `{:s | :u | :f, 8 | 16 | 32 | 64}`, restoring meaningful Dialyzer coverage.
+- **O(n²) accumulation in `extract_numeric_fields`** (#200) — already fixed in
+  v0.6.0 (uses `[field | acc]` + `Enum.reverse/1`).
+- **`Nx.tensor(Nx.to_list(...))` materialization in `from_nx_rank2`** (#200) —
+  already fixed in v0.6.0 (uses `Nx.as_type/2`).
+- **Whole-file `dialyzer_ignore.exs` suppression** (#202) — `from_arrow/1` no
+  longer pattern-matches on opaque `%Stream{}`/`%RecordBatch{}` structs.
+  Instead it delegates to `RecordBatch.record_batch?/1` and `Stream.stream?/1`
+  predicate functions.  The ignore file is now empty (`[]`), so future
+  Dialyzer warnings in `data_frame.ex` will surface.
+- **Test gaps** (#203) — added dedicated `data_frame_test.exs` with empty-batch
+  error, dispatch, and type-rejection tests; extended rank-2 property tests to
+  cover ≥11 columns; added Nx boolean null extraction tests; fixed property test
+  column-name generation to use `uniq_list_of/2`.
+- **Documentation: `from_tensor` arity inconsistency** (#204) — the API table
+  and `from_tensors` doc referenced `from_tensor/2`; both now say
+  `from_tensor/3` to match the actual arity with the optional `opts` default.
+- **Documentation: overstated round-trip guarantees** (#204) —
+  `from_dataframe/1` doc said "Schema and values are preserved" (schema
+  includes nullable, which is not guaranteed); changed to "Schema field names
+  and value types are preserved."  `to_dataframe/1` doc said "Schema, row
+  count, and values are preserved"; changed to "Column names, row count, and
+  values are preserved."
+- **Documentation: stale first-batch rationalization** (#204) — the
+  `data_frame.ex` docstring no longer mentions "the first batch is returned"
+  (was already removed in the C1 fix).
+- **Documentation: trailing space in `record_batch.ex`** (#204) — removed
+  trailing space after `ExArrow.Table` / and clarified as "or".
+- **Documentation: `Schema` moduledoc** (#204) — updated from "field names and
+  types" to "field names, types, and nullability".
+
 ## [0.5.0] - 2026-04-16
 
 ### Added
