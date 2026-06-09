@@ -2,7 +2,7 @@ defmodule ExArrow.Schema do
   @moduledoc """
   Arrow schema handle (opaque reference to native schema).
 
-  Holds metadata (field names and types) for a table or record batch.
+  Holds metadata (field names, types, and nullability) for a table or record batch.
   Data lives in native memory; this module provides a stable handle and
   Elixir-friendly accessors for small metadata.
   """

@@ -87,7 +87,7 @@ defmodule ExArrow do
     concatenated into one batch, so the full row count and all values are
     preserved.
 
-    Schema and values are preserved.  Nullability is not guaranteed to survive
+    Schema field names and value types are preserved.  Nullability is not guaranteed to survive
     the Explorer IPC round-trip: Explorer does not distinguish nullable from
     non-nullable columns, so columns may be reported as nullable regardless of
     the source data.
@@ -108,7 +108,7 @@ defmodule ExArrow do
     Convert an `ExArrow.RecordBatch` or `ExArrow.Stream` to an
     `Explorer.DataFrame`.
 
-    Schema, row count, and values are preserved.  See `from_dataframe/1` for a
+    Column names, row count, and values are preserved.  See `from_dataframe/1` for a
     note on nullability through the Explorer round-trip.
 
     Returns `{:ok, dataframe}` or `{:error, message}`.

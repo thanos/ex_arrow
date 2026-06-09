@@ -190,7 +190,7 @@ defmodule ExArrow.Schema.MapperTest do
   end
 
   describe "round-trip: Nx <-> Arrow dtype string" do
-    for {nx_dtype, arrow_str} <- [
+    for {nx_dtype, _arrow_str} <- [
           {{:s, 8}, "s8"},
           {{:s, 16}, "s16"},
           {{:s, 32}, "s32"},
@@ -211,7 +211,7 @@ defmodule ExArrow.Schema.MapperTest do
   end
 
   describe "round-trip: Arrow type atom <-> dtype string" do
-    for {atom, str} <- [
+    for {atom, _str} <- [
           {:boolean, "bool"},
           {:int8, "s8"},
           {:int16, "s16"},

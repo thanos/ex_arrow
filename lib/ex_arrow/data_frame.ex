@@ -33,6 +33,12 @@ defmodule ExArrow.DataFrame do
 
   @explorer_available Code.ensure_loaded?(Explorer.DataFrame)
 
+  # Test-only injection point without global config: each ExUnit test runs in its
+  # own process, so using the process dictionary avoids cross-test interference.
+  defp explorer_impl do
+    Process.get({__MODULE__, :explorer_impl}, ExArrowExplorer)
+  end
+
   if @explorer_available do
     @doc """
     Convert Arrow data to an `Explorer.DataFrame`.
@@ -57,10 +63,10 @@ defmodule ExArrow.DataFrame do
     def from_arrow(arg) do
       cond do
         RecordBatch.record_batch?(arg) ->
-          ExArrowExplorer.from_record_batch(arg)
+          explorer_impl().from_record_batch(arg)
 
         Stream.stream?(arg) ->
-          ExArrowExplorer.from_stream(arg)
+          explorer_impl().from_stream(arg)
 
         true ->
           {:error, "expected an ExArrow.RecordBatch or ExArrow.Stream, got: #{inspect(arg)}"}
@@ -87,7 +93,7 @@ defmodule ExArrow.DataFrame do
     @spec to_arrow(Explorer.DataFrame.t()) ::
             {:ok, RecordBatch.t()} | {:error, String.t()}
     def to_arrow(df) do
-      case ExArrowExplorer.to_record_batches(df) do
+      case explorer_impl().to_record_batches(df) do
         {:ok, []} -> {:error, "no batches produced from dataframe"}
         {:ok, [batch]} -> {:ok, batch}
         {:ok, batches} -> concat_batches(batches)

@@ -206,7 +206,7 @@ EX_ARROW_BUILD=1 mix deps.get
 EX_ARROW_BUILD=1 mix compile
 ```
 
-The optional dependency `{:rustler, "~> 0.32.0", optional: true}` is required
+The optional dependency `{:rustler, "~> 0.36", optional: true}` is required
 for source builds and is already listed in ExArrow's own `mix.exs`.
 
 For **path dependencies** (e.g. Livebook or `Mix.install`), add `rustler`
@@ -215,7 +215,7 @@ explicitly and have Rust available:
 ```elixir
 Mix.install([
   {:ex_arrow, path: "/path/to/ex_arrow"},
-  {:rustler, "~> 0.37.3", optional: true}
+  {:rustler, "~> 0.36", optional: true}
 ])
 ```
 
@@ -939,7 +939,8 @@ welcome for any of them.
 - **`ExArrow.Schema.Mapper`** — single authority for Arrow <-> Explorer/Nx type
   mapping, extensible for future ExZarr and Dataset support.
 - **Field nullability** — `ExArrow.Field` includes `nullable`; NIF returns the
-  flag; schema round-trips preserve nullability.
+  flag; Arrow-native schema round-trips preserve nullability. Explorer-based
+  round-trips may report columns as nullable regardless of source data.
 - **Boolean tensor support** — `from_nx/1` with `as: :boolean`; `column_to_tensor/2`
   and `to_tensors/1` handle Boolean columns.
 - **RecordBatch and Table improvements** — `num_columns/1`, `column_names/1`,

@@ -37,12 +37,15 @@ defmodule ExArrow.Nx do
 
   ### Null handling
 
-  Arrow null positions are treated as zero bytes in the extracted buffer.  For
-  numeric columns the null bitmap is irrelevant because the backing buffer holds
-  unspecified bytes at null positions; for Boolean columns the NIF now checks
-  the null bitmap explicitly and writes 0 for null slots.  If you need to
-  distinguish nulls from real zero values, inspect the original batch (full null
-  support may be added in a future release).
+  Arrow validity (null) bitmaps are not exposed through this API.
+
+  For numeric columns, null slots have unspecified backing bytes in Arrow
+  memory, so the extracted buffer is not meaningful at null positions.
+  For Boolean columns, ExArrow explicitly checks the null bitmap and emits 0 for
+  null slots.
+
+  If you need to distinguish nulls from real zero values, inspect the original
+  batch (full null support may be added in a future release).
 
   ## Public API
 
@@ -50,7 +53,7 @@ defmodule ExArrow.Nx do
   |----------|-----------|-------------|
   | `column_to_tensor/2` | Arrow → Nx | Extract one named numeric/boolean column as an `Nx.Tensor` |
   | `to_tensors/1` | Arrow → Nx | Extract all numeric/boolean columns as `%{name => Nx.Tensor}` |
-  | `from_tensor/2` | Nx → Arrow | Single tensor → single-column `RecordBatch` |
+  | `from_tensor/3` | Nx → Arrow | Single tensor → single-column `RecordBatch` |
   | `from_tensors/1` | Nx → Arrow | Map of tensors → multi-column `RecordBatch` (single NIF call) |
 
   ## Quick example
@@ -240,8 +243,8 @@ defmodule ExArrow.Nx do
     All tensors must have the same number of elements (`Nx.size/1`).  For
     rank-2 or higher-rank tensors the elements are flattened into a 1-D column.
 
-    Column order in the resulting batch follows `Map.to_list/1` ordering (i.e.
-    sorted by key).  Supported dtypes are the same as `from_tensor/2`.
+    Column order in the resulting batch is deterministic: columns are sorted
+    lexicographically by name. Supported dtypes are the same as `from_tensor/3`.
 
     Returns `{:ok, batch}` or `{:error, message}`.
 
@@ -265,7 +268,17 @@ defmodule ExArrow.Nx do
     @spec from_tensors(%{String.t() => Nx.Tensor.t()}) ::
             {:ok, RecordBatch.t()} | {:error, String.t()}
     def from_tensors(tensors) when is_map(tensors) do
-      case collect_tensor_columns(Map.to_list(tensors)) do
+      entries = Map.to_list(tensors)
+
+      # Maps do not guarantee iteration order; sort for deterministic schema order.
+      entries =
+        if Enum.all?(entries, fn {name, _tensor} -> is_binary(name) end) do
+          Enum.sort_by(entries, fn {name, _tensor} -> name end)
+        else
+          entries
+        end
+
+      case collect_tensor_columns(entries) do
         {:error, _} = err ->
           err
 

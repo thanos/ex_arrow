@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Top-level Explorer interchange API** — `ExArrow.from_dataframe/1` and
   `ExArrow.to_dataframe/1` convert between Explorer DataFrames and Arrow
-  RecordBatches with preserved schema, nullability, row count, and values.
+  RecordBatches with preserved column names, row count, and values. Arrow value
+  types are preserved; nullability metadata is not guaranteed through Explorer.
 - **`ExArrow.DataFrame`** — `from_arrow/1` and `to_arrow/1` provide a
   DataFrame-oriented naming convention.  `from_arrow/1` accepts both
   `ExArrow.RecordBatch` and `ExArrow.Stream`.
@@ -25,7 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   future ExZarr and Dataset support.
 - **Field nullability** — `ExArrow.Field` now includes a `nullable` field.  The
   `schema_fields` NIF returns `{name, type_atom, nullable}` tuples.  Schema
-  round-trips preserve nullability information.
+  round-trips preserve nullability information for Arrow-native data. Explorer
+  IPC round-trips may relax nullable flags.
 - **Boolean tensor support** — `ExArrow.Nx.from_tensor/3` accepts `as:
   :boolean` to create Arrow Boolean columns.  `column_to_tensor/2` and
   `to_tensors/1` now extract Boolean columns as `{:u, 8}` Nx tensors.
@@ -103,6 +105,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   error, dispatch, and type-rejection tests; extended rank-2 property tests to
   cover ≥11 columns; added Nx boolean null extraction tests; fixed property test
   column-name generation to use `uniq_list_of/2`.
+- **Documentation: `from_tensor` arity inconsistency** (#204) — the API table
+  and `from_tensors` doc referenced `from_tensor/2`; both now say
+  `from_tensor/3` to match the actual arity with the optional `opts` default.
+- **Documentation: overstated round-trip guarantees** (#204) —
+  `from_dataframe/1` doc said "Schema and values are preserved" (schema
+  includes nullable, which is not guaranteed); changed to "Schema field names
+  and value types are preserved."  `to_dataframe/1` doc said "Schema, row
+  count, and values are preserved"; changed to "Column names, row count, and
+  values are preserved."
+- **Documentation: stale first-batch rationalization** (#204) — the
+  `data_frame.ex` docstring no longer mentions "the first batch is returned"
+  (was already removed in the C1 fix).
+- **Documentation: trailing space in `record_batch.ex`** (#204) — removed
+  trailing space after `ExArrow.Table` / and clarified as "or".
+- **Documentation: `Schema` moduledoc** (#204) — updated from "field names and
+  types" to "field names, types, and nullability".
 
 ## [0.5.0] - 2026-04-16
 

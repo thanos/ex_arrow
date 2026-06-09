@@ -4,7 +4,6 @@ defmodule ExArrow.DataFrameTest do
   alias ExArrow.DataFrame
   alias ExArrow.Explorer, as: ExArrowExplorer
   alias ExArrow.RecordBatch
-  alias ExArrow.Stream
 
   @moduletag :explorer
 
@@ -42,9 +41,15 @@ defmodule ExArrow.DataFrameTest do
         assert recovered == values
       end
 
-      test "returns error for empty record batch list" do
-        assert {:error, msg} = ExArrow.Native.record_batch_concat([])
-        assert msg =~ "empty"
+      test "returns an error when Explorer produces no batches" do
+        stub = ExArrow.DataFrameTest.ExplorerStubEmpty
+
+        Process.put({DataFrame, :explorer_impl}, stub)
+        on_exit(fn -> Process.delete({DataFrame, :explorer_impl}) end)
+
+        df = Explorer.DataFrame.new(x: [1, 2, 3])
+        assert {:error, msg} = DataFrame.to_arrow(df)
+        assert msg =~ "no batches"
       end
     end
 
@@ -79,4 +84,10 @@ defmodule ExArrow.DataFrameTest do
       assert msg =~ "Explorer"
     end
   end
+end
+
+defmodule ExArrow.DataFrameTest.ExplorerStubEmpty do
+  @moduledoc false
+
+  def to_record_batches(_df), do: {:ok, []}
 end

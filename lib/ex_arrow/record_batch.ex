@@ -3,7 +3,7 @@ defmodule ExArrow.RecordBatch do
   Arrow record batch handle (opaque reference to native record batch).
 
   A batch is a collection of column arrays with a shared schema and row count.
-  It sits between `ExArrow.Array` (one column) and `ExArrow.Table` / 
+  It sits between `ExArrow.Array` (one column) and `ExArrow.Table` or 
   `ExArrow.Stream` (multiple batches).  Data stays in native memory; accessors
   return handles or small metadata.
 
