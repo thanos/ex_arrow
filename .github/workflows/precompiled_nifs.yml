@@ -116,6 +116,8 @@ jobs:
           cargo-args: ${{ matrix.job.cargo-args || '' }}
 
       - name: Artifact attestation
+        if: startsWith(github.ref, 'refs/tags/')
+        continue-on-error: true
         uses: actions/attest-build-provenance@v1
         with:
           subject-path: ${{ steps.build.outputs.file-path }}
