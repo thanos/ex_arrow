@@ -61,6 +61,11 @@ defmodule ExArrow.Stream do
   @opaque t :: %__MODULE__{resource: reference(), backend: :ipc | :adbc | :parquet | :flight_sql}
   defstruct [:resource, backend: :ipc]
 
+  @doc false
+  @spec stream?(term()) :: boolean()
+  def stream?(%__MODULE__{}), do: true
+  def stream?(_), do: false
+
   @doc """
   Returns the schema of this stream (without consuming it).
   Returns `{:error, message}` if the stream is invalid (e.g. poisoned lock).

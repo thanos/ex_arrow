@@ -22,6 +22,11 @@ defmodule ExArrow.RecordBatch do
   defstruct [:resource]
 
   @doc false
+  @spec record_batch?(term()) :: boolean()
+  def record_batch?(%__MODULE__{}), do: true
+  def record_batch?(_), do: false
+
+  @doc false
   @spec from_ref(reference()) :: t()
   def from_ref(ref), do: %__MODULE__{resource: ref}
 

@@ -54,14 +54,17 @@ defmodule ExArrow.DataFrame do
     """
     @spec from_arrow(RecordBatch.t() | Stream.t()) ::
             {:ok, Explorer.DataFrame.t()} | {:error, String.t()}
-    # dialyzer: pattern matching on opaque structs is intentional here —
-    # we dispatch to the correct bridge function based on the struct type.
-    def from_arrow(%Stream{} = stream) do
-      ExArrowExplorer.from_stream(stream)
-    end
+    def from_arrow(arg) do
+      cond do
+        RecordBatch.record_batch?(arg) ->
+          ExArrowExplorer.from_record_batch(arg)
 
-    def from_arrow(%RecordBatch{} = batch) do
-      ExArrowExplorer.from_record_batch(batch)
+        Stream.stream?(arg) ->
+          ExArrowExplorer.from_stream(arg)
+
+        true ->
+          {:error, "expected an ExArrow.RecordBatch or ExArrow.Stream, got: #{inspect(arg)}"}
+      end
     end
 
     @doc """
