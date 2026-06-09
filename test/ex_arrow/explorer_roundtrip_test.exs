@@ -4,7 +4,6 @@ defmodule ExArrow.ExplorerRoundtripTest do
   alias ExArrow.Explorer, as: ExArrowExplorer
 
   @moduletag :explorer
-  @nx_available Code.ensure_loaded?(Nx)
 
   if Code.ensure_loaded?(Explorer.DataFrame) do
     describe "ExArrow.from_dataframe/1 and ExArrow.to_dataframe/1 round-trip" do
@@ -45,18 +44,6 @@ defmodule ExArrow.ExplorerRoundtripTest do
 
         # Nulls come back as nil; non-null booleans are exact
         assert flags_vals == [true, nil, false, nil]
-      end
-
-      # Regression for issue #201 (L1): boolean NIF extraction previously
-      # ignored the null bitmap, returning arbitrary bits for null slots.
-      # Now null slots always emit 0.
-      test "boolean column with nulls: Nx extraction emits 0 at null positions" do
-        if @nx_available do
-          df = Explorer.DataFrame.new(flags: [true, nil, false], x: [1, 2, 3])
-          {:ok, batch} = ExArrow.from_dataframe(df)
-          {:ok, tensor} = ExArrow.Nx.column_to_tensor(batch, "flags")
-          assert Nx.to_list(tensor) == [1, 0, 0]
-        end
       end
 
       test "preserves boolean column" do
@@ -131,6 +118,27 @@ defmodule ExArrow.ExplorerRoundtripTest do
         {:ok, stream} = ExArrowExplorer.to_stream(df)
         {:ok, df2} = ExArrow.DataFrame.from_arrow(stream)
         assert Explorer.DataFrame.n_rows(df2) == 3
+      end
+    end
+
+    # Regression for issue #201 (L1): boolean NIF extraction previously
+    # ignored the null bitmap, returning arbitrary bits for null slots.
+    # These tests require both Explorer and Nx.
+    if Code.ensure_loaded?(Nx) do
+      describe "boolean column Nx extraction with null handling" do
+        test "boolean column without nulls round-trips via Nx" do
+          df = Explorer.DataFrame.new(flags: [true, false, true], x: [1, 2, 3])
+          {:ok, batch} = ExArrow.from_dataframe(df)
+          {:ok, tensor} = ExArrow.Nx.column_to_tensor(batch, "flags")
+          assert Nx.to_list(tensor) == [1, 0, 1]
+        end
+
+        test "boolean column with nulls: null positions emit 0 in Nx" do
+          df = Explorer.DataFrame.new(flags: [true, nil, false], x: [1, 2, 3])
+          {:ok, batch} = ExArrow.from_dataframe(df)
+          {:ok, tensor} = ExArrow.Nx.column_to_tensor(batch, "flags")
+          assert Nx.to_list(tensor) == [1, 0, 0]
+        end
       end
     end
 

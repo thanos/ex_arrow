@@ -3,6 +3,8 @@ defmodule ExArrow.DataFrameTest do
 
   alias ExArrow.DataFrame
   alias ExArrow.Explorer, as: ExArrowExplorer
+  alias ExArrow.RecordBatch
+  alias ExArrow.Stream
 
   @moduletag :explorer
 
@@ -11,8 +13,8 @@ defmodule ExArrow.DataFrameTest do
       test "converts a small dataframe to a single batch" do
         df = Explorer.DataFrame.new(x: [1, 2, 3], y: ["a", "b", "c"])
         assert {:ok, batch} = DataFrame.to_arrow(df)
-        assert ExArrow.RecordBatch.num_rows(batch) == 3
-        assert ExArrow.RecordBatch.column_names(batch) == ["x", "y"]
+        assert RecordBatch.num_rows(batch) == 3
+        assert RecordBatch.column_names(batch) == ["x", "y"]
       end
 
       # Regression for issue #200 (C1): a large dataframe that Explorer splits
@@ -22,12 +24,11 @@ defmodule ExArrow.DataFrameTest do
         n = 2_000_000
         df = Explorer.DataFrame.new(x: Enum.to_list(1..n))
 
-        # Confirm the precondition: Explorer really does split this frame.
         assert {:ok, batches} = ExArrowExplorer.to_record_batches(df)
         assert length(batches) > 1
 
         assert {:ok, batch} = DataFrame.to_arrow(df)
-        assert ExArrow.RecordBatch.num_rows(batch) == n
+        assert RecordBatch.num_rows(batch) == n
       end
 
       test "preserves values across the concatenation boundary" do
@@ -40,21 +41,36 @@ defmodule ExArrow.DataFrameTest do
         recovered = Explorer.Series.to_list(Explorer.DataFrame.pull(df2, "x"))
         assert recovered == values
       end
+
+      test "returns error for empty record batch list" do
+        assert {:error, msg} = ExArrow.Native.record_batch_concat([])
+        assert msg =~ "empty"
+      end
     end
 
-    describe "from_arrow/1" do
-      test "converts a RecordBatch to a dataframe" do
+    describe "from_arrow/1 dispatches by struct type" do
+      test "RecordBatch path: round-trips a dataframe" do
         df = Explorer.DataFrame.new(x: [1, 2, 3])
         {:ok, batch} = DataFrame.to_arrow(df)
         assert {:ok, df2} = DataFrame.from_arrow(batch)
         assert Explorer.DataFrame.n_rows(df2) == 3
       end
 
-      test "converts a Stream to a dataframe" do
+      test "Stream path: round-trips a dataframe" do
         df = Explorer.DataFrame.new(x: [1, 2, 3])
         {:ok, stream} = ExArrowExplorer.to_stream(df)
         assert {:ok, df2} = DataFrame.from_arrow(stream)
         assert Explorer.DataFrame.n_rows(df2) == 3
+      end
+
+      test "returns error for unsupported input type" do
+        assert {:error, msg} = DataFrame.from_arrow("not a batch")
+        assert msg =~ "RecordBatch" or msg =~ "Stream"
+      end
+
+      test "returns error for a bare map" do
+        assert {:error, msg} = DataFrame.from_arrow(%{})
+        assert msg =~ "RecordBatch" or msg =~ "Stream"
       end
     end
   else

@@ -53,8 +53,8 @@ defmodule ExArrow.NxPropertyTest do
     property "rank-2 from_nx/to_nx round-trip preserves shape and values for s64" do
       check all(
               rows <- integer(1..10),
-              cols <- integer(2..5),
-              max_runs: 10
+              cols <- integer(2..20),
+              max_runs: 20
             ) do
         values = Enum.map(1..(rows * cols), fn i -> rem(i, 1000) end)
         tensor = Nx.reshape(Nx.tensor(values, type: {:s, 64}), {rows, cols})

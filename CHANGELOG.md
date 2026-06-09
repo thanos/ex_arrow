@@ -90,6 +90,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`nx_dtype` typespec was `term()`** (#201) — replaced the overly permissive
   `@type nx_dtype :: term()` in `ExArrow.Schema.Mapper` with the precise union
   `{:s | :u | :f, 8 | 16 | 32 | 64}`, restoring meaningful Dialyzer coverage.
+- **O(n²) accumulation in `extract_numeric_fields`** (#200) — already fixed in
+  v0.6.0 (uses `[field | acc]` + `Enum.reverse/1`).
+- **`Nx.tensor(Nx.to_list(...))` materialization in `from_nx_rank2`** (#200) —
+  already fixed in v0.6.0 (uses `Nx.as_type/2`).
+- **Whole-file `dialyzer_ignore.exs` suppression** (#202) — `from_arrow/1` no
+  longer pattern-matches on opaque `%Stream{}`/`%RecordBatch{}` structs.
+  Instead it delegates to `RecordBatch.record_batch?/1` and `Stream.stream?/1`
+  predicate functions.  The ignore file is now empty (`[]`), so future
+  Dialyzer warnings in `data_frame.ex` will surface.
+- **Test gaps** (#203) — added dedicated `data_frame_test.exs` with empty-batch
+  error, dispatch, and type-rejection tests; extended rank-2 property tests to
+  cover ≥11 columns; added Nx boolean null extraction tests; fixed property test
+  column-name generation to use `uniq_list_of/2`.
 
 ## [0.5.0] - 2026-04-16
 

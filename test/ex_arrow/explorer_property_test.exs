@@ -11,12 +11,10 @@ defmodule ExArrow.ExplorerPropertyTest do
       check all(
               n <- integer(1..50),
               num_cols <- integer(1..5),
-              col_names <-
-                list_of(member_of(@safe_atoms), min_length: num_cols, max_length: num_cols),
+              unique_names <-
+                uniq_list_of(member_of(@safe_atoms), min_length: num_cols, max_length: num_cols),
               max_runs: 20
             ) do
-        unique_names = col_names |> Enum.uniq() |> Enum.take(num_cols)
-
         data =
           Enum.map(unique_names, fn name ->
             {name, Enum.to_list(1..n//1)}
