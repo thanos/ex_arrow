@@ -1,3 +1,9 @@
+defmodule ExArrow.DataFrameTestSupport.ExplorerStubEmpty do
+  @moduledoc false
+
+  def to_record_batches(_df), do: {:ok, []}
+end
+
 defmodule ExArrow.DataFrameTest do
   use ExUnit.Case, async: true
 
@@ -42,7 +48,7 @@ defmodule ExArrow.DataFrameTest do
       end
 
       test "returns an error when Explorer produces no batches" do
-        stub = ExArrow.DataFrameTest.ExplorerStubEmpty
+        stub = ExArrow.DataFrameTestSupport.ExplorerStubEmpty
 
         Process.put({DataFrame, :explorer_impl}, stub)
         on_exit(fn -> Process.delete({DataFrame, :explorer_impl}) end)
@@ -84,10 +90,4 @@ defmodule ExArrow.DataFrameTest do
       assert msg =~ "Explorer"
     end
   end
-end
-
-defmodule ExArrow.DataFrameTest.ExplorerStubEmpty do
-  @moduledoc false
-
-  def to_record_batches(_df), do: {:ok, []}
 end
