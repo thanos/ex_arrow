@@ -8,7 +8,8 @@ defmodule ExArrow.MixProject do
     [
       app: :ex_arrow,
       version: @version,
-      # Same as Explorer: support OTP 25 (NIF 2.15) and OTP 26 (NIF 2.16) users
+      # Keep the public Elixir floor broad; CI exercises current supported
+      # Elixir/OTP pairs up through Elixir 1.20 / OTP 29.
       elixir: "~> 1.14",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -74,19 +75,19 @@ defmodule ExArrow.MixProject do
 
   defp deps do
     [
-      {:rustler_precompiled, "~> 0.8"},
-      {:adbc, "~> 0.9", optional: true},
+      {:rustler_precompiled, "~> 0.9"},
+      {:adbc, "~> 0.12", optional: true},
       {:explorer, "~> 0.11", optional: true},
-      {:nx, "~> 0.9", optional: true},
+      {:nx, "~> 0.12", optional: true},
       {:nimble_pool, "~> 1.1", optional: true},
-      {:rustler, "~> 0.36", optional: true},
-      {:ex_doc, "~> 0.34", only: :dev},
-      {:benchee, "~> 1.4", only: :dev},
+      {:rustler, "~> 0.36 or ~> 0.38", optional: true},
+      {:ex_doc, "~> 0.40", only: :dev},
+      {:benchee, "~> 1.5", only: :dev},
       {:benchee_html, "~> 1.0", only: :dev},
       {:benchee_json, "~> 1.0", only: :dev},
-      {:credo, "~> 1.7.17", only: [:dev, :test], runtime: false},
+      {:credo, "~> 1.7.19", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
+      {:sobelow, "~> 0.14", only: [:dev, :test], runtime: false},
       {:excoveralls, "~> 0.18", only: :test},
       {:mox, "~> 1.0", only: :test},
       {:stream_data, "~> 1.3.0", only: :test}

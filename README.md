@@ -177,7 +177,8 @@ quantifies the zero-copy advantage and publishes results per commit at
 
 ## Requirements
 
-- Elixir ~> 1.14 (OTP 25 / NIF 2.15 and OTP 26+ / NIF 2.16)
+- Elixir ~> 1.14. CI covers Elixir 1.18/OTP 27, 1.19/OTP 28, and
+  1.20/OTP 29.
 
 ---
 
@@ -206,7 +207,7 @@ EX_ARROW_BUILD=1 mix deps.get
 EX_ARROW_BUILD=1 mix compile
 ```
 
-The optional dependency `{:rustler, "~> 0.36", optional: true}` is required
+The optional dependency `{:rustler, "~> 0.36 or ~> 0.38", optional: true}` is required
 for source builds and is already listed in ExArrow's own `mix.exs`.
 
 For **path dependencies** (e.g. Livebook or `Mix.install`), add `rustler`
@@ -215,7 +216,7 @@ explicitly and have Rust available:
 ```elixir
 Mix.install([
   {:ex_arrow, path: "/path/to/ex_arrow"},
-  {:rustler, "~> 0.36", optional: true}
+  {:rustler, "~> 0.36 or ~> 0.38", optional: true}
 ])
 ```
 
