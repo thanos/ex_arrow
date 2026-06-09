@@ -49,8 +49,8 @@ jobs:
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: "1.18"
-          otp-version: "27"
+          elixir-version: "1.20"
+          otp-version: "29"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -61,17 +61,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: deps
-          key: mix-deps-integration-pg-27-1.18-${{ hashFiles('mix.lock') }}
+          key: mix-deps-integration-pg-29-1.20-${{ hashFiles('mix.lock') }}
           restore-keys: |
-            mix-deps-integration-pg-27-1.18-
+            mix-deps-integration-pg-29-1.20-
 
       - name: Restore Mix build cache
         uses: actions/cache@v4
         with:
           path: _build
-          key: mix-build-integration-pg-27-1.18-${{ hashFiles('mix.lock', 'lib/**/*.ex', 'native/ex_arrow_native/**') }}
+          key: mix-build-integration-pg-29-1.20-${{ hashFiles('mix.lock', 'lib/**/*.ex', 'native/ex_arrow_native/**') }}
           restore-keys: |
-            mix-build-integration-pg-27-1.18-
+            mix-build-integration-pg-29-1.20-
 
       - name: Restore Cargo registry cache
         uses: actions/cache@v4
@@ -138,8 +138,8 @@ jobs:
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: "1.18"
-          otp-version: "27"
+          elixir-version: "1.20"
+          otp-version: "29"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -150,17 +150,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: deps
-          key: mix-deps-integration-duckdb-27-1.18-${{ hashFiles('mix.lock') }}
+          key: mix-deps-integration-duckdb-29-1.20-${{ hashFiles('mix.lock') }}
           restore-keys: |
-            mix-deps-integration-duckdb-27-1.18-
+            mix-deps-integration-duckdb-29-1.20-
 
       - name: Restore Mix build cache
         uses: actions/cache@v4
         with:
           path: _build
-          key: mix-build-integration-duckdb-27-1.18-${{ hashFiles('mix.lock', 'lib/**/*.ex', 'native/ex_arrow_native/**') }}
+          key: mix-build-integration-duckdb-29-1.20-${{ hashFiles('mix.lock', 'lib/**/*.ex', 'native/ex_arrow_native/**') }}
           restore-keys: |
-            mix-build-integration-duckdb-27-1.18-
+            mix-build-integration-duckdb-29-1.20-
 
       - name: Restore Cargo registry cache
         uses: actions/cache@v4

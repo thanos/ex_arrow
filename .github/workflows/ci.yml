@@ -23,8 +23,8 @@ jobs:
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: "1.18"
-          otp-version: "27"
+          elixir-version: "1.20"
+          otp-version: "29"
 
       - name: Restore Mix dependencies cache
         uses: actions/cache@v4
@@ -38,9 +38,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: _build
-          key: mix-build-lint-1.18-27-${{ hashFiles('mix.lock', 'lib/**/*.ex') }}
+          key: mix-build-lint-1.20-29-${{ hashFiles('mix.lock', 'lib/**/*.ex') }}
           restore-keys: |
-            mix-build-lint-1.18-27-
+            mix-build-lint-1.20-29-
 
       - run: mix deps.get
       - run: mix compile --warnings-as-errors
@@ -62,8 +62,8 @@ jobs:
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: "1.18"
-          otp-version: "27"
+          elixir-version: "1.20"
+          otp-version: "29"
 
       - name: Restore Mix dependencies cache
         uses: actions/cache@v4
@@ -77,18 +77,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: _build
-          key: mix-build-dialyzer-1.18-27-${{ hashFiles('mix.lock', 'lib/**/*.ex') }}
+          key: mix-build-dialyzer-1.20-29-${{ hashFiles('mix.lock', 'lib/**/*.ex') }}
           restore-keys: |
-            mix-build-dialyzer-1.18-27-
+            mix-build-dialyzer-1.20-29-
 
       - name: Restore Dialyzer PLT cache
         id: plt-cache
         uses: actions/cache@v4
         with:
           path: priv/plts
-          key: plt-1.18-27-${{ hashFiles('mix.lock') }}
+          key: plt-1.20-29-${{ hashFiles('mix.lock') }}
           restore-keys: |
-            plt-1.18-27-
+            plt-1.20-29-
 
       - run: mix deps.get
       - run: mkdir -p priv/plts
@@ -108,6 +108,12 @@ jobs:
         include:
           - elixir: "1.18"
             otp: "27"
+            coverage: false
+          - elixir: "1.19"
+            otp: "28"
+            coverage: false
+          - elixir: "1.20"
+            otp: "29"
             coverage: true
 
     env:
