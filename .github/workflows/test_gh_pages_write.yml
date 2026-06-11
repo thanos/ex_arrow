@@ -19,9 +19,12 @@ jobs:
     permissions:
       contents: write
 
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
     steps:
       - name: Checkout gh-pages branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.3
         with:
           ref: gh-pages
           # Use the built-in GITHUB_TOKEN; no extra secret required.

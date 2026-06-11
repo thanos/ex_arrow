@@ -42,23 +42,24 @@ jobs:
       PG_PASSWORD: postgres
       PG_DATABASE: postgres
       EX_ARROW_BUILD: "1"
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.3
 
       - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@v1.24.0
         with:
           elixir-version: "1.20"
           otp-version: "29"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
 
       - name: Restore Mix dependencies cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: deps
           key: mix-deps-integration-pg-29-1.20-${{ hashFiles('mix.lock') }}
@@ -66,7 +67,7 @@ jobs:
             mix-deps-integration-pg-29-1.20-
 
       - name: Restore Mix build cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: _build
           key: mix-build-integration-pg-29-1.20-${{ hashFiles('mix.lock', 'lib/**/*.ex', 'native/ex_arrow_native/**') }}
@@ -74,7 +75,7 @@ jobs:
             mix-build-integration-pg-29-1.20-
 
       - name: Restore Cargo registry cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: |
             ~/.cargo/registry
@@ -84,7 +85,7 @@ jobs:
             cargo-registry-
 
       - name: Restore Rust target cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: native/ex_arrow_native/target
           key: rust-target-integration-pg-${{ hashFiles('native/ex_arrow_native/Cargo.lock', 'native/ex_arrow_native/src/**') }}
@@ -92,7 +93,7 @@ jobs:
             rust-target-integration-pg-
 
       - name: Restore pip cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: ~/.cache/pip
           key: pip-adbc-postgresql-${{ runner.os }}
@@ -131,23 +132,24 @@ jobs:
 
     env:
       EX_ARROW_BUILD: "1"
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.3
 
       - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@v1.24.0
         with:
           elixir-version: "1.20"
           otp-version: "29"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
 
       - name: Restore Mix dependencies cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: deps
           key: mix-deps-integration-duckdb-29-1.20-${{ hashFiles('mix.lock') }}
@@ -155,7 +157,7 @@ jobs:
             mix-deps-integration-duckdb-29-1.20-
 
       - name: Restore Mix build cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: _build
           key: mix-build-integration-duckdb-29-1.20-${{ hashFiles('mix.lock', 'lib/**/*.ex', 'native/ex_arrow_native/**') }}
@@ -163,7 +165,7 @@ jobs:
             mix-build-integration-duckdb-29-1.20-
 
       - name: Restore Cargo registry cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: |
             ~/.cargo/registry
@@ -173,7 +175,7 @@ jobs:
             cargo-registry-
 
       - name: Restore Rust target cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: native/ex_arrow_native/target
           key: rust-target-integration-duckdb-${{ hashFiles('native/ex_arrow_native/Cargo.lock', 'native/ex_arrow_native/src/**') }}
@@ -182,7 +184,7 @@ jobs:
 
       - name: Restore DuckDB binary cache
         id: duckdb-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: /opt/duckdb/${{ matrix.duckdb }}
           key: duckdb-${{ matrix.duckdb }}-linux-amd64

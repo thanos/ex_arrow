@@ -17,17 +17,20 @@ jobs:
     name: Lint (format, credo, sobelow, docs)
     runs-on: ubuntu-latest
 
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.3
 
       - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@v1.24.0
         with:
           elixir-version: "1.20"
           otp-version: "29"
 
       - name: Restore Mix dependencies cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: deps
           key: mix-deps-lint-${{ hashFiles('mix.lock') }}
@@ -35,7 +38,7 @@ jobs:
             mix-deps-lint-
 
       - name: Restore Mix build cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: _build
           key: mix-build-lint-1.20-29-${{ hashFiles('mix.lock', 'lib/**/*.ex') }}
@@ -56,17 +59,20 @@ jobs:
     name: Dialyzer
     runs-on: ubuntu-latest
 
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.3
 
       - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@v1.24.0
         with:
           elixir-version: "1.20"
           otp-version: "29"
 
       - name: Restore Mix dependencies cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: deps
           key: mix-deps-dialyzer-${{ hashFiles('mix.lock') }}
@@ -74,7 +80,7 @@ jobs:
             mix-deps-dialyzer-
 
       - name: Restore Mix build cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: _build
           key: mix-build-dialyzer-1.20-29-${{ hashFiles('mix.lock', 'lib/**/*.ex') }}
@@ -83,7 +89,7 @@ jobs:
 
       - name: Restore Dialyzer PLT cache
         id: plt-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: priv/plts
           key: plt-1.20-29-${{ hashFiles('mix.lock') }}
@@ -120,21 +126,22 @@ jobs:
       # Override workflow-level skip: this job compiles and loads the real NIF.
       EX_ARROW_SKIP_NIF: "false"
       EX_ARROW_BUILD: "1"
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.3
 
       - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@v1.24.0
         with:
           elixir-version: ${{ matrix.elixir }}
           otp-version: ${{ matrix.otp }}
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
 
       - name: Restore Mix dependencies cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: deps
           key: mix-deps-test-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
@@ -142,7 +149,7 @@ jobs:
             mix-deps-test-${{ matrix.otp }}-${{ matrix.elixir }}-
 
       - name: Restore Mix build cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: _build
           key: mix-build-test-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock', 'lib/**/*.ex', 'native/ex_arrow_native/**') }}
@@ -150,7 +157,7 @@ jobs:
             mix-build-test-${{ matrix.otp }}-${{ matrix.elixir }}-
 
       - name: Restore Cargo registry cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: |
             ~/.cargo/registry
@@ -160,7 +167,7 @@ jobs:
             cargo-registry-
 
       - name: Restore Rust target cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: native/ex_arrow_native/target
           key: rust-target-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('native/ex_arrow_native/Cargo.lock', 'native/ex_arrow_native/src/**') }}
@@ -191,7 +198,7 @@ jobs:
 
       - name: Upload coverage report
         if: ${{ matrix.coverage }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: coverage-report
           path: cover/
