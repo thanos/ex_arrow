@@ -19,7 +19,6 @@ defmodule ExArrow.MixProject do
       package: package(),
       test_coverage: [tool: ExCoveralls],
       dialyzer: [
-        plt_file: {:no_warn, "priv/plts/project.plt"},
         plt_add_apps: [:mix],
         ignore_warnings: "dialyzer_ignore.exs"
       ]
