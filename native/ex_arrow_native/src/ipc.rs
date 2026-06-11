@@ -6,20 +6,27 @@ use std::sync::Arc;
 use arrow::array::{BooleanArray, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use arrow_array::types::{
-    Float32Type, Float64Type, Int16Type, Int32Type, Int64Type, Int8Type, UInt16Type, UInt32Type,
-    UInt64Type, UInt8Type,
+    Date32Type, Date64Type, DurationMicrosecondType, DurationMillisecondType,
+    DurationNanosecondType, DurationSecondType, Float32Type, Float64Type, Int16Type, Int32Type,
+    Int64Type, Int8Type, TimestampMicrosecondType, TimestampMillisecondType,
+    TimestampNanosecondType, TimestampSecondType, UInt16Type, UInt32Type, UInt64Type, UInt8Type,
 };
-use arrow_array::{Array, ArrayRef, PrimitiveArray};
+use arrow_array::{
+    Array, ArrayRef, BinaryArray, LargeBinaryArray, LargeStringArray, PrimitiveArray,
+};
 use arrow_buffer::Buffer;
 use arrow_data::ArrayData;
-use arrow_schema::{DataType, Field, Schema};
+use arrow_schema::{DataType, Field, Schema, TimeUnit};
 
 use arrow_ipc::reader::{FileReader, StreamReader};
 use arrow_ipc::writer::{FileWriter, StreamWriter};
 use rustler::ResourceArc;
 use rustler::{Encoder, Env, Term};
 
-use crate::resources::{ExArrowIpcFile, ExArrowIpcStream, ExArrowRecordBatch, ExArrowSchema, IpcFileBacking, IpcStreamBacking};
+use crate::resources::{
+    ExArrowIpcFile, ExArrowIpcStream, ExArrowRecordBatch, ExArrowSchema, IpcFileBacking,
+    IpcStreamBacking,
+};
 use crate::util::{err_encode, ok_encode};
 
 /// Builds a small IPC stream fixture (schema: id int64, name utf8; 2 rows) for tests.
@@ -184,7 +191,9 @@ fn data_type_to_atom(env: Env, dt: &arrow_schema::DataType) -> rustler::types::a
 
 /// Return the schema ref of a record batch.
 #[rustler::nif]
-pub fn record_batch_schema(batch: ResourceArc<ExArrowRecordBatch>) -> rustler::ResourceArc<ExArrowSchema> {
+pub fn record_batch_schema(
+    batch: ResourceArc<ExArrowRecordBatch>,
+) -> rustler::ResourceArc<ExArrowSchema> {
     let schema_handle = ExArrowSchema {
         schema: batch.batch.schema().clone(),
     };
@@ -217,9 +226,7 @@ pub fn ipc_stream_schema<'a>(env: Env<'a>, stream: ResourceArc<ExArrowIpcStream>
             guard.schema()
         }
     };
-    let schema_handle = ExArrowSchema {
-        schema: schema_ref,
-    };
+    let schema_handle = ExArrowSchema { schema: schema_ref };
     ResourceArc::new(schema_handle).encode(env)
 }
 
@@ -243,7 +250,9 @@ pub fn ipc_stream_next<'a>(env: Env<'a>, stream: ResourceArc<ExArrowIpcStream>) 
         }
     };
     match next_result {
-        None => rustler::types::atom::Atom::from_str(env, "done").unwrap().encode(env),
+        None => rustler::types::atom::Atom::from_str(env, "done")
+            .unwrap()
+            .encode(env),
         Some(Err(e)) => err_encode(env, &e.to_string()),
         Some(Ok(batch)) => {
             let handle = ExArrowRecordBatch { batch };
@@ -326,9 +335,7 @@ pub fn ipc_file_schema<'a>(env: Env<'a>, file: ResourceArc<ExArrowIpcFile>) -> T
             Err(_) => return err_encode(env, "file lock"),
         },
     };
-    let schema_handle = ExArrowSchema {
-        schema: schema_ref,
-    };
+    let schema_handle = ExArrowSchema { schema: schema_ref };
     ResourceArc::new(schema_handle).encode(env)
 }
 
@@ -411,7 +418,9 @@ pub fn ipc_writer_to_file<'a>(
     if let Err(e) = writer.finish() {
         return err_encode(env, &e.to_string());
     }
-    rustler::types::atom::Atom::from_str(env, "ok").unwrap().encode(env)
+    rustler::types::atom::Atom::from_str(env, "ok")
+        .unwrap()
+        .encode(env)
 }
 
 // ── Nx support NIFs ──────────────────────────────────────────────────────────
@@ -423,7 +432,7 @@ pub fn ipc_writer_to_file<'a>(
 /// `type_string` is one of `"s8"`, `"s16"`, `"s32"`, `"s64"`, `"u8"`, `"u16"`,
 /// `"u32"`, `"u64"`, `"f32"`, `"f64"`.  Float columns use IEEE 754 native byte order.
 ///
-/// Null/validity bitmaps are ignored — null positions are returned as zero bytes.
+/// Null/validity bitmaps are ignored; null positions are returned as zero bytes.
 #[rustler::nif]
 pub fn record_batch_column_buffer<'a>(
     env: Env<'a>,
@@ -453,9 +462,8 @@ macro_rules! primitive_buffer {
             std::mem::size_of::<<$ArrowType as arrow_array::types::ArrowPrimitiveType>::Native>();
         // SAFETY: slice is a valid aligned slice of a numeric primitive type whose
         // in-memory representation is exactly `len * byte_size` bytes.
-        let bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(slice.as_ptr() as *const u8, len * byte_size)
-        };
+        let bytes: &[u8] =
+            unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const u8, len * byte_size) };
         let mut owned = match rustler::OwnedBinary::new(bytes.len()) {
             Some(b) => b,
             None => return err_encode($env, "binary alloc"),
@@ -596,9 +604,20 @@ pub fn record_batch_concat<'a>(
 }
 
 // ── Column-array builder (shared by single-column and multi-column NIFs) ─────
+//
+// Wire formats accepted by `build_column_array`:
+//
+// * Fixed-width primitives (s8..s64, u8..u64, f32, f64, date32, date64,
+//   timestamp_*, duration_*): `length × element_size` bytes, little-endian
+//   for multi-byte types.
+// * `bool`: exactly `length` bytes, one byte per element (0 = false,
+//   non-zero = true).
+// * `utf8`, `large_utf8`, `binary`, `large_binary`: concatenation of N
+//   length-prefixed records, each of the form
+//   `<<elem_len::u32-little, elem_bytes::binary-size(elem_len)>>`.
 
-macro_rules! build_col {
-    ($bytes:expr, $length:expr, $NativeType:ty, $ArrowDType:expr) => {{
+macro_rules! build_fixed_col {
+    ($bytes:expr, $length:expr, $NativeType:ty, $ArrowType:ty, $ArrowDType:expr) => {{
         let elem_size = std::mem::size_of::<$NativeType>();
         if $bytes.len() != $length * elem_size {
             return Err(format!(
@@ -615,25 +634,34 @@ macro_rules! build_col {
             .add_buffer(buf)
             .build()
             .map_err(|e| e.to_string())?;
-        let array: ArrayRef = Arc::new(
-            PrimitiveArray::<<$NativeType as NativeTypeAlias>::ArrowType>::from(array_data),
-        );
+        let array: ArrayRef = Arc::new(PrimitiveArray::<$ArrowType>::from(array_data));
         ($ArrowDType, array)
     }};
 }
 
-fn build_column_array(bytes: &[u8], dtype_str: &str, length: usize) -> Result<(DataType, ArrayRef), String> {
+fn build_column_array(
+    bytes: &[u8],
+    dtype_str: &str,
+    length: usize,
+) -> Result<(DataType, ArrayRef), String> {
     let pair = match dtype_str {
-        "s8"  => build_col!(bytes, length, i8,  DataType::Int8),
-        "s16" => build_col!(bytes, length, i16, DataType::Int16),
-        "s32" => build_col!(bytes, length, i32, DataType::Int32),
-        "s64" => build_col!(bytes, length, i64, DataType::Int64),
-        "u8"  => build_col!(bytes, length, u8,  DataType::UInt8),
-        "u16" => build_col!(bytes, length, u16, DataType::UInt16),
-        "u32" => build_col!(bytes, length, u32, DataType::UInt32),
-        "u64" => build_col!(bytes, length, u64, DataType::UInt64),
-        "f32" => build_col!(bytes, length, f32, DataType::Float32),
-        "f64" => build_col!(bytes, length, f64, DataType::Float64),
+        // ── Signed integers ─────────────────────────────────────────
+        "s8" => build_fixed_col!(bytes, length, i8, Int8Type, DataType::Int8),
+        "s16" => build_fixed_col!(bytes, length, i16, Int16Type, DataType::Int16),
+        "s32" => build_fixed_col!(bytes, length, i32, Int32Type, DataType::Int32),
+        "s64" => build_fixed_col!(bytes, length, i64, Int64Type, DataType::Int64),
+
+        // ── Unsigned integers ───────────────────────────────────────
+        "u8" => build_fixed_col!(bytes, length, u8, UInt8Type, DataType::UInt8),
+        "u16" => build_fixed_col!(bytes, length, u16, UInt16Type, DataType::UInt16),
+        "u32" => build_fixed_col!(bytes, length, u32, UInt32Type, DataType::UInt32),
+        "u64" => build_fixed_col!(bytes, length, u64, UInt64Type, DataType::UInt64),
+
+        // ── Floats ──────────────────────────────────────────────────
+        "f32" => build_fixed_col!(bytes, length, f32, Float32Type, DataType::Float32),
+        "f64" => build_fixed_col!(bytes, length, f64, Float64Type, DataType::Float64),
+
+        // ── Boolean ─────────────────────────────────────────────────
         "bool" => {
             if bytes.len() != length {
                 return Err(format!(
@@ -646,44 +674,165 @@ fn build_column_array(bytes: &[u8], dtype_str: &str, length: usize) -> Result<(D
             let array: ArrayRef = Arc::new(BooleanArray::from(bool_vals));
             (DataType::Boolean, array)
         }
+
+        // ── Date / Time ─────────────────────────────────────────────
+        // date32:        i32 days since 1970-01-01
+        // date64:        i64 milliseconds since 1970-01-01
+        // timestamp_*:   i64 ticks (s/ms/us/ns) since 1970-01-01 UTC
+        // duration_*:    i64 ticks (s/ms/us/ns)
+        "date32" => build_fixed_col!(bytes, length, i32, Date32Type, DataType::Date32),
+        "date64" => build_fixed_col!(bytes, length, i64, Date64Type, DataType::Date64),
+
+        "timestamp_seconds" => build_fixed_col!(
+            bytes,
+            length,
+            i64,
+            TimestampSecondType,
+            DataType::Timestamp(TimeUnit::Second, None)
+        ),
+        "timestamp_millis" => build_fixed_col!(
+            bytes,
+            length,
+            i64,
+            TimestampMillisecondType,
+            DataType::Timestamp(TimeUnit::Millisecond, None)
+        ),
+        "timestamp_micros" => build_fixed_col!(
+            bytes,
+            length,
+            i64,
+            TimestampMicrosecondType,
+            DataType::Timestamp(TimeUnit::Microsecond, None)
+        ),
+        "timestamp_nanos" => build_fixed_col!(
+            bytes,
+            length,
+            i64,
+            TimestampNanosecondType,
+            DataType::Timestamp(TimeUnit::Nanosecond, None)
+        ),
+
+        "duration_seconds" => build_fixed_col!(
+            bytes,
+            length,
+            i64,
+            DurationSecondType,
+            DataType::Duration(TimeUnit::Second)
+        ),
+        "duration_millis" => build_fixed_col!(
+            bytes,
+            length,
+            i64,
+            DurationMillisecondType,
+            DataType::Duration(TimeUnit::Millisecond)
+        ),
+        "duration_micros" => build_fixed_col!(
+            bytes,
+            length,
+            i64,
+            DurationMicrosecondType,
+            DataType::Duration(TimeUnit::Microsecond)
+        ),
+        "duration_nanos" => build_fixed_col!(
+            bytes,
+            length,
+            i64,
+            DurationNanosecondType,
+            DataType::Duration(TimeUnit::Nanosecond)
+        ),
+
+        // ── Variable-length string / binary ─────────────────────────
+        "utf8" => {
+            let elems = decode_varlen_records(bytes, length, "utf8")?;
+            let strs: Vec<&str> = elems
+                .iter()
+                .map(|e| std::str::from_utf8(e).map_err(|err| format!("invalid utf-8: {}", err)))
+                .collect::<Result<_, _>>()?;
+            let array: ArrayRef = Arc::new(StringArray::from(strs));
+            (DataType::Utf8, array)
+        }
+        "large_utf8" => {
+            let elems = decode_varlen_records(bytes, length, "large_utf8")?;
+            let strs: Vec<&str> = elems
+                .iter()
+                .map(|e| std::str::from_utf8(e).map_err(|err| format!("invalid utf-8: {}", err)))
+                .collect::<Result<_, _>>()?;
+            let array: ArrayRef = Arc::new(LargeStringArray::from(strs));
+            (DataType::LargeUtf8, array)
+        }
+        "binary" => {
+            let elems = decode_varlen_records(bytes, length, "binary")?;
+            let array: ArrayRef = Arc::new(BinaryArray::from(
+                elems.iter().map(|e| e.as_ref()).collect::<Vec<&[u8]>>(),
+            ));
+            (DataType::Binary, array)
+        }
+        "large_binary" => {
+            let elems = decode_varlen_records(bytes, length, "large_binary")?;
+            let array: ArrayRef = Arc::new(LargeBinaryArray::from(
+                elems.iter().map(|e| e.as_ref()).collect::<Vec<&[u8]>>(),
+            ));
+            (DataType::LargeBinary, array)
+        }
+
         other => return Err(format!("unknown dtype '{}' for column creation", other)),
     };
     Ok(pair)
 }
 
-// Helper trait to associate Rust native types with Arrow type markers.
-trait NativeTypeAlias {
-    type ArrowType: arrow_array::types::ArrowPrimitiveType;
-}
-impl NativeTypeAlias for i8 {
-    type ArrowType = Int8Type;
-}
-impl NativeTypeAlias for i16 {
-    type ArrowType = Int16Type;
-}
-impl NativeTypeAlias for i32 {
-    type ArrowType = Int32Type;
-}
-impl NativeTypeAlias for i64 {
-    type ArrowType = Int64Type;
-}
-impl NativeTypeAlias for u8 {
-    type ArrowType = UInt8Type;
-}
-impl NativeTypeAlias for u16 {
-    type ArrowType = UInt16Type;
-}
-impl NativeTypeAlias for u32 {
-    type ArrowType = UInt32Type;
-}
-impl NativeTypeAlias for u64 {
-    type ArrowType = UInt64Type;
-}
-impl NativeTypeAlias for f32 {
-    type ArrowType = Float32Type;
-}
-impl NativeTypeAlias for f64 {
-    type ArrowType = Float64Type;
+/// Decode a sequence of `length` length-prefixed records out of `bytes`.
+///
+/// Each record has the layout `<<len::u32-le, bytes::binary-size(len)>>`.
+/// Returns the decoded byte slices in order, or an error describing the
+/// malformed framing.
+fn decode_varlen_records<'a>(
+    bytes: &'a [u8],
+    length: usize,
+    dtype: &str,
+) -> Result<Vec<&'a [u8]>, String> {
+    let mut elems: Vec<&[u8]> = Vec::with_capacity(length);
+    let mut offset = 0usize;
+
+    for i in 0..length {
+        if offset + 4 > bytes.len() {
+            return Err(format!(
+                "binary truncated for {}: missing length prefix for element {} (offset {} of {} bytes)",
+                dtype,
+                i,
+                offset,
+                bytes.len()
+            ));
+        }
+        let len = u32::from_le_bytes([
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+        ]) as usize;
+        offset += 4;
+        if offset + len > bytes.len() {
+            return Err(format!(
+                "binary truncated for {}: element {} declares {} bytes but only {} remain",
+                dtype,
+                i,
+                len,
+                bytes.len() - offset
+            ));
+        }
+        elems.push(&bytes[offset..offset + len]);
+        offset += len;
+    }
+
+    if offset != bytes.len() {
+        return Err(format!(
+            "binary length mismatch for {}: {} trailing bytes after {} elements",
+            dtype,
+            bytes.len() - offset,
+            length
+        ));
+    }
+
+    Ok(elems)
 }
 
 /// Write schema and record batches in IPC file format (random-access footer). Returns :ok or {:error, msg}.
@@ -710,5 +859,7 @@ pub fn ipc_file_writer_to_file<'a>(
     if let Err(e) = writer.finish() {
         return err_encode(env, &e.to_string());
     }
-    rustler::types::atom::Atom::from_str(env, "ok").unwrap().encode(env)
+    rustler::types::atom::Atom::from_str(env, "ok")
+        .unwrap()
+        .encode(env)
 }

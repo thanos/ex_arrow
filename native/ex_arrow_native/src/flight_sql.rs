@@ -20,7 +20,7 @@ use tonic::transport::{Certificate, Channel, ClientTlsConfig};
 use crate::resources::{ExArrowRecordBatch, ExArrowSchema};
 use crate::util::{err_encode, ok_encode};
 
-// ── Atoms ─────────────────────────────────────────────────────────────────────
+// Atoms
 
 // All atoms used in this module declared in a single block to avoid conflicts.
 rustler::atoms! {
@@ -39,13 +39,13 @@ rustler::atoms! {
     multi_endpoint,
     unknown,
     done,
-    // TLS mode atoms (same values as flight.rs — atoms are global BEAM atoms)
+    // TLS mode atoms (same values as flight.rs; atoms are global BEAM atoms)
     plaintext,
     system_certs,
     custom_ca,
 }
 
-// ── Resource types ────────────────────────────────────────────────────────────
+// Resource types
 
 /// Opaque handle for an active Flight SQL connection.
 ///
@@ -65,7 +65,7 @@ impl rustler::Resource for FlightSqlClientHandle {}
 /// The stream is pinned on the heap so it can be driven from multiple
 /// NIF calls without requiring a stable stack address.
 ///
-/// `rt` is the Tokio runtime that owns the gRPC channel — stored here so
+/// `rt` is the Tokio runtime that owns the gRPC channel; stored here so
 /// `flight_sql_stream_next` uses the same runtime as the one that opened the
 /// connection, keeping stream I/O isolated from any other runtime.
 pub struct FlightSqlStreamResource {
@@ -87,13 +87,13 @@ impl rustler::Resource for FlightSqlStreamResource {}
 pub struct FlightSqlPreparedStatementResource {
     pub rt: Arc<tokio::runtime::Runtime>,
     pub client: Arc<Mutex<FlightSqlServiceClient<Channel>>>,
-    pub stmt: Mutex<PreparedStatement<Channel>>,
+    pub stmt: Mutex<Option<PreparedStatement<Channel>>>,
 }
 
 #[rustler::resource_impl]
 impl rustler::Resource for FlightSqlPreparedStatementResource {}
 
-// ── Tokio runtime ─────────────────────────────────────────────────────────────
+// Tokio runtime
 
 /// Shared Tokio runtime for all Flight SQL async operations.
 ///
@@ -115,7 +115,7 @@ fn sql_runtime() -> Arc<tokio::runtime::Runtime> {
         .clone()
 }
 
-// ── TLS mode ──────────────────────────────────────────────────────────────────
+// TLS mode
 
 enum TlsMode {
     Plaintext,
@@ -131,9 +131,7 @@ fn parse_tls_mode<'a>(term: Term<'a>) -> Result<TlsMode, String> {
         if atom == system_certs() {
             return Ok(TlsMode::SystemCerts);
         }
-        return Err(
-            "unknown tls_mode atom; expected :plaintext or :system_certs".to_string(),
-        );
+        return Err("unknown tls_mode atom; expected :plaintext or :system_certs".to_string());
     }
 
     let tuple = rustler::types::tuple::get_tuple(term).map_err(|_| {
@@ -157,7 +155,7 @@ fn parse_tls_mode<'a>(term: Term<'a>) -> Result<TlsMode, String> {
     )
 }
 
-// ── Error encoding ────────────────────────────────────────────────────────────
+// Error encoding
 
 /// Encode a Flight SQL error as `{:error, {code_atom, grpc_status_integer, message}}`.
 ///
@@ -178,12 +176,8 @@ fn flight_error_to_term<'a>(env: Env<'a>, err: FlightError) -> Term<'a> {
             encode_sql_error(env, code, grpc_code, status.message())
         }
         FlightError::Arrow(inner) => arrow_error_to_term(env, inner),
-        FlightError::DecodeError(msg) => {
-            encode_sql_error(env, protocol_error(), 0, msg)
-        }
-        FlightError::ProtocolError(msg) => {
-            encode_sql_error(env, protocol_error(), 0, msg)
-        }
+        FlightError::DecodeError(msg) => encode_sql_error(env, protocol_error(), 0, msg),
+        FlightError::ProtocolError(msg) => encode_sql_error(env, protocol_error(), 0, msg),
         other => encode_sql_error(env, transport_error(), 0, &other.to_string()),
     }
 }
@@ -312,11 +306,11 @@ fn extract_quoted_field(s: &str, prefix: &str) -> Option<String> {
     Some(result)
 }
 
-// ── Schema decode helper ──────────────────────────────────────────────────────
+// Schema decode helper
 
 /// Decode the IPC-encoded schema bytes from a `FlightInfo` response.
 ///
-/// Returns an empty schema when `bytes` is empty — some servers omit the
+/// Returns an empty schema when `bytes` is empty; some servers omit the
 /// schema in `FlightInfo` and send it as the first `FlightData` message
 /// instead.  The `FlightRecordBatchStream` decoder handles that path
 /// transparently.
@@ -329,7 +323,7 @@ fn decode_flight_schema(bytes: bytes::Bytes) -> Result<SchemaRef, String> {
         .map_err(|e| format!("schema decode: {e}"))
 }
 
-// ── NIFs ──────────────────────────────────────────────────────────────────────
+// NIFs
 
 /// Connect to a Flight SQL server.
 ///
@@ -398,7 +392,7 @@ pub fn flight_sql_connect<'a>(
 /// Returns `{:ok, stream_ref}` or `{:error, {code, grpc_status, message}}`.
 ///
 /// Returns `{:error, {multi_endpoint, 0, message}}` when `FlightInfo` contains
-/// more than one endpoint — multi-endpoint distribution is not supported in v0.5.0.
+/// more than one endpoint; multi-endpoint distribution is not supported in v0.5.0.
 ///
 /// **Concurrency note**: concurrent calls on the same client handle are serialised
 /// by an internal Mutex.  `FlightSqlServiceClient::execute` requires exclusive
@@ -439,14 +433,7 @@ pub fn flight_sql_query<'a>(
     // Step 3: Extract ticket
     let ticket = match flight_info.endpoint[0].ticket.clone() {
         Some(t) => t,
-        None => {
-            return encode_sql_error(
-                env,
-                protocol_error(),
-                0,
-                "FlightEndpoint has no ticket",
-            )
-        }
+        None => return encode_sql_error(env, protocol_error(), 0, "FlightEndpoint has no ticket"),
     };
 
     // Step 4: Decode schema from FlightInfo schema bytes
@@ -460,7 +447,7 @@ pub fn flight_sql_query<'a>(
         Ok(s) => s,
         Err(e) => return arrow_error_to_term(env, &e),
     };
-    // Release the lock — the stream owns its own connection internally.
+    // Release the lock; the stream owns its own connection internally.
     drop(guard);
 
     let resource = FlightSqlStreamResource {
@@ -515,9 +502,9 @@ pub fn flight_sql_stream_schema<'a>(
 /// Read the next record batch from a Flight SQL stream.
 ///
 /// Returns:
-/// - `{:ok, batch_ref}` — the next batch (data stays in native memory).
-/// - `:done` — the stream is exhausted.
-/// - `{:error, {code, grpc_status, message}}` — a transport or server error.
+/// - `{:ok, batch_ref}`: the next batch (data stays in native memory).
+/// - `:done`: the stream is exhausted.
+/// - `{:error, {code, grpc_status, message}}`: transport or server error.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn flight_sql_stream_next<'a>(
     env: Env<'a>,
@@ -539,7 +526,7 @@ pub fn flight_sql_stream_next<'a>(
     }
 }
 
-// ── Metadata helpers ──────────────────────────────────────────────────────────
+// Metadata helpers
 
 /// Shared post-processing for any `FlightInfo`-returning metadata call.
 ///
@@ -566,14 +553,7 @@ fn flight_info_to_stream<'a>(
 
     let ticket = match flight_info.endpoint[0].ticket.clone() {
         Some(t) => t,
-        None => {
-            return encode_sql_error(
-                env,
-                protocol_error(),
-                0,
-                "FlightEndpoint has no ticket",
-            )
-        }
+        None => return encode_sql_error(env, protocol_error(), 0, "FlightEndpoint has no ticket"),
     };
 
     let schema = match decode_flight_schema(flight_info.schema) {
@@ -600,7 +580,7 @@ fn flight_info_to_stream<'a>(
     ok_encode(env, ResourceArc::new(resource))
 }
 
-// ── Metadata NIFs ─────────────────────────────────────────────────────────────
+// Metadata NIFs
 
 /// List tables visible to the connected user.
 ///
@@ -706,19 +686,20 @@ pub fn flight_sql_get_sql_info<'a>(
     flight_info_to_stream(env, &rt, &client_ref.client, flight_info)
 }
 
-// ── Prepared statement NIFs ───────────────────────────────────────────────────
+// Prepared statement NIFs
 
 /// Prepare a SQL query on the server and return an opaque statement handle.
 ///
 /// The server parses and plans the query, returning a
-/// `FlightSqlPreparedStatementResource` that can be executed one or more
-/// times via `flight_sql_prepared_execute` or
-/// `flight_sql_prepared_execute_update`.
+/// `FlightSqlPreparedStatementResource` that can be bound, executed, and
+/// closed.
+///
+/// After preparing, parameters can be bound with `flight_sql_prepared_bind`,
+/// the statement can be executed with `flight_sql_prepared_execute` or
+/// `flight_sql_prepared_execute_update`, and the handle should be closed
+/// with `flight_sql_prepared_close` to release server-side resources.
 ///
 /// Returns `{:ok, stmt_ref}` or `{:error, {code, grpc_status, message}}`.
-///
-/// Parameter binding is not supported in v0.5.0 — the statement executes
-/// with no bound parameters.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn flight_sql_prepare<'a>(
     env: Env<'a>,
@@ -741,9 +722,75 @@ pub fn flight_sql_prepare<'a>(
     let resource = FlightSqlPreparedStatementResource {
         rt,
         client: client_ref.client.clone(),
-        stmt: Mutex::new(stmt),
+        stmt: Mutex::new(Some(stmt)),
     };
     ok_encode(env, ResourceArc::new(resource))
+}
+
+/// Bind a RecordBatch of parameters to a prepared statement.
+///
+/// The RecordBatch must match the parameter schema returned by the server
+/// during `CreatePreparedStatement`.  Column names must match parameter
+/// names; column types must be compatible.
+///
+/// The arrow-flight crate's `PreparedStatement::set_parameters` stores the
+/// batch internally; `write_bind_params` sends it to the server during the
+/// next `execute` or `execute_update` call.
+///
+/// Returns `:ok` on success, `{:error, {code, grpc_status, message}}` on failure.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_sql_prepared_bind<'a>(
+    env: Env<'a>,
+    stmt_ref: ResourceArc<FlightSqlPreparedStatementResource>,
+    batch_ref: ResourceArc<ExArrowRecordBatch>,
+) -> Term<'a> {
+    let mut guard = match stmt_ref.stmt.lock() {
+        Ok(g) => g,
+        Err(_) => return err_encode(env, "statement lock poisoned"),
+    };
+
+    let stmt = match guard.as_mut() {
+        Some(s) => s,
+        None => return encode_sql_error(env, protocol_error(), 0, "statement is closed"),
+    };
+
+    match stmt.set_parameters(batch_ref.batch.clone()) {
+        Ok(()) => ok_encode(env, rustler::types::atom::ok()),
+        Err(e) => arrow_error_to_term(env, &e),
+    }
+}
+
+/// Return the parameter schema of a prepared statement.
+///
+/// The schema describes the expected column names and Arrow types for
+/// parameter binding.  An empty schema means the statement takes no
+/// parameters.
+///
+/// Returns `{:ok, schema_ref}` or `{:error, {code, grpc_status, message}}`.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_sql_prepared_parameter_schema<'a>(
+    env: Env<'a>,
+    stmt_ref: ResourceArc<FlightSqlPreparedStatementResource>,
+) -> Term<'a> {
+    let guard = match stmt_ref.stmt.lock() {
+        Ok(g) => g,
+        Err(_) => return err_encode(env, "statement lock poisoned"),
+    };
+
+    let stmt = match guard.as_ref() {
+        Some(s) => s,
+        None => return encode_sql_error(env, protocol_error(), 0, "statement is closed"),
+    };
+
+    match stmt.parameter_schema() {
+        Ok(schema) => {
+            let schema_ref = ExArrowSchema {
+                schema: Arc::new(schema.clone()),
+            };
+            ok_encode(env, ResourceArc::new(schema_ref))
+        }
+        Err(e) => arrow_error_to_term(env, &e),
+    }
 }
 
 /// Execute a prepared statement and return a lazy record-batch stream.
@@ -764,7 +811,11 @@ pub fn flight_sql_prepared_execute<'a>(
             Ok(g) => g,
             Err(_) => return err_encode(env, "statement lock poisoned"),
         };
-        match rt.block_on(guard.execute()) {
+        let stmt = match guard.as_mut() {
+            Some(s) => s,
+            None => return encode_sql_error(env, protocol_error(), 0, "statement is closed"),
+        };
+        match rt.block_on(stmt.execute()) {
             Ok(info) => info,
             Err(e) => return arrow_error_to_term(env, &e),
         }
@@ -788,10 +839,65 @@ pub fn flight_sql_prepared_execute_update<'a>(
         Ok(g) => g,
         Err(_) => return err_encode(env, "statement lock poisoned"),
     };
+    let stmt = match guard.as_mut() {
+        Some(s) => s,
+        None => return encode_sql_error(env, protocol_error(), 0, "statement is closed"),
+    };
 
-    match rt.block_on(guard.execute_update()) {
+    match rt.block_on(stmt.execute_update()) {
         Ok(n) if n < 0 => (ok(), unknown()).encode(env),
         Ok(n) => (ok(), n as u64).encode(env),
+        Err(e) => arrow_error_to_term(env, &e),
+    }
+}
+
+/// Close a prepared statement and release server-side resources.
+///
+/// Sends `ActionClosePreparedStatement` to the server.  After this call
+/// the statement handle must not be used again; subsequent bind, execute,
+/// or close calls will return `{:error, {:protocol_error, 0, "statement is closed"}}`.
+///
+/// Close is idempotent; calling it on an already-closed statement returns `:ok`.
+///
+/// ## Behaviour on error
+///
+/// `PreparedStatement::close(self)` consumes the statement, so even when the
+/// underlying gRPC call fails the statement is taken out of the resource's
+/// `Mutex<Option<...>>` and dropped.  This means:
+///
+/// - The Elixir resource is in the closed state regardless of return value.
+/// - A retry call to this NIF returns `:ok` (idempotent path).
+/// - The server-side resource may or may not be freed; transient transport
+///   errors may leave it allocated until the connection is dropped.
+///
+/// Returns `:ok` on success, `{:error, {code, grpc_status, message}}` on failure.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_sql_prepared_close<'a>(
+    env: Env<'a>,
+    stmt_ref: ResourceArc<FlightSqlPreparedStatementResource>,
+) -> Term<'a> {
+    let rt = stmt_ref.rt.clone();
+
+    // Take ownership of the PreparedStatement out of the Option.
+    // This prevents any further use of the statement through this handle.
+    let stmt = {
+        let mut guard = match stmt_ref.stmt.lock() {
+            Ok(g) => g,
+            Err(_) => return err_encode(env, "statement lock poisoned"),
+        };
+        match guard.take() {
+            Some(s) => s,
+            None => {
+                // Already closed; idempotent close returns :ok
+                return ok_encode(env, rustler::types::atom::ok());
+            }
+        }
+    };
+
+    // PreparedStatement::close(self) consumes self and sends
+    // ActionClosePreparedStatement to the server.
+    match rt.block_on(stmt.close()) {
+        Ok(()) => ok_encode(env, rustler::types::atom::ok()),
         Err(e) => arrow_error_to_term(env, &e),
     }
 }

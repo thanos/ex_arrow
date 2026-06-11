@@ -5,6 +5,78 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-06-11
+
+### Added
+
+- **Flight SQL prepared statement parameter binding**:
+  `ExArrow.FlightSQL.Statement.bind/2` binds an `ExArrow.RecordBatch` of
+  parameters to a prepared statement before execution.  Returns `:ok` or
+  `{:error, %Error{}}`.
+- **`ExArrow.FlightSQL.Statement.close/1`**: closes a prepared
+  statement and releases server-side resources via
+  `ActionClosePreparedStatement`.  Idempotent: calling `close/1` on an
+  already-closed statement returns `:ok`.  Closed-state is tracked inside
+  the underlying NIF resource; subsequent calls to `bind/2`, `execute/1`,
+  `execute_update/1`, or `parameter_schema/1` return
+  `{:error, %Error{code: :protocol_error}}`.
+- **`ExArrow.FlightSQL.Statement.parameter_schema/1`**: returns the parameter
+  schema of a prepared statement, enabling callers to inspect expected column
+  names and Arrow types before binding.
+- **`ExArrow.RecordBatch.from_columns/4`**: creates a `RecordBatch` from
+  column-oriented binary data (names, binaries, dtype strings, row count).
+  Returns `{:ok, t()} | {:error, String.t()}`.  Constructor for
+  building parameter batches.  Supported dtypes:
+  - Signed integers: `"s8"`, `"s16"`, `"s32"`, `"s64"`
+  - Unsigned integers: `"u8"`, `"u16"`, `"u32"`, `"u64"`
+  - Floats: `"f32"`, `"f64"`
+  - Boolean: `"bool"`
+  - Date/time: `"date32"`, `"date64"`, `"timestamp_seconds"`,
+    `"timestamp_millis"`, `"timestamp_micros"`, `"timestamp_nanos"`,
+    `"duration_seconds"`, `"duration_millis"`, `"duration_micros"`,
+    `"duration_nanos"`
+  - Variable-length: `"utf8"`, `"large_utf8"`, `"binary"`, `"large_binary"`
+    (length-prefixed records, see `ExArrow.RecordBatch` moduledoc for the
+    wire format)
+- **Rust NIF: `flight_sql_prepared_bind`**: binds a `RecordBatch` to a
+  prepared statement via `PreparedStatement::set_parameters`.
+- **Rust NIF: `flight_sql_prepared_close`**: closes a prepared statement via
+  `PreparedStatement::close`, consuming the statement handle.  The
+  `FlightSqlPreparedStatementResource` stores `Mutex<Option<PreparedStatement>>`
+  to support clean ownership transfer and idempotent close.
+- **Rust NIF: `flight_sql_prepared_parameter_schema`**: returns the parameter
+  schema from a prepared statement.
+
+### Changed
+
+- **`FlightSqlPreparedStatementResource.stmt`** changed from
+  `Mutex<PreparedStatement<Channel>>` to
+  `Mutex<Option<PreparedStatement<Channel>>>` to support `close/1` that
+  consumes the statement handle.  Closed-state is detected by checking the
+  inner `Option`; all prepared-statement NIFs return
+  `{:error, {:protocol_error, 0, "statement is closed"}}` when called on a
+  closed handle.
+- **`Client.prepare/2` documentation** updated to reflect parameter binding
+  support and `close/1` lifecycle.
+- **Minimum Rust `arrow-flight` crate version: 56**: Flight SQL prepared
+  statement support uses `PreparedStatement::set_parameters`, `close`, and
+  `parameter_schema` APIs available from `arrow-flight` v56.  Earlier crate
+  versions are missing these methods.  `Cargo.toml` pins `arrow-flight = "56"`.
+- **`Statement` struct is opaque**: the `closed` field from earlier
+  development builds has been removed.  Closed-state is now tracked inside
+  the NIF resource (`Mutex<Option<PreparedStatement>>`).  Code that pattern-
+  matched on `%Statement{closed: _}` must be updated to treat `Statement` as
+  an opaque handle and use `close/1` / `bind/2` / `execute/1` for lifecycle
+  queries.
+
+### Fixed
+
+- CI: Removed broken Dialyzer PLT cache that produced "Old PLT file" errors
+  when the cached PLT was incompatible with the current OTP/Elixir version.
+  The PLT now lives in `_build/dev/` (dialyxir's default location) and is
+  covered by the existing `_build` cache.
+- `script/ci`: Fixed `--warninsg-as-errors` typo in `mix docs` invocation.
+
 ## [0.6.0] - 2026-06-08
 
 ### Added

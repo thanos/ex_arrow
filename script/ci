@@ -15,6 +15,8 @@ echo "== mix credo --strict"
 mix credo --strict
 echo "== mix sobelow"
 mix sobelow --exit --skip
+echo "== check_version"
+bash script/check_version
 echo "== mix dialyzer"
 mix dialyzer
 echo "== mix test"
@@ -22,5 +24,5 @@ mix test
 echo "== mix coveralls.html"
 mix coveralls.html  --include adbc_package:true
 echo "== mix docs"
-mix docs --warninsg-as-errors
+mix docs --warnings-as-errors
 echo "== CI (local) passed"

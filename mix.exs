@@ -1,7 +1,7 @@
 defmodule ExArrow.MixProject do
   use Mix.Project
 
-  @version "0.6.0"
+  @version "0.6.1"
   @source_url "https://github.com/thanos/ex_arrow"
 
   def project do
@@ -19,7 +19,6 @@ defmodule ExArrow.MixProject do
       package: package(),
       test_coverage: [tool: ExCoveralls],
       dialyzer: [
-        plt_file: {:no_warn, "priv/plts/project.plt"},
         plt_add_apps: [:mix],
         ignore_warnings: "dialyzer_ignore.exs"
       ]

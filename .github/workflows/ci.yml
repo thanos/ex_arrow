@@ -50,6 +50,8 @@ jobs:
       - run: mix format --check-formatted
       - run: mix credo --strict
       - run: mix sobelow --exit --skip
+      - name: Check CHANGELOG version matches mix.exs
+        run: bash script/check_version
       - run: mix docs --warnings-as-errors
         env:
           MIX_ENV: dev
@@ -88,13 +90,6 @@ jobs:
             mix-build-dialyzer-1.20-29-
 
       - run: mix deps.get
-      - run: mkdir -p priv/plts
-      - name: Restore Dialyzer PLT cache
-        uses: actions/cache@v5.0.5
-        with:
-          path: priv/plts
-          key: plt-core-1.20-29-${{ hashFiles('mix.lock') }}
-      - run: rm -f priv/plts/project.plt
       - run: mix dialyzer
 
   # ── Test with Rust NIF ────────────────────────────────────────────────────────

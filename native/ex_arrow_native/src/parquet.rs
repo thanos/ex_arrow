@@ -62,10 +62,7 @@ pub fn parquet_reader_from_binary<'a>(env: Env<'a>, binary: rustler::Binary) -> 
     build_stream(env, builder)
 }
 
-fn build_stream<'a, T>(
-    env: Env<'a>,
-    builder: ParquetRecordBatchReaderBuilder<T>,
-) -> Term<'a>
+fn build_stream<'a, T>(env: Env<'a>, builder: ParquetRecordBatchReaderBuilder<T>) -> Term<'a>
 where
     T: parquet::file::reader::ChunkReader + 'static,
 {

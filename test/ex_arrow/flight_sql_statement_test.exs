@@ -85,8 +85,28 @@ defmodule ExArrow.FlightSQL.StatementTest do
   end
 
   describe "execute/1 — invalid resource (real NIF)" do
-    test "raises ArgumentError when resource is a plain Erlang ref" do
+    @tag no_nif: true
+    test "raises ArgumentError when NIF is loaded with bad ref" do
       assert_raise ArgumentError, fn -> Statement.execute(fake_stmt()) end
+    end
+  end
+
+  describe "execute/1 — closed statement (NIF returns :protocol_error)" do
+    setup do
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeClosed
+      )
+
+      :ok
+    end
+
+    test "returns {:error, %Error{code: :protocol_error}}" do
+      assert {:error, %Error{code: :protocol_error, message: msg}} =
+               Statement.execute(fake_stmt())
+
+      assert msg =~ "statement is closed"
     end
   end
 
@@ -154,8 +174,287 @@ defmodule ExArrow.FlightSQL.StatementTest do
   end
 
   describe "execute_update/1 — invalid resource (real NIF)" do
-    test "raises ArgumentError when resource is a plain Erlang ref" do
+    @tag no_nif: true
+    test "raises ArgumentError when NIF is loaded with bad ref" do
       assert_raise ArgumentError, fn -> Statement.execute_update(fake_stmt()) end
+    end
+  end
+
+  describe "execute_update/1 — closed statement (NIF returns :protocol_error)" do
+    setup do
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeClosed
+      )
+
+      :ok
+    end
+
+    test "returns {:error, %Error{code: :protocol_error}}" do
+      assert {:error, %Error{code: :protocol_error}} = Statement.execute_update(fake_stmt())
+    end
+  end
+
+  # ── Statement.bind/2 ─────────────────────────────────────────────────────────
+
+  describe "bind/2 — success (stub native)" do
+    setup do
+      Application.put_env(:ex_arrow, :flight_sql_statement_native, ExArrow.FlightSQL.StmtNativeOk)
+      :ok
+    end
+
+    test "returns :ok" do
+      batch = %ExArrow.RecordBatch{resource: make_ref()}
+      assert :ok = Statement.bind(fake_stmt(), batch)
+    end
+
+    test "accepts a real RecordBatch built via from_columns/4 and forwards its resource ref" do
+      # End-to-end at the Elixir layer:
+      #   from_columns/4 produces a real NIF reference,
+      #   Statement.bind/2 unwraps the struct via pattern match,
+      #   the recording stub captures the exact ref it was handed.
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeRecording
+      )
+
+      ExArrow.FlightSQL.StmtNativeRecording.reset()
+
+      assert {:ok, %ExArrow.RecordBatch{resource: batch_ref} = batch} =
+               ExArrow.RecordBatch.from_columns(
+                 ["id"],
+                 [<<42::little-signed-64>>],
+                 ["s64"],
+                 1
+               )
+
+      assert is_reference(batch_ref)
+
+      stmt = fake_stmt()
+      assert :ok = Statement.bind(stmt, batch)
+
+      assert ExArrow.FlightSQL.StmtNativeRecording.last_bind_call() ==
+               {stmt.resource, batch_ref}
+    end
+  end
+
+  describe "bind/2 — schema mismatch error" do
+    setup do
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeError
+      )
+
+      :ok
+    end
+
+    test "returns {:error, %Error{code: :invalid_argument}}" do
+      batch = %ExArrow.RecordBatch{resource: make_ref()}
+
+      assert {:error, %Error{code: :invalid_argument, message: msg}} =
+               Statement.bind(fake_stmt(), batch)
+
+      assert msg =~ "schema mismatch"
+    end
+  end
+
+  describe "bind/2 — closed statement (NIF returns :protocol_error)" do
+    setup do
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeClosed
+      )
+
+      :ok
+    end
+
+    test "returns {:error, %Error{code: :protocol_error}}" do
+      batch = %ExArrow.RecordBatch{resource: make_ref()}
+
+      assert {:error, %Error{code: :protocol_error, message: msg}} =
+               Statement.bind(fake_stmt(), batch)
+
+      assert msg =~ "statement is closed"
+    end
+  end
+
+  # ── Statement.parameter_schema/1 ─────────────────────────────────────────────
+
+  describe "parameter_schema/1 — success (stub native)" do
+    setup do
+      Application.put_env(:ex_arrow, :flight_sql_statement_native, ExArrow.FlightSQL.StmtNativeOk)
+      :ok
+    end
+
+    test "returns {:ok, schema_ref}" do
+      assert {:ok, _schema} = Statement.parameter_schema(fake_stmt())
+    end
+  end
+
+  describe "parameter_schema/1 — unimplemented error" do
+    setup do
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeError
+      )
+
+      :ok
+    end
+
+    test "returns {:error, %Error{code: :unimplemented}}" do
+      assert {:error, %Error{code: :unimplemented, message: msg}} =
+               Statement.parameter_schema(fake_stmt())
+
+      assert msg =~ "parameter schema not available"
+    end
+  end
+
+  describe "parameter_schema/1 — closed statement (NIF returns :protocol_error)" do
+    setup do
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeClosed
+      )
+
+      :ok
+    end
+
+    test "returns {:error, %Error{code: :protocol_error}}" do
+      assert {:error, %Error{code: :protocol_error}} = Statement.parameter_schema(fake_stmt())
+    end
+  end
+
+  # ── Statement.close/1 ───────────────────────────────────────────────────────
+
+  describe "close/1 — success (stub native)" do
+    setup do
+      Application.put_env(:ex_arrow, :flight_sql_statement_native, ExArrow.FlightSQL.StmtNativeOk)
+      :ok
+    end
+
+    test "returns :ok" do
+      assert :ok = Statement.close(fake_stmt())
+    end
+  end
+
+  describe "close/1 — idempotent" do
+    test "open → close → close (counts both invocations, both succeed)" do
+      # Use a stateful stub that flips its closed-state after the first
+      # successful close call, so the second invocation hits the
+      # already-closed branch and still returns :ok.
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeStatefulClose
+      )
+
+      ExArrow.FlightSQL.StmtNativeStatefulClose.reset()
+
+      stmt = fake_stmt()
+
+      assert :ok = Statement.close(stmt)
+      assert :ok = Statement.close(stmt)
+
+      assert ExArrow.FlightSQL.StmtNativeStatefulClose.call_count() == 2
+      assert ExArrow.FlightSQL.StmtNativeStatefulClose.closed?()
+    end
+
+    test "operations after close return :protocol_error (full lifecycle)" do
+      # Stateful stub: first close returns :ok, then everything else (including
+      # subsequent close, bind, execute, ...) returns :protocol_error from the
+      # NIF — modelling the real NIF's Mutex<Option<...>>::take() behaviour.
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeStatefulClose
+      )
+
+      ExArrow.FlightSQL.StmtNativeStatefulClose.reset()
+
+      stmt = fake_stmt()
+      batch = %ExArrow.RecordBatch{resource: make_ref()}
+
+      assert :ok = Statement.close(stmt)
+
+      assert {:error, %Error{code: :protocol_error}} = Statement.bind(stmt, batch)
+      assert {:error, %Error{code: :protocol_error}} = Statement.execute(stmt)
+      assert {:error, %Error{code: :protocol_error}} = Statement.execute_update(stmt)
+      assert {:error, %Error{code: :protocol_error}} = Statement.parameter_schema(stmt)
+
+      # close/1 itself is still idempotent and returns :ok.
+      assert :ok = Statement.close(stmt)
+    end
+  end
+
+  describe "close/1 — server error (stub native)" do
+    setup do
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeError
+      )
+
+      :ok
+    end
+
+    test "returns {:error, %Error{}} when server fails" do
+      assert {:error, %Error{}} = Statement.close(fake_stmt())
+    end
+  end
+
+  # ── Lifecycle: bind → execute → close ────────────────────────────────────────
+
+  describe "lifecycle — bind, execute, close" do
+    setup do
+      Application.put_env(:ex_arrow, :flight_sql_statement_native, ExArrow.FlightSQL.StmtNativeOk)
+      :ok
+    end
+
+    test "full lifecycle works with stubs" do
+      stmt = fake_stmt()
+      batch = %ExArrow.RecordBatch{resource: make_ref()}
+
+      assert :ok = Statement.bind(stmt, batch)
+      assert {:ok, %Stream{}} = Statement.execute(stmt)
+      assert :ok = Statement.close(stmt)
+    end
+  end
+
+  # ── Operations after close should fail (NIF-side guard) ──────────────────────
+
+  describe "operations after close (NIF guard)" do
+    setup do
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeClosed
+      )
+
+      :ok
+    end
+
+    test "bind on closed stmt returns protocol error" do
+      batch = %ExArrow.RecordBatch{resource: make_ref()}
+
+      assert {:error, %Error{code: :protocol_error}} = Statement.bind(fake_stmt(), batch)
+    end
+
+    test "execute on closed stmt returns protocol error" do
+      assert {:error, %Error{code: :protocol_error}} = Statement.execute(fake_stmt())
+    end
+
+    test "execute_update on closed stmt returns protocol error" do
+      assert {:error, %Error{code: :protocol_error}} = Statement.execute_update(fake_stmt())
+    end
+
+    test "parameter_schema on closed stmt returns protocol error" do
+      assert {:error, %Error{code: :protocol_error}} = Statement.parameter_schema(fake_stmt())
     end
   end
 
@@ -200,7 +499,8 @@ defmodule ExArrow.FlightSQL.StatementTest do
   end
 
   describe "Client.prepare/2 — invalid resource (real NIF)" do
-    test "raises ArgumentError when client ref is a plain Erlang ref" do
+    @tag no_nif: true
+    test "raises ArgumentError when NIF is loaded with bad ref" do
       fake_client = %Client{resource: make_ref()}
 
       assert_raise ArgumentError, fn ->
