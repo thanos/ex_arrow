@@ -93,8 +93,7 @@ jobs:
         uses: actions/cache@v5.0.5
         with:
           path: priv/plts
-          key: plt-core-1.20-29-${{ hashFiles('mix.lock') }}
-      - run: rm -f priv/plts/project.plt
+          key: plt-1.20-29-${{ hashFiles('mix.lock') }}
       - run: mix dialyzer
 
   # ── Test with Rust NIF ────────────────────────────────────────────────────────
