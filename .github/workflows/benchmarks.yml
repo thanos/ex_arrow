@@ -24,22 +24,25 @@ jobs:
     permissions:
       contents: write
 
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.3
 
       - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@v1.24.0
         with:
           elixir-version: "1.20"
           otp-version: "29"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
 
       - name: Cache Rust build
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: |
             ~/.cargo/registry
@@ -50,7 +53,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Cache Mix build
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: |
             deps
@@ -180,7 +183,7 @@ jobs:
       # auto-push: true handles the gh-pages push via github-token — no
       # separate push step or GH_PAGES_TOKEN secret is required.
       - name: Store benchmark results
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@v1.22.1
         with:
           name: ExArrow Benchmark Suite
           tool: customSmallerIsBetter
@@ -199,7 +202,7 @@ jobs:
 
       # Upload HTML reports as a workflow artifact (7-day retention).
       - name: Upload HTML reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: benchmark-html-${{ github.sha }}
           path: bench/output/*.html

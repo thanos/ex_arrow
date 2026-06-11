@@ -31,6 +31,9 @@ jobs:
     name: NIF ${{ matrix.nif }} - ${{ matrix.job.target }} (${{ matrix.job.os }} | ${{ matrix.job.variant || 'default' }})
     runs-on: ${{ matrix.job.os }}
 
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
     strategy:
       fail-fast: false
       matrix:
@@ -59,7 +62,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.3
 
       - name: Extract project version
         shell: bash
@@ -73,7 +76,7 @@ jobs:
         if: ${{ matrix.job.rustflags }}
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
           targets: ${{ matrix.job.target }}
@@ -92,7 +95,7 @@ jobs:
           echo "PATH=$(brew --prefix gnu-tar)/libexec/gnubin:$PATH" >> $GITHUB_ENV
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.1
         with:
           prefix-key: ex-arrow-precomp
           shared-key: ${{ matrix.job.target }}-${{ matrix.nif }}-${{ matrix.job.variant || 'default' }}
@@ -101,7 +104,7 @@ jobs:
 
       - name: Build NIF
         id: build
-        uses: philss/rustler-precompiled-action@v1.1.4
+        uses: philss/rustler-precompiled-action@v1.1.5
         env:
           RUSTUP_TOOLCHAIN: stable
         with:
@@ -118,7 +121,7 @@ jobs:
       - name: Artifact attestation
         if: startsWith(github.ref, 'refs/tags/')
         continue-on-error: true
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4.1.0
         with:
           subject-path: ${{ steps.build.outputs.file-path }}
 
@@ -131,7 +134,7 @@ jobs:
           fi
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: ${{ steps.build.outputs.file-name }}
           path: ${{ steps.build.outputs.file-path }}
@@ -141,9 +144,11 @@ jobs:
     needs: build_nifs
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8.0.1
         with:
           path: release-artifacts
           merge-multiple: true
@@ -155,7 +160,7 @@ jobs:
           ls -la nifs/
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3.0.0
         with:
           files: nifs/*.tar.gz
           generate_release_notes: true
@@ -169,20 +174,21 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     env:
       EX_ARROW_BUILD: "1"
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.3
 
       - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@v1.24.0
         with:
           otp-version: "29"
           elixir-version: "1.20"
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1
 
       - name: Restore Mix dependencies cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: deps
           key: mix-deps-publish-${{ hashFiles('mix.lock') }}
@@ -190,7 +196,7 @@ jobs:
             mix-deps-publish-
 
       - name: Restore Rust target cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.5
         with:
           path: native/ex_arrow_native/target
           key: rust-target-publish-${{ hashFiles('native/ex_arrow_native/Cargo.lock', 'native/ex_arrow_native/src/**') }}

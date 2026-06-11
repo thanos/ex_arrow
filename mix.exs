@@ -22,8 +22,13 @@ defmodule ExArrow.MixProject do
         plt_file: {:no_warn, "priv/plts/project.plt"},
         plt_add_apps: [:mix],
         ignore_warnings: "dialyzer_ignore.exs"
-      ],
-      preferred_cli_env: [
+      ]
+    ]
+  end
+
+  def cli do
+    [
+      preferred_envs: [
         coveralls: :test,
         "coveralls.html": :test,
         "coveralls.github": :test
