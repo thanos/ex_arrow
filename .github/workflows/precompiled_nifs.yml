@@ -76,9 +76,8 @@ jobs:
         if: ${{ matrix.job.rustflags }}
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
           targets: ${{ matrix.job.target }}
 
       - name: Add target (macOS)
@@ -185,7 +184,7 @@ jobs:
           elixir-version: "1.20"
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Restore Mix dependencies cache
         uses: actions/cache@v5.0.5
