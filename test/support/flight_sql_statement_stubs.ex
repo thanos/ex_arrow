@@ -121,6 +121,35 @@ defmodule ExArrow.FlightSQL.StmtNativeStatefulClose do
   end
 end
 
+# Recording stub: captures the (stmt_ref, batch_ref) pair handed to
+# flight_sql_prepared_bind so tests can verify the Elixir layer forwards
+# the right resource references unchanged.  State is per-process to keep
+# tests isolated.
+defmodule ExArrow.FlightSQL.StmtNativeRecording do
+  @moduledoc false
+  @key :__ex_arrow_stmt_recording__
+
+  def reset, do: Process.put(@key, %{last_bind: nil})
+
+  def last_bind_call do
+    state = Process.get(@key) || %{last_bind: nil}
+    state.last_bind
+  end
+
+  def flight_sql_prepared_bind(stmt_ref, batch_ref) do
+    state = Process.get(@key) || %{last_bind: nil}
+    Process.put(@key, %{state | last_bind: {stmt_ref, batch_ref}})
+    :ok
+  end
+
+  # Pass-through implementations for the other operations so the stub can
+  # be used in lifecycle tests without exploding.
+  def flight_sql_prepared_execute(_ref), do: {:ok, :fake_stream_ref}
+  def flight_sql_prepared_execute_update(_ref), do: {:ok, 0}
+  def flight_sql_prepared_parameter_schema(_ref), do: {:ok, :fake_schema_ref}
+  def flight_sql_prepared_close(_ref), do: :ok
+end
+
 # Returns a binary (non-tuple) error -- exercises the binary clause of wrap_nif_error.
 defmodule ExArrow.FlightSQL.StmtNativeBinaryError do
   @moduledoc false

@@ -208,6 +208,36 @@ defmodule ExArrow.FlightSQL.StatementTest do
       batch = %ExArrow.RecordBatch{resource: make_ref()}
       assert :ok = Statement.bind(fake_stmt(), batch)
     end
+
+    test "accepts a real RecordBatch built via from_columns/4 and forwards its resource ref" do
+      # End-to-end at the Elixir layer:
+      #   from_columns/4 produces a real NIF reference,
+      #   Statement.bind/2 unwraps the struct via pattern match,
+      #   the recording stub captures the exact ref it was handed.
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeRecording
+      )
+
+      ExArrow.FlightSQL.StmtNativeRecording.reset()
+
+      assert {:ok, %ExArrow.RecordBatch{resource: batch_ref} = batch} =
+               ExArrow.RecordBatch.from_columns(
+                 ["id"],
+                 [<<42::little-signed-64>>],
+                 ["s64"],
+                 1
+               )
+
+      assert is_reference(batch_ref)
+
+      stmt = fake_stmt()
+      assert :ok = Statement.bind(stmt, batch)
+
+      assert ExArrow.FlightSQL.StmtNativeRecording.last_bind_call() ==
+               {stmt.resource, batch_ref}
+    end
   end
 
   describe "bind/2 — schema mismatch error" do

@@ -334,4 +334,99 @@ defmodule ExArrow.RecordBatchTest do
       assert msg =~ "truncated"
     end
   end
+
+  describe "from_columns/4 — round-trip with schema and metadata" do
+    test "schema is queryable after from_columns and reflects the input names" do
+      assert {:ok, batch} =
+               RecordBatch.from_columns(
+                 ["id", "score"],
+                 [<<1::little-signed-64>>, <<3.14::little-float-64>>],
+                 ["s64", "f64"],
+                 1
+               )
+
+      schema = RecordBatch.schema(batch)
+      assert %ExArrow.Schema{} = schema
+      assert ExArrow.Schema.field_names(schema) == ["id", "score"]
+    end
+
+    test "field types in the schema match the declared dtypes" do
+      bin =
+        [
+          {"i", <<1::little-signed-32>>, "s32"},
+          {"f", <<2.0::little-float-64>>, "f64"},
+          {"b", <<1>>, "bool"},
+          {"s", <<3::little-32, "abc">>, "utf8"}
+        ]
+
+      names = Enum.map(bin, &elem(&1, 0))
+      bins = Enum.map(bin, &elem(&1, 1))
+      dtypes = Enum.map(bin, &elem(&1, 2))
+
+      assert {:ok, batch} = RecordBatch.from_columns(names, bins, dtypes, 1)
+
+      types =
+        batch
+        |> RecordBatch.schema()
+        |> ExArrow.Schema.fields()
+        |> Enum.map(& &1.type)
+
+      # The Schema NIF returns Arrow logical-type atoms (e.g. :int32 for s32).
+      # Verify that the dtypes round-trip correctly to the expected logical
+      # type, not just that *some* schema is produced.
+      assert types == [:int32, :float64, :boolean, :utf8]
+    end
+
+    test "non-nullable fields are produced by from_columns/4" do
+      assert {:ok, batch} =
+               RecordBatch.from_columns(["x"], [<<1::little-signed-64>>], ["s64"], 1)
+
+      assert [%ExArrow.Field{name: "x", type: :int64, nullable: false}] =
+               batch
+               |> RecordBatch.schema()
+               |> ExArrow.Schema.fields()
+    end
+
+    test "column_names/1 round-trip after from_columns/4" do
+      names = ["a", "b", "c"]
+
+      assert {:ok, batch} =
+               RecordBatch.from_columns(
+                 names,
+                 [
+                   <<1::little-signed-64>>,
+                   <<2::little-signed-64>>,
+                   <<3::little-signed-64>>
+                 ],
+                 ["s64", "s64", "s64"],
+                 1
+               )
+
+      assert RecordBatch.column_names(batch) == names
+    end
+
+    test "num_rows/1 reports the declared row count for fixed-width columns" do
+      bin =
+        <<1::little-signed-64, 2::little-signed-64, 3::little-signed-64, 4::little-signed-64,
+          5::little-signed-64>>
+
+      assert {:ok, batch} = RecordBatch.from_columns(["x"], [bin], ["s64"], 5)
+      assert RecordBatch.num_rows(batch) == 5
+    end
+
+    test "num_rows/1 reports the declared row count for utf8 columns" do
+      bin =
+        <<1::little-32, "a", 2::little-32, "bc", 3::little-32, "def">>
+
+      assert {:ok, batch} = RecordBatch.from_columns(["s"], [bin], ["utf8"], 3)
+      assert RecordBatch.num_rows(batch) == 3
+      assert RecordBatch.num_columns(batch) == 1
+    end
+
+    test "num_rows/1 reports zero for an empty column" do
+      assert {:ok, batch} = RecordBatch.from_columns(["s"], [<<>>], ["utf8"], 0)
+      assert RecordBatch.num_rows(batch) == 0
+      assert RecordBatch.num_columns(batch) == 1
+    end
+  end
 end

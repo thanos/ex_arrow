@@ -183,8 +183,9 @@ defmodule ExArrow.FlightSQL.IntegrationTest do
 
       with_stmt(client, "SELECT 1 AS n", fn stmt ->
         case Statement.parameter_schema(stmt) do
-          {:ok, %ExArrow.Schema{}} ->
-            :ok
+          {:ok, %ExArrow.Schema{} = schema} ->
+            # Parameter-less queries should produce an empty parameter schema.
+            assert ExArrow.Schema.fields(schema) == []
 
           {:error, %Error{code: code}} ->
             # Some servers don't expose a parameter schema for parameter-less
@@ -194,14 +195,32 @@ defmodule ExArrow.FlightSQL.IntegrationTest do
       end)
     end
 
-    test "returns a Schema describing a single ? placeholder" do
+    test "describes a single ? placeholder with one Field" do
       client = connect()
 
       with_stmt(client, "SELECT ? AS x", fn stmt ->
         case Statement.parameter_schema(stmt) do
           {:ok, %ExArrow.Schema{} = schema} ->
             fields = ExArrow.Schema.fields(schema)
-            assert length(fields) >= 1
+            assert length(fields) == 1
+            [field] = fields
+            assert %ExArrow.Field{} = field
+            assert is_binary(field.name)
+            assert is_atom(field.type)
+
+          {:error, %Error{code: code}} ->
+            assert code in [:unimplemented, :invalid_argument]
+        end
+      end)
+    end
+
+    test "describes two ? placeholders with two Fields" do
+      client = connect()
+
+      with_stmt(client, "SELECT ? AS x, ? AS y", fn stmt ->
+        case Statement.parameter_schema(stmt) do
+          {:ok, %ExArrow.Schema{} = schema} ->
+            assert length(ExArrow.Schema.fields(schema)) == 2
 
           {:error, %Error{code: code}} ->
             assert code in [:unimplemented, :invalid_argument]
@@ -250,6 +269,25 @@ defmodule ExArrow.FlightSQL.IntegrationTest do
             assert code in [:unimplemented, :invalid_argument]
 
           {_, {:error, %Error{code: code}}} ->
+            assert code in [:unimplemented, :invalid_argument]
+        end
+      end)
+    end
+
+    test "binds a utf8 parameter built via from_columns/4 (length-prefixed wire format)" do
+      client = connect()
+
+      with_stmt(client, "SELECT ? AS s", fn stmt ->
+        # Two strings, length-prefixed.
+        utf8 = <<5::little-32, "hello", 5::little-32, "world">>
+        {:ok, params} = RecordBatch.from_columns(["s"], [utf8], ["utf8"], 2)
+
+        case Statement.bind(stmt, params) do
+          :ok ->
+            assert {:ok, stream} = Statement.execute(stmt)
+            assert length(Enum.to_list(stream)) >= 1
+
+          {:error, %Error{code: code}} ->
             assert code in [:unimplemented, :invalid_argument]
         end
       end)
