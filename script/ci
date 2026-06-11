@@ -22,5 +22,5 @@ mix test
 echo "== mix coveralls.html"
 mix coveralls.html  --include adbc_package:true
 echo "== mix docs"
-mix docs --warninsg-as-errors
+mix docs --warnings-as-errors
 echo "== CI (local) passed"

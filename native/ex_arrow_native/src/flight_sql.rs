@@ -87,7 +87,7 @@ impl rustler::Resource for FlightSqlStreamResource {}
 pub struct FlightSqlPreparedStatementResource {
     pub rt: Arc<tokio::runtime::Runtime>,
     pub client: Arc<Mutex<FlightSqlServiceClient<Channel>>>,
-    pub stmt: Mutex<PreparedStatement<Channel>>,
+    pub stmt: Mutex<Option<PreparedStatement<Channel>>>,
 }
 
 #[rustler::resource_impl]
@@ -711,14 +711,15 @@ pub fn flight_sql_get_sql_info<'a>(
 /// Prepare a SQL query on the server and return an opaque statement handle.
 ///
 /// The server parses and plans the query, returning a
-/// `FlightSqlPreparedStatementResource` that can be executed one or more
-/// times via `flight_sql_prepared_execute` or
-/// `flight_sql_prepared_execute_update`.
+/// `FlightSqlPreparedStatementResource` that can be bound, executed, and
+/// closed.
+///
+/// After preparing, parameters can be bound with `flight_sql_prepared_bind`,
+/// the statement can be executed with `flight_sql_prepared_execute` or
+/// `flight_sql_prepared_execute_update`, and the handle should be closed
+/// with `flight_sql_prepared_close` to release server-side resources.
 ///
 /// Returns `{:ok, stmt_ref}` or `{:error, {code, grpc_status, message}}`.
-///
-/// Parameter binding is not supported in v0.5.0 — the statement executes
-/// with no bound parameters.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn flight_sql_prepare<'a>(
     env: Env<'a>,
@@ -741,7 +742,7 @@ pub fn flight_sql_prepare<'a>(
     let resource = FlightSqlPreparedStatementResource {
         rt,
         client: client_ref.client.clone(),
-        stmt: Mutex::new(stmt),
+        stmt: Mutex::new(Some(stmt)),
     };
     ok_encode(env, ResourceArc::new(resource))
 }
@@ -764,7 +765,11 @@ pub fn flight_sql_prepared_execute<'a>(
             Ok(g) => g,
             Err(_) => return err_encode(env, "statement lock poisoned"),
         };
-        match rt.block_on(guard.execute()) {
+        let stmt = match guard.as_mut() {
+            Some(s) => s,
+            None => return encode_sql_error(env, protocol_error(), 0, "statement is closed"),
+        };
+        match rt.block_on(stmt.execute()) {
             Ok(info) => info,
             Err(e) => return arrow_error_to_term(env, &e),
         }
@@ -788,10 +793,120 @@ pub fn flight_sql_prepared_execute_update<'a>(
         Ok(g) => g,
         Err(_) => return err_encode(env, "statement lock poisoned"),
     };
+    let stmt = match guard.as_mut() {
+        Some(s) => s,
+        None => return encode_sql_error(env, protocol_error(), 0, "statement is closed"),
+    };
 
-    match rt.block_on(guard.execute_update()) {
+    match rt.block_on(stmt.execute_update()) {
         Ok(n) if n < 0 => (ok(), unknown()).encode(env),
         Ok(n) => (ok(), n as u64).encode(env),
+        Err(e) => arrow_error_to_term(env, &e),
+    }
+}
+
+/// Bind a RecordBatch of parameters to a prepared statement.
+///
+/// The RecordBatch must match the parameter schema returned by the server
+/// during `CreatePreparedStatement`.  Column names must match parameter
+/// names; column types must be compatible.
+///
+/// The arrow-flight crate's `PreparedStatement::set_parameters` stores the
+/// batch internally; `write_bind_params` sends it to the server during the
+/// next `execute` or `execute_update` call.
+///
+/// Returns `:ok` on success, `{:error, {code, grpc_status, message}}` on failure.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_sql_prepared_bind<'a>(
+    env: Env<'a>,
+    stmt_ref: ResourceArc<FlightSqlPreparedStatementResource>,
+    batch_ref: ResourceArc<ExArrowRecordBatch>,
+) -> Term<'a> {
+    let mut guard = match stmt_ref.stmt.lock() {
+        Ok(g) => g,
+        Err(_) => return err_encode(env, "statement lock poisoned"),
+    };
+
+    let stmt = match guard.as_mut() {
+        Some(s) => s,
+        None => return encode_sql_error(env, protocol_error(), 0, "statement is closed"),
+    };
+
+    match stmt.set_parameters(batch_ref.batch.clone()) {
+        Ok(()) => ok_encode(env, rustler::types::atom::ok()),
+        Err(e) => arrow_error_to_term(env, &e),
+    }
+}
+
+/// Return the parameter schema of a prepared statement.
+///
+/// The schema describes the expected column names and Arrow types for
+/// parameter binding.  An empty schema means the statement takes no
+/// parameters.
+///
+/// Returns `{:ok, schema_ref}` or `{:error, {code, grpc_status, message}}`.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_sql_prepared_parameter_schema<'a>(
+    env: Env<'a>,
+    stmt_ref: ResourceArc<FlightSqlPreparedStatementResource>,
+) -> Term<'a> {
+    let guard = match stmt_ref.stmt.lock() {
+        Ok(g) => g,
+        Err(_) => return err_encode(env, "statement lock poisoned"),
+    };
+
+    let stmt = match guard.as_ref() {
+        Some(s) => s,
+        None => return encode_sql_error(env, protocol_error(), 0, "statement is closed"),
+    };
+
+    match stmt.parameter_schema() {
+        Ok(schema) => {
+            let schema_ref = ExArrowSchema {
+                schema: Arc::new(schema.clone()),
+            };
+            ok_encode(env, ResourceArc::new(schema_ref))
+        }
+        Err(e) => arrow_error_to_term(env, &e),
+    }
+}
+
+/// Close a prepared statement and release server-side resources.
+///
+/// Sends `ActionClosePreparedStatement` to the server.  After this call
+/// the statement handle must not be used again — subsequent bind, execute,
+/// or close calls will return `{:error, {:protocol_error, 0, "statement is closed"}}`.
+///
+/// Close is idempotent — calling it on an already-closed statement returns `:ok`.
+///
+/// Returns `:ok` on success, `{:error, {code, grpc_status, message}}` on failure.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn flight_sql_prepared_close<'a>(
+    env: Env<'a>,
+    stmt_ref: ResourceArc<FlightSqlPreparedStatementResource>,
+) -> Term<'a> {
+    let rt = stmt_ref.rt.clone();
+
+    // Take ownership of the PreparedStatement out of the Option.
+    // This prevents any further use of the statement through this handle.
+    let stmt = {
+        let mut guard = match stmt_ref.stmt.lock() {
+            Ok(g) => g,
+            Err(_) => return err_encode(env, "statement lock poisoned"),
+        };
+        match guard.take() {
+            Some(s) => s,
+            None => {
+                // Already closed — idempotent close returns :ok
+                return ok_encode(env, rustler::types::atom::ok());
+            }
+        }
+    };
+
+    // PreparedStatement::close(self) consumes self and sends
+    // ActionClosePreparedStatement to the server.
+    match rt.block_on(stmt.close()) {
+        Ok(()) => ok_encode(env, rustler::types::atom::ok()),
         Err(e) => arrow_error_to_term(env, &e),
     }
 }

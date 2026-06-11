@@ -229,17 +229,28 @@ defmodule ExArrow.FlightSQL.Client do
   Servers that do not implement `CreatePreparedStatement` return
   `{:error, %Error{code: :unimplemented}}`.
 
-  Parameter binding (passing `?` placeholders with Arrow data) is not
-  supported in v0.5.0.
+  Use `ExArrow.FlightSQL.Statement.bind/2` to bind Arrow RecordBatch
+  parameters before executing.  Use `ExArrow.FlightSQL.Statement.close/1`
+  to release server-side resources when done.
 
   ## Examples
 
-      {:ok, stmt} = ExArrow.FlightSQL.Client.prepare(client, "SELECT * FROM t")
+      {:ok, stmt} = ExArrow.FlightSQL.Client.prepare(client, "SELECT * FROM t WHERE id = ?")
       {:ok, stream} = ExArrow.FlightSQL.Statement.execute(stmt)
       batches = Enum.to_list(stream)
 
-      # Re-execute the same statement without re-preparing
+      # Bind parameters and execute
+      params = ExArrow.RecordBatch.from_columns(["id"], [<<42::little-signed-64>>], ["int64"], 1)
+      :ok = ExArrow.FlightSQL.Statement.bind(stmt, params)
+      {:ok, stream} = ExArrow.FlightSQL.Statement.execute(stmt)
+
+      # Re-bind and re-execute (same statement, different parameters)
+      other_params = ExArrow.RecordBatch.from_columns(["id"], [<<99::little-signed-64>>], ["int64"], 1)
+      :ok = ExArrow.FlightSQL.Statement.bind(stmt, other_params)
       {:ok, stream2} = ExArrow.FlightSQL.Statement.execute(stmt)
+
+      # Close when done
+      :ok = ExArrow.FlightSQL.Statement.close(stmt)
   """
   @spec prepare(t(), String.t()) :: {:ok, Statement.t()} | {:error, Error.t()}
   def prepare(%__MODULE__{} = client, sql) when is_binary(sql) do

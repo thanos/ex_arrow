@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-06-11
+
+### Added
+
+- **Flight SQL prepared statement parameter binding** —
+  `ExArrow.FlightSQL.Statement.bind/2` binds an `ExArrow.RecordBatch` of
+  parameters to a prepared statement before execution.  Supports all Arrow
+  column types compatible with the server's parameter schema.
+- **`ExArrow.FlightSQL.Statement.close/1`** — explicitly closes a prepared
+  statement and releases server-side resources via `ActionClosePreparedStatement`.
+  Idempotent: calling `close/1` on an already-closed statement returns `:ok`.
+  All subsequent operations on a closed statement return
+  `{:error, %Error{code: :protocol_error}}`.
+- **`ExArrow.FlightSQL.Statement.parameter_schema/1`** — returns the parameter
+  schema of a prepared statement, enabling callers to inspect expected column
+  names and Arrow types before binding.
+- **`ExArrow.RecordBatch.from_columns/4`** — creates a `RecordBatch` from
+  column-oriented binary data (names, binaries, dtype strings, row count).
+  Primary constructor for Flight SQL parameter binding.
+- **Rust NIF: `flight_sql_prepared_bind`** — binds a `RecordBatch` to a prepared
+  statement via `PreparedStatement::set_parameters`.
+- **Rust NIF: `flight_sql_prepared_close`** — closes a prepared statement via
+  `PreparedStatement::close`, consuming the statement handle.  The
+  `FlightSqlPreparedStatementResource` stores `Mutex<Option<PreparedStatement>>`
+  to support clean ownership transfer.
+- **Rust NIF: `flight_sql_prepared_parameter_schema`** — returns the parameter
+  schema from a prepared statement.
+
+### Changed
+
+- **`FlightSqlPreparedStatementResource.stmt`** changed from
+  `Mutex<PreparedStatement<Channel>>` to `Mutex<Option<PreparedStatement<Channel>>>`
+  to support proper `close/1` that consumes the statement handle.
+- **`ExArrow.FlightSQL.Statement`** struct now includes a `closed` field to
+  prevent operations on closed statements at the Elixir level.
+- **`Client.prepare/2` documentation** updated to reflect parameter binding
+  support and `close/1` lifecycle.
+
 ## [0.6.0] - 2026-06-08
 
 ### Added
