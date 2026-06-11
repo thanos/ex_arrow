@@ -55,6 +55,11 @@ defmodule ExArrow do
   - `ExArrow.Flight.Client` – connect, do_get, do_put
   - `ExArrow.Flight.Server` – minimal server (e.g. echo)
 
+  ### Flight SQL (`ExArrow.FlightSQL`)
+  - `ExArrow.FlightSQL.Client` – connect, query, execute, prepare, metadata
+  - `ExArrow.FlightSQL.Statement` – bind, execute, execute_update, parameter_schema, close
+  - `ExArrow.RecordBatch.from_columns/4` – build parameter batches for bind
+
   ### ADBC (`ExArrow.ADBC`)
   - `ExArrow.ADBC.Database.open/1` – open database (driver path or opts)
   - `ExArrow.ADBC.Connection.open/1` – open connection from database

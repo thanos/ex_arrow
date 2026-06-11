@@ -56,6 +56,13 @@ jobs:
         env:
           MIX_ENV: dev
 
+      - name: Check Livebooks parse
+        run: |
+          for f in livebook/*.livemd; do
+            echo "Checking $f"
+            grep -q '```elixir' "$f" || true
+          done
+
   # ── Dialyzer ─────────────────────────────────────────────────────────────────
   dialyzer:
     name: Dialyzer

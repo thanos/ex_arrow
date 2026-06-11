@@ -1,6 +1,6 @@
-# ExArrow Tutorial 2: Arrow Flight
+# ExArrow Tutorial 2: Arrow Flight & Flight SQL
 
-Arrow Flight is a gRPC-based protocol for high-throughput Arrow data transfer. ExArrow provides a **client** and a built-in **echo server**. This notebook walks through the full Flight API: `do_put`/`do_get`, listing flights, metadata, and actions.
+Arrow Flight is a gRPC-based protocol for high-throughput Arrow data transfer. ExArrow provides a **Flight client**, a built-in **echo server**, and a **Flight SQL client** for executing SQL queries against remote servers. This notebook covers the Flight API (`do_put`/`do_get`, listing flights, metadata, actions) and Flight SQL prepared statements with parameter binding.
 
 ---
 
@@ -10,6 +10,7 @@ Arrow Flight is a gRPC-based protocol for high-throughput Arrow data transfer. E
 |-----------|--------|---------|
 | Server | `ExArrow.Flight.Server` | Built-in echo server: stores last `do_put`, serves it on `do_get` with ticket `"echo"`. |
 | Client | `ExArrow.Flight.Client` | Connect, do_put, do_get, list_flights, get_flight_info, get_schema, list_actions, do_action. |
+| SQL Client | `ExArrow.FlightSQL.Client` | Connect to Flight SQL servers (DuckDB, DataFusion, Dremio). Query, execute DML, prepare statements with parameter binding. |
 
 Connections are **plaintext HTTP/2** only. Use on localhost or trusted networks.
 
@@ -142,4 +143,84 @@ IO.puts("Server stopped.")
 
 - **Server**: `Flight.Server.start_link(port, opts)` → optional `host` (default `"127.0.0.1"`).
 - **Client**: `connect(host, port, opts)` → `do_put`, `do_get`, `list_flights`, `get_flight_info`, `get_schema`, `list_actions`, `do_action`.
-- Same `ExArrow.Stream` and `ExArrow.RecordBatch` as IPC and ADBC. Next notebook: **ADBC** for querying databases and getting Arrow result streams.
+- Same `ExArrow.Stream` and `ExArrow.RecordBatch` as IPC and ADBC.
+
+---
+
+## 10. Flight SQL: prepared statements with parameter binding
+
+Flight SQL layers SQL semantics on top of Arrow Flight. Use it to connect to remote query servers (DuckDB over the network, DataFusion, Dremio, InfluxDB v3). For in-process databases, use ADBC instead.
+
+> **Note:** This section requires a running Flight SQL server. Start DuckDB with `INSTALL flight_sql; SELECT * FROM duckdb_extensions();` and then launch its Flight SQL listener, or use any compatible server.
+
+### Connect and query
+
+```elixir
+# Uncomment when a Flight SQL server is running:
+# {:ok, client} = ExArrow.FlightSQL.Client.connect("localhost:32010")
+#
+# # Simple query (all batches collected into a Result)
+# {:ok, result} = ExArrow.FlightSQL.Client.query(client, "SELECT id, name FROM users LIMIT 10")
+# result.num_rows
+# result.batches
+#
+# # Lazy streaming for large results
+# {:ok, stream} = ExArrow.FlightSQL.Client.stream_query(client, "SELECT * FROM events")
+# Enum.to_list(stream)
+IO.puts("Uncomment when a Flight SQL server is available.")
+```
+
+### Prepare, bind, execute, close
+
+```elixir
+# Uncomment when a Flight SQL server is running:
+# {:ok, client} = ExArrow.FlightSQL.Client.connect("localhost:32010")
+#
+# # Prepare a parameterized query
+# {:ok, stmt} = ExArrow.FlightSQL.Client.prepare(client, "SELECT * FROM users WHERE id = ?")
+#
+# # Inspect expected parameter schema
+# {:ok, schema} = ExArrow.FlightSQL.Statement.parameter_schema(stmt)
+# ExArrow.Schema.fields(schema)
+#
+# # Bind parameters as a RecordBatch
+# {:ok, params} = ExArrow.RecordBatch.from_columns(["id"], [<<42::little-signed-64>>], ["s64"], 1)
+# :ok = ExArrow.FlightSQL.Statement.bind(stmt, params)
+#
+# # Execute
+# {:ok, stream} = ExArrow.FlightSQL.Statement.execute(stmt)
+# batches = Enum.to_list(stream)
+#
+# # Re-bind with a different value (reuses the prepared plan)
+# {:ok, other} = ExArrow.RecordBatch.from_columns(["id"], [<<99::little-signed-64>>], ["s64"], 1)
+# :ok = ExArrow.FlightSQL.Statement.bind(stmt, other)
+# {:ok, stream2} = ExArrow.FlightSQL.Statement.execute(stmt)
+#
+# # Close when done (idempotent)
+# :ok = ExArrow.FlightSQL.Statement.close(stmt)
+IO.puts("Uncomment when a Flight SQL server is available.")
+```
+
+### Supported dtypes for `from_columns/4`
+
+```elixir
+# Fixed-width: "s8"-"s64", "u8"-"u64", "f32", "f64", "bool"
+# Date/time: "date32", "date64", "timestamp_seconds"-"timestamp_nanos",
+#            "duration_seconds"-"duration_nanos"
+# Variable-length: "utf8", "large_utf8", "binary", "large_binary"
+#   (length-prefixed: <<len::little-32, bytes::binary-size(len)>> per element)
+
+# Example: bind two columns (int64 + utf8)
+(utf8 = <<5::little-32, "hello", 5::little-32, "world">>)
+# {:ok, params} = ExArrow.RecordBatch.from_columns(
+#   ["id", "name"],
+#   [<<1::little-signed-64, 2::little-signed-64>>, utf8],
+#   ["s64", "utf8"],
+#   2
+# )
+IO.puts("See ExArrow.RecordBatch moduledoc for the full dtype table and wire format.")
+```
+
+---
+
+Next notebook: **ADBC** for querying databases and getting Arrow result streams directly.

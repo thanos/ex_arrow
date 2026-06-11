@@ -1,6 +1,6 @@
 # ExArrow Quick Start
 
-Get up and running with ExArrow in a few minutes. This notebook touches all three pillars: **IPC** (read/write Arrow streams), **Arrow Flight** (client/server), and **ADBC** (query databases and get Arrow results).
+Get up and running with ExArrow in a few minutes. This notebook touches all major features: **IPC** (read/write Arrow streams), **Arrow Flight** (client/server), **Flight SQL** (parameterized queries), **ADBC** (query databases), and **data interchange** (Explorer/Nx).
 
 Configure adbc to use the SQLite driver (for section 5):
 
@@ -171,7 +171,81 @@ end
 ### Next steps
 
 * **Notebook 01 — IPC**: Stream vs file format, reading from files, writing to files, schema and types.
-* **Notebook 02 — Flight**: Full server/client API: `list_flights`, `get_flight_info`, `get_schema`, actions.
+* **Notebook 02 — Flight**: Full server/client API, Flight SQL prepared statements with parameter binding.
 * **Notebook 03 — ADBC**: Metadata APIs, optional Explorer roundtrip, and production tips.
+
+---
+
+## 6. Explorer interchange (v0.6+)
+
+ExArrow can convert between Arrow data and Explorer DataFrames in one call:
+
+```elixir
+if Code.ensure_loaded?(Explorer.DataFrame) do
+  df = Explorer.DataFrame.new(id: [1, 2, 3], name: ["alice", "bob", "carol"])
+
+  # DataFrame → Arrow
+  {:ok, batch} = ExArrow.from_dataframe(df)
+  IO.puts("Batch rows: #{ExArrow.RecordBatch.num_rows(batch)}")
+
+  # Arrow → DataFrame
+  {:ok, df2} = ExArrow.to_dataframe(batch)
+  IO.inspect(df2)
+else
+  "Explorer not loaded; add {:explorer, \"~> 0.11\"} to deps."
+end
+```
+
+---
+
+## 7. Nx interchange (v0.6+)
+
+ExArrow can convert between Arrow columns and Nx tensors without materialising lists:
+
+```elixir
+if Code.ensure_loaded?(Nx) do
+  tensor = Nx.tensor([1, 2, 3], type: {:s, 64})
+
+  # Tensor → Arrow
+  {:ok, batch} = ExArrow.from_nx(tensor)
+  IO.puts("Batch rows: #{ExArrow.RecordBatch.num_rows(batch)}")
+
+  # Arrow → Tensor
+  {:ok, back} = ExArrow.to_nx(batch)
+  IO.inspect(Nx.to_list(back))
+else
+  "Nx not loaded; add {:nx, \"~> 0.9\"} to deps."
+end
+```
+
+---
+
+## 8. Flight SQL prepared statements with parameter binding (v0.6+)
+
+Connect to a Flight SQL server, prepare a query, bind parameters, and execute:
+
+```elixir
+# Requires a running Flight SQL server (e.g. DuckDB with flight_sql extension)
+# {:ok, client} = ExArrow.FlightSQL.Client.connect("localhost:32010")
+#
+# {:ok, stmt} = ExArrow.FlightSQL.Client.prepare(client, "SELECT * FROM users WHERE id = ?")
+#
+# {:ok, schema} = ExArrow.FlightSQL.Statement.parameter_schema(stmt)
+# # => [%ExArrow.Field{name: "id", type: :int64, nullable: false}]
+#
+# {:ok, params} = ExArrow.RecordBatch.from_columns(["id"], [<<42::little-signed-64>>], ["s64"], 1)
+# :ok = ExArrow.FlightSQL.Statement.bind(stmt, params)
+# {:ok, stream} = ExArrow.FlightSQL.Statement.execute(stmt)
+# batches = Enum.to_list(stream)
+#
+# # Re-bind with a different parameter value
+# {:ok, other} = ExArrow.RecordBatch.from_columns(["id"], [<<99::little-signed-64>>], ["s64"], 1)
+# :ok = ExArrow.FlightSQL.Statement.bind(stmt, other)
+# {:ok, stream2} = ExArrow.FlightSQL.Statement.execute(stmt)
+#
+# :ok = ExArrow.FlightSQL.Statement.close(stmt)
+
+IO.puts("Uncomment the cells above when a Flight SQL server is available.")
+```
 
 Docs: [hexdocs.pm/ex_arrow](https://hexdocs.pm/ex_arrow).

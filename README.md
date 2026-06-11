@@ -79,8 +79,8 @@ Snowflake Flight endpoints, or any custom Flight service. Run an in-process
 echo server for testing. Transfer Arrow streams over gRPC with one API call.
 - **Arrow Flight SQL client** — Execute SQL against remote Flight SQL servers
 (DuckDB, DataFusion, Dremio, InfluxDB v3) and receive results as lazy Arrow
-streams. Supports TLS, bearer-token auth, prepared statements, and metadata
-discovery.
+streams. Supports TLS, bearer-token auth, prepared statements with parameter
+binding, and metadata discovery.
 - **ADBC database connectivity** — Execute SQL against any ADBC-compatible
 database (SQLite, PostgreSQL, DuckDB, BigQuery, Snowflake, and more) and
 receive the results as a lazy Arrow stream — never materialising rows into
@@ -188,7 +188,7 @@ Add the dependency:
 
 ```elixir
 def deps do
-  [{:ex_arrow, "~> 0.6.0"}]
+  [{:ex_arrow, "~> 0.6"}]
 end
 ```
 
@@ -221,7 +221,7 @@ Mix.install([
 ```
 
 Alternatively, use the published Hex package so the precompiled NIF is used
-and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.6.0"}])`.
+and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.6"}])`.
 
 ---
 
@@ -260,6 +260,13 @@ result.num_rows  #=> 42
 # Lazy streaming for large result sets
 {:ok, stream} = ExArrow.FlightSQL.Client.stream_query(client, "SELECT * FROM events")
 Enum.each(stream, fn batch -> process(batch) end)
+
+# Parameterized query
+{:ok, stmt} = ExArrow.FlightSQL.Client.prepare(client, "SELECT * FROM users WHERE id = ?")
+{:ok, params} = ExArrow.RecordBatch.from_columns(["id"], [<<1::little-signed-64>>], ["s64"], 1)
+:ok = ExArrow.FlightSQL.Statement.bind(stmt, params)
+{:ok, stream} = ExArrow.FlightSQL.Statement.execute(stmt)
+:ok = ExArrow.FlightSQL.Statement.close(stmt)
 ```
 
 **Query a database with ADBC:**
@@ -423,12 +430,30 @@ pem = File.read!("priv/ca.pem")
   headers: [{"authorization", "Bearer my-pat-token"}])
 ```
 
-**Prepared statements:**
+**Prepared statements with parameter binding:**
 
 ```elixir
-{:ok, stmt}   = ExArrow.FlightSQL.Client.prepare(client, "SELECT * FROM events WHERE ts > '2024-01-01'")
+# Prepare
+{:ok, stmt} = ExArrow.FlightSQL.Client.prepare(client, "SELECT * FROM users WHERE id = ?")
+
+# Inspect expected parameter schema
+{:ok, schema} = ExArrow.FlightSQL.Statement.parameter_schema(stmt)
+
+# Bind parameters as an Arrow RecordBatch
+{:ok, params} = ExArrow.RecordBatch.from_columns(["id"], [<<42::little-signed-64>>], ["s64"], 1)
+:ok = ExArrow.FlightSQL.Statement.bind(stmt, params)
+
+# Execute
 {:ok, stream} = ExArrow.FlightSQL.Statement.execute(stmt)
 batches = Enum.to_list(stream)
+
+# Re-bind and re-execute the same statement
+{:ok, other} = ExArrow.RecordBatch.from_columns(["id"], [<<99::little-signed-64>>], ["s64"], 1)
+:ok = ExArrow.FlightSQL.Statement.bind(stmt, other)
+{:ok, stream2} = ExArrow.FlightSQL.Statement.execute(stmt)
+
+# Close when done (idempotent)
+:ok = ExArrow.FlightSQL.Statement.close(stmt)
 ```
 
 **Metadata discovery:**
@@ -951,10 +976,18 @@ welcome for any of them.
   Nx, and the ecosystem.
 - **Property tests** — StreamData-based round-trip fidelity tests.
 
+### Shipped (v0.6.1)
+
+- **Prepared statement parameter binding** — `Statement.bind/2` binds an
+  `ExArrow.RecordBatch` of parameters to a prepared statement.  `Statement.close/1`
+  releases server-side resources (idempotent).  `Statement.parameter_schema/1`
+  inspects expected column names and Arrow types before binding.
+- **`RecordBatch.from_columns/4`** — creates a batch from column-oriented binary
+  data (names, binaries, dtype strings, row count).  21 dtypes including
+  timestamps, durations, utf8, and binary columns.
+
 ### Longer-term
 
-- **Parameter binding for prepared statements** — pass `?` placeholders with
-  Arrow record batch values (v0.6.0).
 - **Streaming writes to Delta Lake** — sink for data pipeline nodes.
 - **OTel / telemetry integration** — `:telemetry` events for IPC read/write
   throughput, Flight request latency, and ADBC query duration.

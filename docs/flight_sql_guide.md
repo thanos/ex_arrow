@@ -284,30 +284,45 @@ getting early syntax errors before execution.
 
 ```elixir
 # Prepare the query (server parses and plans it)
-{:ok, stmt} = ExArrow.FlightSQL.Client.prepare(client, "SELECT * FROM events WHERE ts > '2024-01-01'")
+{:ok, stmt} = ExArrow.FlightSQL.Client.prepare(client, "SELECT * FROM events WHERE id = ?")
 
-# Execute as a streaming query
+# Inspect expected parameter schema
+{:ok, schema} = ExArrow.FlightSQL.Statement.parameter_schema(stmt)
+
+# Bind parameters and execute
+{:ok, params} = ExArrow.RecordBatch.from_columns(["id"], [<<42::little-signed-64>>], ["s64"], 1)
+:ok = ExArrow.FlightSQL.Statement.bind(stmt, params)
+
 {:ok, stream} = ExArrow.FlightSQL.Statement.execute(stmt)
 batches = Enum.to_list(stream)
 
-# Re-execute the same statement (reuses the server plan)
+# Re-bind with different parameters (reuses the server plan)
+{:ok, other} = ExArrow.RecordBatch.from_columns(["id"], [<<99::little-signed-64>>], ["s64"], 1)
+:ok = ExArrow.FlightSQL.Statement.bind(stmt, other)
 {:ok, stream2} = ExArrow.FlightSQL.Statement.execute(stmt)
 
-# Or execute as DML
-{:ok, dml_stmt} = ExArrow.FlightSQL.Client.prepare(client, "DELETE FROM logs WHERE ts < '2020-01-01'")
-{:ok, 1042}     = ExArrow.FlightSQL.Statement.execute_update(dml_stmt)
+# Close when done (idempotent)
+:ok = ExArrow.FlightSQL.Statement.close(stmt)
 ```
-
-### Lifecycle
-
-The server-side handle is released when the `Statement` struct is
-garbage-collected.  There is no explicit `close/1` in v0.5.0.
 
 ### Parameter binding
 
-Parameter binding (passing `?` placeholders with Arrow record batch values)
-is not supported in v0.5.0.  Parameterized queries can be prepared and
-executed, but parameter values cannot be set from Elixir in this release.
+Parameters are bound as Arrow `RecordBatch` values using `bind/2`.  The batch
+schema must match the parameter schema returned by the server during
+`CreatePreparedStatement`.  Use `parameter_schema/1` to inspect expected column
+names and Arrow types before binding.
+
+`ExArrow.RecordBatch.from_columns/4` builds parameter batches from raw binary
+data.  Supported dtypes include signed/unsigned integers, floats, booleans,
+timestamps, durations, and variable-length strings/binary.  See the
+`ExArrow.RecordBatch` moduledoc for the full dtype table and wire format.
+
+### Close semantics
+
+`Statement.close/1` releases server-side resources.  It is idempotent: calling
+`close/1` on an already-closed statement returns `:ok`.  After `close/1`,
+subsequent calls to `bind/2`, `execute/1`, `execute_update/1`, or
+`parameter_schema/1` return `{:error, %Error{code: :protocol_error}}`.
 
 ### Server compatibility
 
@@ -397,7 +412,8 @@ end
 - Ad-hoc SQL query execution (`query/2`, `query!/2`, `stream_query/2`)
 - DML execution with affected-row count (`execute/2`)
 - Lazy streaming of large result sets with `Enumerable` support
-- Prepared statements (`prepare/2`, `Statement.execute/1`, `Statement.execute_update/1`)
+- Prepared statements with parameter binding (`prepare/2`, `Statement.bind/2`, `Statement.execute/1`, `Statement.execute_update/1`, `Statement.close/1`, `Statement.parameter_schema/1`)
+- `ExArrow.RecordBatch.from_columns/4` for building parameter batches
 - Metadata discovery: `get_tables/2`, `get_db_schemas/2`, `get_sql_info/1`
 - TLS connections — plaintext, OS trust store, or custom CA certificate
 - Bearer-token and arbitrary gRPC header injection
@@ -405,12 +421,11 @@ end
 - Nx integration: `Result.to_tensor/2`
 - Mox-compatible `ClientBehaviour` for unit testing without a server
 
-**Not supported in v0.5.0 (deferred):**
+**Not supported (deferred):**
 
 - Bulk ingestion (`DoPut`)
 - Transactions (`BEGIN`, `COMMIT`, `ROLLBACK`)
 - Multi-endpoint distributed `FlightInfo` responses
-- Parameter binding for prepared statements (v0.6.0)
 - Filtering `get_sql_info` by specific info code (returns all codes)
 
 ---

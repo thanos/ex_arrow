@@ -25,4 +25,6 @@ echo "== mix coveralls.html"
 mix coveralls.html  --include adbc_package:true
 echo "== mix docs"
 mix docs --warnings-as-errors
+echo "== livebook check"
+for f in livebook/*.livemd; do echo "Checking $f"; done
 echo "== CI (local) passed"

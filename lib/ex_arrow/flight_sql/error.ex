@@ -61,7 +61,7 @@ defmodule ExArrow.FlightSQL.Error do
   end
 
   def message(%__MODULE__{code: code, message: msg, details: details}) do
-    "[#{code}] #{msg} — #{inspect(details)}"
+    "[#{code}] #{msg} - #{inspect(details)}"
   end
 
   @doc false

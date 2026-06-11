@@ -139,45 +139,79 @@ Supported type atoms include: `:null`, `:boolean`, `:int64`, `:float64`, `:utf8`
 
 ---
 
-## 7. Interop with Explorer (optional)
+## 7. Interop with Explorer (v0.6+)
 
-If you have Explorer in your project, you can move data between ExArrow and Explorer via IPC binary or file.
-
-**ExArrow to Explorer**: Produce IPC with ExArrow, then load into Explorer:
-
-```elixir
-if Code.ensure_loaded?(Explorer.DataFrame) do
-  {:ok, ipc_bytes} = ExArrow.Native.ipc_test_fixture_binary()
-  {:ok, stream} = ExArrow.IPC.Reader.from_binary(ipc_bytes)
-  {:ok, schema} = ExArrow.Stream.schema(stream)
-  batches = Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end) |> Enum.take_while(&is_struct(&1, ExArrow.RecordBatch))
-  {:ok, binary} = ExArrow.IPC.Writer.to_binary(schema, batches)
-  df = Explorer.DataFrame.load_ipc_stream!(binary)
-  df["id"]
-else
-  "Explorer not loaded; add {:explorer, \"~> 0.11\"} to deps to try this."
-end
-```
-
-**Explorer to ExArrow**: Dump a dataframe to IPC, then read with ExArrow:
+`ExArrow.from_dataframe/1` and `ExArrow.to_dataframe/1` convert between Explorer DataFrames and Arrow RecordBatches in one call (requires `{:explorer, "~> 0.11"}`):
 
 ```elixir
 if Code.ensure_loaded?(Explorer.DataFrame) do
   df = Explorer.DataFrame.new(x: [1, 2, 3], y: ["a", "b", "c"])
-  # Reader.from_binary expects stream format; use dump_ipc_stream!
-  binary = Explorer.DataFrame.dump_ipc_stream!(df)
-  {:ok, stream} = ExArrow.IPC.Reader.from_binary(binary)
-  {:ok, schema} = ExArrow.Stream.schema(stream)
-  ExArrow.Schema.fields(schema) |> Enum.map(& &1.name)
+
+  # DataFrame → Arrow
+  {:ok, batch} = ExArrow.from_dataframe(df)
+  IO.puts("from_dataframe rows: #{ExArrow.RecordBatch.num_rows(batch)}")
+
+  # Arrow → DataFrame
+  {:ok, df2} = ExArrow.to_dataframe(batch)
+  IO.inspect(df2)
 else
-  "Explorer not loaded."
+  "Explorer not loaded; add {:explorer, \"~> 0.11\"} to deps."
 end
+```
+
+---
+
+## 8. Interop with Nx (v0.6+)
+
+`ExArrow.from_nx/1` and `ExArrow.to_nx/1` convert between Nx tensors and Arrow RecordBatches by sharing raw byte buffers (requires `{:nx, "~> 0.9"}`):
+
+```elixir
+if Code.ensure_loaded?(Nx) do
+  # Rank-1 tensor
+  tensor = Nx.tensor([1, 2, 3], type: {:s, 64})
+  {:ok, batch} = ExArrow.from_nx(tensor)
+  IO.puts("from_nx rows: #{ExArrow.RecordBatch.num_rows(batch)}")
+
+  {:ok, back} = ExArrow.to_nx(batch)
+  IO.inspect(Nx.to_list(back))
+else
+  "Nx not loaded; add {:nx, \"~> 0.9\"} to deps."
+end
+```
+
+---
+
+## 9. Building parameter batches with `from_columns/4` (v0.6+)
+
+`ExArrow.RecordBatch.from_columns/4` creates a batch from column-oriented binary data. This is the primary way to build parameter batches for Flight SQL prepared statement binding:
+
+```elixir
+# Single int64 column with one row
+{:ok, batch} = ExArrow.RecordBatch.from_columns(["id"], [<<42::little-signed-64>>], ["s64"], 1)
+IO.puts("from_columns rows: #{ExArrow.RecordBatch.num_rows(batch)}")
+
+# Mixed primitives (int64 + float64)
+{:ok, batch2} = ExArrow.RecordBatch.from_columns(
+  ["id", "score"],
+  [<<1::little-signed-64>>, <<3.14::little-float-64>>],
+  ["s64", "f64"],
+  1
+)
+IO.puts("from_columns (mixed) rows: #{ExArrow.RecordBatch.num_rows(batch2)}")
+
+# utf8 column (length-prefixed records)
+utf8 = <<5::little-32, "hello", 5::little-32, "world">>
+{:ok, batch3} = ExArrow.RecordBatch.from_columns(["name"], [utf8], ["utf8"], 2)
+IO.puts("from_columns (utf8) rows: #{ExArrow.RecordBatch.num_rows(batch3)}")
 ```
 
 ---
 
 ## Summary
 
-* **Stream**: `Reader.from_binary/1` or `from_file/1` then `Stream.schema/1`, `Stream.next/1`; write with `Writer.to_binary/2` or `to_file/3`. Explorer → ExArrow: use `Explorer.DataFrame.dump_ipc_stream!/1` (stream format) then `Reader.from_binary/1`.
+* **Stream**: `Reader.from_binary/1` or `from_file/1` then `Stream.schema/1`, `Stream.next/1`; write with `Writer.to_binary/2` or `to_file/3`.
 * **File format**: `IPC.File.from_binary/1` or `from_file/1` then `schema/1`, `batch_count/1`, `get_batch/2`.
-* Schema and batches are shared across IPC, Flight, and ADBC. Next notebook: **Arrow Flight**.
+* **Explorer interchange (v0.6+)**: `ExArrow.from_dataframe/1` / `to_dataframe/1` for one-call conversion. Also `ExArrow.DataFrame.from_arrow/1` / `to_arrow/1`.
+* **Nx interchange (v0.6+)**: `ExArrow.from_nx/1` / `to_nx/1` for zero-copy tensor conversion.
+* **Parameter batches (v0.6+)**: `ExArrow.RecordBatch.from_columns/4` builds batches from raw binary column data, used for Flight SQL prepared statement binding.
+* Schema and batches are shared across IPC, Flight, Flight SQL, and ADBC. Next notebook: **Flight & Flight SQL**.

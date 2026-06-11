@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-06-11
+
+### Changed
+
+- **Documentation**: updated Flight SQL guide, README, and module docs for
+  prepared statement parameter binding, `close/1`, `parameter_schema/1`,
+  and `RecordBatch.from_columns/4`.  Removed stale "not supported in v0.5.0"
+  references.
+- **Documentation**: replaced em-dashes with simpler punctuation across Elixir
+  and Rust source, removed marketing language, varied repetitive return-value
+  patterns, replaced decorative section dividers with plain comments, reordered
+  prepared-statement NIFs in lifecycle order (prepare, bind, parameter_schema,
+  execute, execute_update, close).
+- **CI**: fixed `dtolnay/rust-toolchain@v1` in publish workflow (requires
+  `toolchain` input); switched to `@stable`.  Added `script/check_version` to
+  git (was missing from tracked files).
+- **Minimum Rust `arrow-flight` crate version: 56**: Flight SQL prepared
+  statement support uses `PreparedStatement::set_parameters`, `close`, and
+  `parameter_schema` APIs available from `arrow-flight` v56.  Earlier crate
+  versions are missing these methods.  `Cargo.toml` pins `arrow-flight = "56"`.
+- **`Statement` struct is opaque**: the `closed` field from earlier
+  development builds has been removed.  Closed-state is now tracked inside
+  the NIF resource (`Mutex<Option<PreparedStatement>>`).  Code that pattern-
+  matched on `%Statement{closed: _}` must be updated to treat `Statement` as
+  an opaque handle and use `close/1` / `bind/2` / `execute/1` for lifecycle
+  queries.
+
 ## [0.6.1] - 2026-06-11
 
 ### Added
