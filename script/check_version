@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Assert that the top "## [x.y.z]" version in CHANGELOG.md matches the
+# @version attribute in mix.exs.  Run by CI to prevent shipping a release
+# whose version markers disagree.
+
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+mix_version=$(grep -E '^[[:space:]]*@version[[:space:]]+"' mix.exs | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+changelog_version=$(grep -E '^##[[:space:]]+\[[0-9]+\.[0-9]+\.[0-9]+' CHANGELOG.md | head -1 | sed -E 's/^##[[:space:]]+\[([0-9]+\.[0-9]+\.[0-9]+)\].*/\1/')
+
+if [ -z "$mix_version" ]; then
+  echo "::error::could not parse @version from mix.exs"
+  exit 1
+fi
+
+if [ -z "$changelog_version" ]; then
+  echo "::error::could not parse top version from CHANGELOG.md"
+  exit 1
+fi
+
+if [ "$mix_version" != "$changelog_version" ]; then
+  echo "::error::version mismatch: mix.exs @version=\"$mix_version\" but CHANGELOG.md top entry is [$changelog_version]"
+  exit 1
+fi
+
+echo "version OK: $mix_version"
