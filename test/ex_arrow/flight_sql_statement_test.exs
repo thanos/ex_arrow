@@ -313,22 +313,52 @@ defmodule ExArrow.FlightSQL.StatementTest do
     end
   end
 
-  describe "close/1 — idempotent (NIF reports already-closed as :ok)" do
-    setup do
+  describe "close/1 — idempotent" do
+    test "open → close → close (counts both invocations, both succeed)" do
+      # Use a stateful stub that flips its closed-state after the first
+      # successful close call, so the second invocation hits the
+      # already-closed branch and still returns :ok.
       Application.put_env(
         :ex_arrow,
         :flight_sql_statement_native,
-        ExArrow.FlightSQL.StmtNativeClosed
+        ExArrow.FlightSQL.StmtNativeStatefulClose
       )
 
-      :ok
+      ExArrow.FlightSQL.StmtNativeStatefulClose.reset()
+
+      stmt = fake_stmt()
+
+      assert :ok = Statement.close(stmt)
+      assert :ok = Statement.close(stmt)
+
+      assert ExArrow.FlightSQL.StmtNativeStatefulClose.call_count() == 2
+      assert ExArrow.FlightSQL.StmtNativeStatefulClose.closed?()
     end
 
-    test "second close call returns :ok" do
-      # Closed-state lives inside the NIF resource; the stub returns :ok
-      # to model the idempotent behaviour of the real NIF when the inner
-      # Option<PreparedStatement> has already been taken.
-      assert :ok = Statement.close(fake_stmt())
+    test "operations after close return :protocol_error (full lifecycle)" do
+      # Stateful stub: first close returns :ok, then everything else (including
+      # subsequent close, bind, execute, ...) returns :protocol_error from the
+      # NIF — modelling the real NIF's Mutex<Option<...>>::take() behaviour.
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeStatefulClose
+      )
+
+      ExArrow.FlightSQL.StmtNativeStatefulClose.reset()
+
+      stmt = fake_stmt()
+      batch = %ExArrow.RecordBatch{resource: make_ref()}
+
+      assert :ok = Statement.close(stmt)
+
+      assert {:error, %Error{code: :protocol_error}} = Statement.bind(stmt, batch)
+      assert {:error, %Error{code: :protocol_error}} = Statement.execute(stmt)
+      assert {:error, %Error{code: :protocol_error}} = Statement.execute_update(stmt)
+      assert {:error, %Error{code: :protocol_error}} = Statement.parameter_schema(stmt)
+
+      # close/1 itself is still idempotent and returns :ok.
+      assert :ok = Statement.close(stmt)
     end
   end
 

@@ -25,7 +25,8 @@ defmodule ExArrow.FlightSQL.IntegrationTest do
   """
 
   use ExUnit.Case
-  alias ExArrow.FlightSQL.{Client, Error}
+  alias ExArrow.FlightSQL.{Client, Error, Statement}
+  alias ExArrow.RecordBatch
 
   @moduletag :flight_sql_integration
 
@@ -146,15 +147,160 @@ defmodule ExArrow.FlightSQL.IntegrationTest do
 
   # ── Prepared statements ───────────────────────────────────────────────────────
 
+  # Skip the body when the server does not implement prepared statements.
+  defp with_stmt(client, sql, fun) do
+    case Client.prepare(client, sql) do
+      {:ok, stmt} ->
+        try do
+          fun.(stmt)
+        after
+          # Best-effort cleanup; close errors here are not test failures.
+          _ = Statement.close(stmt)
+        end
+
+      {:error, %Error{code: :unimplemented}} ->
+        :ok
+    end
+  end
+
   describe "prepare/2 + Statement.execute/1" do
     test "prepares and executes a SELECT" do
       client = connect()
 
+      with_stmt(client, "SELECT 1 AS n", fn stmt ->
+        assert {:ok, stream} = Statement.execute(stmt)
+        batches = Enum.to_list(stream)
+        assert length(batches) >= 1
+      end)
+    end
+  end
+
+  # ── Statement.parameter_schema/1 ─────────────────────────────────────────────
+
+  describe "Statement.parameter_schema/1" do
+    test "returns a Schema for a statement with no parameters" do
+      client = connect()
+
+      with_stmt(client, "SELECT 1 AS n", fn stmt ->
+        case Statement.parameter_schema(stmt) do
+          {:ok, %ExArrow.Schema{}} ->
+            :ok
+
+          {:error, %Error{code: code}} ->
+            # Some servers don't expose a parameter schema for parameter-less
+            # queries; accept :unimplemented or :invalid_argument.
+            assert code in [:unimplemented, :invalid_argument]
+        end
+      end)
+    end
+
+    test "returns a Schema describing a single ? placeholder" do
+      client = connect()
+
+      with_stmt(client, "SELECT ? AS x", fn stmt ->
+        case Statement.parameter_schema(stmt) do
+          {:ok, %ExArrow.Schema{} = schema} ->
+            fields = ExArrow.Schema.fields(schema)
+            assert length(fields) >= 1
+
+          {:error, %Error{code: code}} ->
+            assert code in [:unimplemented, :invalid_argument]
+        end
+      end)
+    end
+  end
+
+  # ── Statement.bind/2 ────────────────────────────────────────────────────────
+
+  describe "Statement.bind/2 + Statement.execute/1" do
+    test "binds an int64 parameter and executes" do
+      client = connect()
+
+      with_stmt(client, "SELECT ? AS x", fn stmt ->
+        {:ok, params} =
+          RecordBatch.from_columns(["x"], [<<42::little-signed-64>>], ["s64"], 1)
+
+        case Statement.bind(stmt, params) do
+          :ok ->
+            assert {:ok, stream} = Statement.execute(stmt)
+            batches = Enum.to_list(stream)
+            assert length(batches) >= 1
+
+          {:error, %Error{code: code}} ->
+            # Servers that don't accept bind for ad-hoc placeholders
+            # may return :unimplemented or :invalid_argument.
+            assert code in [:unimplemented, :invalid_argument]
+        end
+      end)
+    end
+
+    test "rebinding replaces previous parameters" do
+      client = connect()
+
+      with_stmt(client, "SELECT ? AS x", fn stmt ->
+        {:ok, p1} = RecordBatch.from_columns(["x"], [<<1::little-signed-64>>], ["s64"], 1)
+        {:ok, p2} = RecordBatch.from_columns(["x"], [<<2::little-signed-64>>], ["s64"], 1)
+
+        case {Statement.bind(stmt, p1), Statement.bind(stmt, p2)} do
+          {:ok, :ok} ->
+            assert {:ok, stream} = Statement.execute(stmt)
+            assert length(Enum.to_list(stream)) >= 1
+
+          {{:error, %Error{code: code}}, _} ->
+            assert code in [:unimplemented, :invalid_argument]
+
+          {_, {:error, %Error{code: code}}} ->
+            assert code in [:unimplemented, :invalid_argument]
+        end
+      end)
+    end
+  end
+
+  # ── Statement.close/1 lifecycle ─────────────────────────────────────────────
+
+  describe "Statement.close/1" do
+    test "explicit close after execute returns :ok" do
+      client = connect()
+
       case Client.prepare(client, "SELECT 1 AS n") do
         {:ok, stmt} ->
-          assert {:ok, stream} = ExArrow.FlightSQL.Statement.execute(stmt)
-          batches = Enum.to_list(stream)
-          assert length(batches) >= 1
+          assert {:ok, _stream} = Statement.execute(stmt)
+          assert :ok = Statement.close(stmt)
+
+        {:error, %Error{code: :unimplemented}} ->
+          :ok
+      end
+    end
+
+    test "operations on a closed statement return :protocol_error" do
+      client = connect()
+
+      case Client.prepare(client, "SELECT 1 AS n") do
+        {:ok, stmt} ->
+          assert :ok = Statement.close(stmt)
+
+          assert {:error, %Error{code: :protocol_error}} = Statement.execute(stmt)
+          assert {:error, %Error{code: :protocol_error}} = Statement.execute_update(stmt)
+          assert {:error, %Error{code: :protocol_error}} = Statement.parameter_schema(stmt)
+
+          {:ok, params} =
+            RecordBatch.from_columns(["x"], [<<1::little-signed-64>>], ["s64"], 1)
+
+          assert {:error, %Error{code: :protocol_error}} = Statement.bind(stmt, params)
+
+        {:error, %Error{code: :unimplemented}} ->
+          :ok
+      end
+    end
+
+    test "close is idempotent" do
+      client = connect()
+
+      case Client.prepare(client, "SELECT 1 AS n") do
+        {:ok, stmt} ->
+          assert :ok = Statement.close(stmt)
+          assert :ok = Statement.close(stmt)
+          assert :ok = Statement.close(stmt)
 
         {:error, %Error{code: :unimplemented}} ->
           :ok

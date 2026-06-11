@@ -58,6 +58,69 @@ defmodule ExArrow.FlightSQL.StmtNativeClosed do
   def flight_sql_prepared_close(_ref), do: :ok
 end
 
+# Stateful stub that models the real NIF's Mutex<Option<PreparedStatement>>
+# closed-state behaviour: the first close call succeeds and flips the
+# resource into the closed state; subsequent close calls are idempotent and
+# also return :ok; every other operation on a closed resource returns
+# :protocol_error.
+#
+# State is held in a process dictionary keyed by the calling process so
+# tests using this stub remain isolated when run async: false.
+defmodule ExArrow.FlightSQL.StmtNativeStatefulClose do
+  @moduledoc false
+  @key :__ex_arrow_stmt_stub_state__
+
+  @doc "Reset the stub state for the current process."
+  def reset, do: Process.put(@key, %{closed?: false, calls: 0})
+
+  @doc "Whether close has been observed at least once."
+  def closed?, do: state().closed?
+
+  @doc "Total number of close calls observed."
+  def call_count, do: state().calls
+
+  defp state do
+    Process.get(@key) || %{closed?: false, calls: 0}
+  end
+
+  defp put_state(s), do: Process.put(@key, s)
+
+  defp ensure_state do
+    case Process.get(@key) do
+      nil ->
+        s = %{closed?: false, calls: 0}
+        Process.put(@key, s)
+        s
+
+      s ->
+        s
+    end
+  end
+
+  def flight_sql_prepared_close(_ref) do
+    s = ensure_state()
+    put_state(%{s | closed?: true, calls: s.calls + 1})
+    :ok
+  end
+
+  def flight_sql_prepared_execute(_ref), do: closed_or_ok({:ok, :fake_stream_ref})
+
+  def flight_sql_prepared_execute_update(_ref), do: closed_or_ok({:ok, 5})
+
+  def flight_sql_prepared_bind(_ref, _batch_ref), do: closed_or_ok(:ok)
+
+  def flight_sql_prepared_parameter_schema(_ref),
+    do: closed_or_ok({:ok, :fake_schema_ref})
+
+  defp closed_or_ok(default) do
+    if state().closed? do
+      {:error, {:protocol_error, 0, "statement is closed"}}
+    else
+      default
+    end
+  end
+end
+
 # Returns a binary (non-tuple) error -- exercises the binary clause of wrap_nif_error.
 defmodule ExArrow.FlightSQL.StmtNativeBinaryError do
   @moduledoc false
