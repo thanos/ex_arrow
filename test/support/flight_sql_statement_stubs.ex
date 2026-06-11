@@ -38,6 +38,26 @@ defmodule ExArrow.FlightSQL.StmtNativeError do
     do: {:error, {:server_error, 13, "close failed"}}
 end
 
+# Models the NIF behaviour for an already-closed statement: every operation
+# (other than close, which is idempotent) returns :protocol_error.
+defmodule ExArrow.FlightSQL.StmtNativeClosed do
+  @moduledoc false
+  def flight_sql_prepared_execute(_ref),
+    do: {:error, {:protocol_error, 0, "statement is closed"}}
+
+  def flight_sql_prepared_execute_update(_ref),
+    do: {:error, {:protocol_error, 0, "statement is closed"}}
+
+  def flight_sql_prepared_bind(_ref, _batch_ref),
+    do: {:error, {:protocol_error, 0, "statement is closed"}}
+
+  def flight_sql_prepared_parameter_schema(_ref),
+    do: {:error, {:protocol_error, 0, "statement is closed"}}
+
+  # Idempotent: real NIF returns :ok when the inner Option has already been taken.
+  def flight_sql_prepared_close(_ref), do: :ok
+end
+
 # Returns a binary (non-tuple) error -- exercises the binary clause of wrap_nif_error.
 defmodule ExArrow.FlightSQL.StmtNativeBinaryError do
   @moduledoc false

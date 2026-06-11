@@ -7,10 +7,13 @@ defmodule ExArrow.FlightSQL.Statement do
 
   ## Lifecycle
 
-      {:ok, stmt} = ExArrow.FlightSQL.Client.prepare(client, "SELECT * FROM users WHERE id = ?")
+      {:ok, stmt} =
+        ExArrow.FlightSQL.Client.prepare(client, "SELECT * FROM users WHERE id = ?")
 
       # Bind parameters
-      params = ExArrow.RecordBatch.from_columns(["id"], [<<123::little-signed-64>>], ["int64"], 1)
+      {:ok, params} =
+        ExArrow.RecordBatch.from_columns(["id"], [<<123::little-signed-64>>], ["s64"], 1)
+
       :ok = ExArrow.FlightSQL.Statement.bind(stmt, params)
 
       # Execute
@@ -37,12 +40,18 @@ defmodule ExArrow.FlightSQL.Statement do
   ## Close semantics
 
   `close/1` sends `ActionClosePreparedStatement` to the server, releasing
-  server-side resources.  After closing, any subsequent call to `bind/2`,
-  `execute/1`, `execute_update/1`, or `close/1` returns
+  server-side resources.  Closed-state is tracked inside the underlying NIF
+  resource; after `close/1` returns `:ok`, any subsequent call to `bind/2`,
+  `execute/1`, `execute_update/1`, or `parameter_schema/1` returns
   `{:error, %Error{code: :protocol_error, message: "statement is closed"}}`.
 
   Close is idempotent: calling `close/1` on an already-closed statement
   returns `:ok`.
+
+  If `close/1` returns `{:error, ...}` (for example a transport error mid-
+  call), the statement handle is still consumed locally — retrying `close/1`
+  is a no-op and returns `:ok`, but the server-side resource may not have
+  been released.
 
   ## Compatibility
 
@@ -55,12 +64,9 @@ defmodule ExArrow.FlightSQL.Statement do
   alias ExArrow.FlightSQL.Error
   alias ExArrow.{RecordBatch, Schema, Stream}
 
-  @opaque t :: %__MODULE__{
-            resource: reference(),
-            closed: boolean()
-          }
+  @opaque t :: %__MODULE__{resource: reference()}
 
-  defstruct [:resource, closed: false]
+  defstruct [:resource]
 
   @doc """
   Bind a `RecordBatch` of parameters to the prepared statement.
@@ -73,18 +79,17 @@ defmodule ExArrow.FlightSQL.Statement do
   Binding replaces any previously bound parameters.  After binding, call
   `execute/1` or `execute_update/1` to run the statement with the parameters.
 
-  Returns `:ok` on success or `{:error, %Error{}}` on failure.
+  Returns `:ok` on success or `{:error, %Error{}}` on failure (including
+  `:protocol_error` if the statement has been closed).
 
   ## Examples
 
-      params = ExArrow.RecordBatch.from_columns(["id"], [<<42::little-signed-64>>], ["int64"], 1)
+      {:ok, params} =
+        ExArrow.RecordBatch.from_columns(["id"], [<<42::little-signed-64>>], ["s64"], 1)
+
       :ok = ExArrow.FlightSQL.Statement.bind(stmt, params)
   """
   @spec bind(t(), RecordBatch.t()) :: :ok | {:error, Error.t()}
-  def bind(%__MODULE__{resource: _ref, closed: true}, _batch) do
-    {:error, Error.from_string(:protocol_error, "statement is closed")}
-  end
-
   def bind(%__MODULE__{resource: ref}, %RecordBatch{resource: batch_ref}) do
     case native().flight_sql_prepared_bind(ref, batch_ref) do
       :ok -> :ok
@@ -98,7 +103,8 @@ defmodule ExArrow.FlightSQL.Statement do
   The schema describes the column names and Arrow types that `bind/2`
   expects.  An empty schema means the statement takes no parameters.
 
-  Returns `{:ok, %ExArrow.Schema{}}` or `{:error, %Error{}}`.
+  Returns `{:ok, %ExArrow.Schema{}}` or `{:error, %Error{}}` (including
+  `:protocol_error` if the statement has been closed).
 
   ## Examples
 
@@ -106,10 +112,6 @@ defmodule ExArrow.FlightSQL.Statement do
       [%ExArrow.Field{name: "id", dtype: "int64"}] = ExArrow.Schema.fields(schema)
   """
   @spec parameter_schema(t()) :: {:ok, Schema.t()} | {:error, Error.t()}
-  def parameter_schema(%__MODULE__{resource: _ref, closed: true}) do
-    {:error, Error.from_string(:protocol_error, "statement is closed")}
-  end
-
   def parameter_schema(%__MODULE__{resource: ref}) do
     case native().flight_sql_prepared_parameter_schema(ref) do
       {:ok, schema_ref} -> {:ok, Schema.from_ref(schema_ref)}
@@ -124,7 +126,8 @@ defmodule ExArrow.FlightSQL.Statement do
   on the returned endpoint.  If parameters were bound with `bind/2`, they
   are sent to the server as part of the execution.
 
-  Returns `{:ok, %ExArrow.Stream{}}` or `{:error, %ExArrow.FlightSQL.Error{}}`.
+  Returns `{:ok, %ExArrow.Stream{}}` or `{:error, %ExArrow.FlightSQL.Error{}}`
+  (including `:protocol_error` if the statement has been closed).
 
   ## Examples
 
@@ -132,10 +135,6 @@ defmodule ExArrow.FlightSQL.Statement do
       batches = Enum.to_list(stream)
   """
   @spec execute(t()) :: {:ok, Stream.t()} | {:error, Error.t()}
-  def execute(%__MODULE__{resource: _ref, closed: true}) do
-    {:error, Error.from_string(:protocol_error, "statement is closed")}
-  end
-
   def execute(%__MODULE__{resource: ref}) do
     case native().flight_sql_prepared_execute(ref) do
       {:ok, stream_ref} -> {:ok, %Stream{resource: stream_ref, backend: :flight_sql}}
@@ -149,7 +148,8 @@ defmodule ExArrow.FlightSQL.Statement do
   Returns `{:ok, n}` where `n` is the number of affected rows, or
   `{:ok, :unknown}` when the server does not report a count.
 
-  Returns `{:error, %ExArrow.FlightSQL.Error{}}` on failure.
+  Returns `{:error, %ExArrow.FlightSQL.Error{}}` on failure (including
+  `:protocol_error` if the statement has been closed).
 
   ## Examples
 
@@ -157,10 +157,6 @@ defmodule ExArrow.FlightSQL.Statement do
       {:ok, 1} = ExArrow.FlightSQL.Statement.execute_update(stmt)
   """
   @spec execute_update(t()) :: {:ok, non_neg_integer() | :unknown} | {:error, Error.t()}
-  def execute_update(%__MODULE__{resource: _ref, closed: true}) do
-    {:error, Error.from_string(:protocol_error, "statement is closed")}
-  end
-
   def execute_update(%__MODULE__{resource: ref}) do
     case native().flight_sql_prepared_execute_update(ref) do
       {:ok, :unknown} -> {:ok, :unknown}
@@ -172,34 +168,28 @@ defmodule ExArrow.FlightSQL.Statement do
   @doc """
   Close the prepared statement and release server-side resources.
 
-  Sends `ActionClosePreparedStatement` to the server.  After closing, any
-  subsequent calls to `bind/2`, `execute/1`, `execute_update/1`, or
-  `close/1` return `{:error, %Error{code: :protocol_error}}`.
+  Sends `ActionClosePreparedStatement` to the server.  Closed-state is
+  tracked inside the underlying NIF resource: after `close/1` returns
+  `:ok`, any subsequent call to `bind/2`, `execute/1`, `execute_update/1`,
+  or `parameter_schema/1` returns `{:error, %Error{code: :protocol_error}}`.
 
   Close is idempotent: calling `close/1` on an already-closed statement
-  returns `:ok`.
+  returns `:ok` without contacting the server.
 
-  Returns `:ok` on success or `{:error, %Error{}}` on failure.
+  Returns `:ok` on success or `{:error, %Error{}}` on failure.  On
+  failure the statement handle is still consumed locally — subsequent
+  operations will return `:protocol_error`.
 
   ## Examples
 
       :ok = ExArrow.FlightSQL.Statement.close(stmt)
   """
   @spec close(t()) :: :ok | {:error, Error.t()}
-  def close(%__MODULE__{closed: true}), do: :ok
-
-  def close(%__MODULE__{resource: ref} = stmt) do
-    result =
-      case native().flight_sql_prepared_close(ref) do
-        :ok -> :ok
-        {:error, nif_err} -> {:error, wrap_nif_error(nif_err)}
-      end
-
-    if result == :ok do
-      %{stmt | closed: true}
+  def close(%__MODULE__{resource: ref}) do
+    case native().flight_sql_prepared_close(ref) do
+      :ok -> :ok
+      {:error, nif_err} -> {:error, wrap_nif_error(nif_err)}
     end
-
-    result
   end
 
   # ── Helpers ───────────────────────────────────────────────────────────────────

@@ -240,12 +240,16 @@ defmodule ExArrow.FlightSQL.Client do
       batches = Enum.to_list(stream)
 
       # Bind parameters and execute
-      params = ExArrow.RecordBatch.from_columns(["id"], [<<42::little-signed-64>>], ["int64"], 1)
+      {:ok, params} =
+        ExArrow.RecordBatch.from_columns(["id"], [<<42::little-signed-64>>], ["s64"], 1)
+
       :ok = ExArrow.FlightSQL.Statement.bind(stmt, params)
       {:ok, stream} = ExArrow.FlightSQL.Statement.execute(stmt)
 
       # Re-bind and re-execute (same statement, different parameters)
-      other_params = ExArrow.RecordBatch.from_columns(["id"], [<<99::little-signed-64>>], ["int64"], 1)
+      {:ok, other_params} =
+        ExArrow.RecordBatch.from_columns(["id"], [<<99::little-signed-64>>], ["s64"], 1)
+
       :ok = ExArrow.FlightSQL.Statement.bind(stmt, other_params)
       {:ok, stream2} = ExArrow.FlightSQL.Statement.execute(stmt)
 

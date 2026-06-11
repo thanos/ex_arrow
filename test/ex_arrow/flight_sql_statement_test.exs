@@ -24,21 +24,14 @@ defmodule ExArrow.FlightSQL.StatementTest do
   defp restore(key, val), do: Application.put_env(:ex_arrow, key, val)
 
   defp fake_stmt, do: %Statement{resource: make_ref()}
-  defp fake_closed_stmt, do: %Statement{resource: make_ref(), closed: true}
 
   # ── Statement struct ─────────────────────────────────────────────────────────
 
   describe "struct" do
-    test "holds a resource ref and defaults to open" do
+    test "holds a resource ref" do
       ref = make_ref()
       stmt = %Statement{resource: ref}
       assert stmt.resource == ref
-      assert stmt.closed == false
-    end
-
-    test "closed field tracks close state" do
-      stmt = %Statement{resource: make_ref(), closed: true}
-      assert stmt.closed == true
     end
   end
 
@@ -98,10 +91,20 @@ defmodule ExArrow.FlightSQL.StatementTest do
     end
   end
 
-  describe "execute/1 — closed statement" do
+  describe "execute/1 — closed statement (NIF returns :protocol_error)" do
+    setup do
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeClosed
+      )
+
+      :ok
+    end
+
     test "returns {:error, %Error{code: :protocol_error}}" do
       assert {:error, %Error{code: :protocol_error, message: msg}} =
-               Statement.execute(fake_closed_stmt())
+               Statement.execute(fake_stmt())
 
       assert msg =~ "statement is closed"
     end
@@ -177,10 +180,19 @@ defmodule ExArrow.FlightSQL.StatementTest do
     end
   end
 
-  describe "execute_update/1 — closed statement" do
+  describe "execute_update/1 — closed statement (NIF returns :protocol_error)" do
+    setup do
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeClosed
+      )
+
+      :ok
+    end
+
     test "returns {:error, %Error{code: :protocol_error}}" do
-      assert {:error, %Error{code: :protocol_error}} =
-               Statement.execute_update(fake_closed_stmt())
+      assert {:error, %Error{code: :protocol_error}} = Statement.execute_update(fake_stmt())
     end
   end
 
@@ -219,12 +231,22 @@ defmodule ExArrow.FlightSQL.StatementTest do
     end
   end
 
-  describe "bind/2 — closed statement" do
+  describe "bind/2 — closed statement (NIF returns :protocol_error)" do
+    setup do
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeClosed
+      )
+
+      :ok
+    end
+
     test "returns {:error, %Error{code: :protocol_error}}" do
       batch = %ExArrow.RecordBatch{resource: make_ref()}
 
       assert {:error, %Error{code: :protocol_error, message: msg}} =
-               Statement.bind(fake_closed_stmt(), batch)
+               Statement.bind(fake_stmt(), batch)
 
       assert msg =~ "statement is closed"
     end
@@ -262,10 +284,19 @@ defmodule ExArrow.FlightSQL.StatementTest do
     end
   end
 
-  describe "parameter_schema/1 — closed statement" do
+  describe "parameter_schema/1 — closed statement (NIF returns :protocol_error)" do
+    setup do
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeClosed
+      )
+
+      :ok
+    end
+
     test "returns {:error, %Error{code: :protocol_error}}" do
-      assert {:error, %Error{code: :protocol_error}} =
-               Statement.parameter_schema(fake_closed_stmt())
+      assert {:error, %Error{code: :protocol_error}} = Statement.parameter_schema(fake_stmt())
     end
   end
 
@@ -278,15 +309,26 @@ defmodule ExArrow.FlightSQL.StatementTest do
     end
 
     test "returns :ok" do
-      stmt = fake_stmt()
-      assert :ok = Statement.close(stmt)
+      assert :ok = Statement.close(fake_stmt())
     end
   end
 
-  describe "close/1 — idempotent" do
-    test "calling close twice returns :ok" do
-      stmt = %Statement{resource: make_ref(), closed: true}
-      assert :ok = Statement.close(stmt)
+  describe "close/1 — idempotent (NIF reports already-closed as :ok)" do
+    setup do
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeClosed
+      )
+
+      :ok
+    end
+
+    test "second close call returns :ok" do
+      # Closed-state lives inside the NIF resource; the stub returns :ok
+      # to model the idempotent behaviour of the real NIF when the inner
+      # Option<PreparedStatement> has already been taken.
+      assert :ok = Statement.close(fake_stmt())
     end
   end
 
@@ -324,28 +366,35 @@ defmodule ExArrow.FlightSQL.StatementTest do
     end
   end
 
-  # ── Operations after close should fail ────────────────────────────────────────
+  # ── Operations after close should fail (NIF-side guard) ──────────────────────
 
-  describe "operations after close" do
-    test "bind after close returns protocol error" do
+  describe "operations after close (NIF guard)" do
+    setup do
+      Application.put_env(
+        :ex_arrow,
+        :flight_sql_statement_native,
+        ExArrow.FlightSQL.StmtNativeClosed
+      )
+
+      :ok
+    end
+
+    test "bind on closed stmt returns protocol error" do
       batch = %ExArrow.RecordBatch{resource: make_ref()}
 
-      assert {:error, %Error{code: :protocol_error}} =
-               Statement.bind(fake_closed_stmt(), batch)
+      assert {:error, %Error{code: :protocol_error}} = Statement.bind(fake_stmt(), batch)
     end
 
-    test "execute after close returns protocol error" do
-      assert {:error, %Error{code: :protocol_error}} = Statement.execute(fake_closed_stmt())
+    test "execute on closed stmt returns protocol error" do
+      assert {:error, %Error{code: :protocol_error}} = Statement.execute(fake_stmt())
     end
 
-    test "execute_update after close returns protocol error" do
-      assert {:error, %Error{code: :protocol_error}} =
-               Statement.execute_update(fake_closed_stmt())
+    test "execute_update on closed stmt returns protocol error" do
+      assert {:error, %Error{code: :protocol_error}} = Statement.execute_update(fake_stmt())
     end
 
-    test "parameter_schema after close returns protocol error" do
-      assert {:error, %Error{code: :protocol_error}} =
-               Statement.parameter_schema(fake_closed_stmt())
+    test "parameter_schema on closed stmt returns protocol error" do
+      assert {:error, %Error{code: :protocol_error}} = Statement.parameter_schema(fake_stmt())
     end
   end
 

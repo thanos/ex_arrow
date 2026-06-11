@@ -87,67 +87,69 @@ defmodule ExArrow.RecordBatch do
   @doc """
   Create a `RecordBatch` from column-oriented binary data.
 
-  This is the primary way to construct a `RecordBatch` for parameter binding
-  in Flight SQL prepared statements.  Each column is provided as a raw binary
-  in native Arrow IPC format, with a corresponding Arrow type string.
+  Each column is provided as a raw little-endian binary, paired with an
+  Arrow dtype string and shared row count.  This is the primary constructor
+  for building parameter batches for Flight SQL prepared statement binding.
 
   ## Parameters
 
-  - `names`  - list of column name strings
-  - `binaries` - list of raw column data binaries (little-endian for integers/floats)
-  - `dtypes` - list of Arrow type strings (e.g. `["int64", "utf8", "float64"]`)
-  - `length` - number of rows (must be consistent across all columns)
+  - `names` — list of column name strings
+  - `binaries` — list of raw column data binaries (little-endian for
+    integers and floats; one byte per element for `"bool"`)
+  - `dtypes` — list of Arrow dtype strings (see below)
+  - `length` — number of rows (must be the same for every column)
 
-  ## Supported Arrow type strings
+  ## Supported dtype strings
 
-  Integer types: `"int8"`, `"int16"`, `"int32"`, `"int64"`,
-  `"uint8"`, `"uint16"`, `"uint32"`, `"uint64"`
+  | dtype  | Arrow type | element size |
+  |--------|------------|--------------|
+  | `"s8"`  | Int8       | 1 byte       |
+  | `"s16"` | Int16      | 2 bytes      |
+  | `"s32"` | Int32      | 4 bytes      |
+  | `"s64"` | Int64      | 8 bytes      |
+  | `"u8"`  | UInt8      | 1 byte       |
+  | `"u16"` | UInt16     | 2 bytes      |
+  | `"u32"` | UInt32     | 4 bytes      |
+  | `"u64"` | UInt64     | 8 bytes      |
+  | `"f32"` | Float32    | 4 bytes      |
+  | `"f64"` | Float64    | 8 bytes      |
+  | `"bool"` | Boolean   | 1 byte (0 = false, non-zero = true) |
 
-  Float types: `"float16"`, `"float32"`, `"float64"`
+  String, binary, date, timestamp, and duration types are not yet supported
+  by this constructor.
 
-  String types: `"utf8"`, `"large_utf8"`
+  ## Returns
 
-  Boolean: `"bool"`
-
-  Date/Time: `"date32"`, `"timestamp_seconds"`, `"timestamp_millis"`,
-  `"timestamp_micros"`, `"timestamp_nanos"`
-
-  Duration: `"duration_seconds"`, `"duration_millis"`,
-  `"duration_micros"`, `"duration_nanos"`
-
-  Binary: `"binary"`, `"large_binary"`
+  - `{:ok, %ExArrow.RecordBatch{}}` on success
+  - `{:error, message}` if the inputs are inconsistent (mismatched lengths,
+    binary size doesn't match `length × element_size`, unknown dtype, etc.)
 
   ## Examples
 
       # Single int64 column with one row
-      batch = ExArrow.RecordBatch.from_columns(
+      {:ok, batch} = ExArrow.RecordBatch.from_columns(
         ["id"],
         [<<42::little-signed-64>>],
-        ["int64"],
+        ["s64"],
         1
       )
 
-      # Multiple columns
-      batch = ExArrow.RecordBatch.from_columns(
-        ["id", "name"],
-        [<<1::little-signed-64>>, "Alice"],
-        ["int64", "utf8"],
+      # Multiple columns: int64 and float64
+      {:ok, batch} = ExArrow.RecordBatch.from_columns(
+        ["id", "score"],
+        [<<1::little-signed-64>>, <<3.14::little-float-64>>],
+        ["s64", "f64"],
         1
       )
   """
   @spec from_columns([String.t()], [binary()], [String.t()], non_neg_integer()) ::
-          t()
+          {:ok, t()} | {:error, String.t()}
   def from_columns(names, binaries, dtypes, length)
       when is_list(names) and is_list(binaries) and is_list(dtypes) and
              is_integer(length) and length >= 0 do
-    ref =
-      Native.record_batch_from_column_binaries(
-        names,
-        binaries,
-        dtypes,
-        length
-      )
-
-    %__MODULE__{resource: ref}
+    case Native.record_batch_from_column_binaries(names, binaries, dtypes, length) do
+      {:ok, ref} -> {:ok, %__MODULE__{resource: ref}}
+      {:error, _} = err -> err
+    end
   end
 end
