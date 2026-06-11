@@ -35,7 +35,9 @@ defmodule ExArrow.FlightSQL.Statement do
   names; column types must be compatible.
 
   Use `parameter_schema/1` to inspect the expected parameter schema before
-  binding.
+  binding.  See `ExArrow.RecordBatch` for the full set of dtype strings
+  supported by `ExArrow.RecordBatch.from_columns/4`, including primitives,
+  date/timestamp/duration, and `utf8`/`binary` variants.
 
   ## Close semantics
 
@@ -49,9 +51,10 @@ defmodule ExArrow.FlightSQL.Statement do
   returns `:ok`.
 
   If `close/1` returns `{:error, ...}` (for example a transport error mid-
-  call), the statement handle is still consumed locally — retrying `close/1`
+  call) the statement handle is still consumed locally — retrying `close/1`
   is a no-op and returns `:ok`, but the server-side resource may not have
-  been released.
+  been released and can leak until the underlying connection is closed.
+  See `close/1` for details.
 
   ## Compatibility
 
@@ -169,20 +172,48 @@ defmodule ExArrow.FlightSQL.Statement do
   Close the prepared statement and release server-side resources.
 
   Sends `ActionClosePreparedStatement` to the server.  Closed-state is
-  tracked inside the underlying NIF resource: after `close/1` returns
-  `:ok`, any subsequent call to `bind/2`, `execute/1`, `execute_update/1`,
-  or `parameter_schema/1` returns `{:error, %Error{code: :protocol_error}}`.
+  tracked inside the underlying NIF resource: after `close/1` returns,
+  any subsequent call to `bind/2`, `execute/1`, `execute_update/1`, or
+  `parameter_schema/1` returns `{:error, %Error{code: :protocol_error}}`.
 
   Close is idempotent: calling `close/1` on an already-closed statement
   returns `:ok` without contacting the server.
 
-  Returns `:ok` on success or `{:error, %Error{}}` on failure.  On
-  failure the statement handle is still consumed locally — subsequent
-  operations will return `:protocol_error`.
+  ## Return values
+
+  - `:ok` — the server acknowledged `ActionClosePreparedStatement` and
+    released the resource.
+  - `{:error, %Error{}}` — a transport, protocol, or server error
+    occurred while closing.
+
+  ## Behaviour on error
+
+  The underlying `arrow-flight` `PreparedStatement::close(self)` consumes
+  the statement value, so retrying after a failure is not possible.  When
+  `close/1` returns `{:error, ...}`:
+
+  - The statement handle is consumed locally regardless of outcome.
+  - All subsequent operations on the handle (including a retry of
+    `close/1`) return `:ok` for `close/1` and `:protocol_error` for
+    everything else.
+  - The server-side resource may or may not have been freed.  If the
+    failure was transient (for example a transport error mid-call) the
+    server-side prepared statement may leak until the connection is
+    closed.
+
+  Callers that need a guarantee of server-side cleanup should drop the
+  whole client connection on a `close/1` error.
 
   ## Examples
 
       :ok = ExArrow.FlightSQL.Statement.close(stmt)
+
+      # Defensive cleanup pattern
+      try do
+        # ... use stmt ...
+      after
+        _ = ExArrow.FlightSQL.Statement.close(stmt)
+      end
   """
   @spec close(t()) :: :ok | {:error, Error.t()}
   def close(%__MODULE__{resource: ref}) do

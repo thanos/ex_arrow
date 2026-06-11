@@ -50,6 +50,8 @@ jobs:
       - run: mix format --check-formatted
       - run: mix credo --strict
       - run: mix sobelow --exit --skip
+      - name: Check CHANGELOG version matches mix.exs
+        run: bash script/check_version
       - run: mix docs --warnings-as-errors
         env:
           MIX_ENV: dev

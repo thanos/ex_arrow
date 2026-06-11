@@ -3,7 +3,7 @@ defmodule ExArrow.RecordBatch do
   Arrow record batch handle (opaque reference to native record batch).
 
   A batch is a collection of column arrays with a shared schema and row count.
-  It sits between `ExArrow.Array` (one column) and `ExArrow.Table` or 
+  It sits between `ExArrow.Array` (one column) and `ExArrow.Table` or
   `ExArrow.Stream` (multiple batches).  Data stays in native memory; accessors
   return handles or small metadata.
 
@@ -14,6 +14,82 @@ defmodule ExArrow.RecordBatch do
       RecordBatch ── Array (one per column)
                         │
       Table / Stream ── RecordBatch (one or more)
+
+  ## Supported dtype strings (`from_columns/4`)
+
+  The `from_columns/4` constructor accepts a per-column dtype string.  The
+  full set of supported strings, the corresponding Arrow logical type, and
+  the wire format expected for each column binary are listed below.
+
+  ### Fixed-width primitives
+
+  Each column binary is exactly `length × element_size` bytes, in
+  little-endian byte order for multi-byte types.
+
+  | dtype  | Arrow type         | element size |
+  |--------|--------------------|--------------|
+  | `"s8"`  | `Int8`             | 1 byte       |
+  | `"s16"` | `Int16`            | 2 bytes      |
+  | `"s32"` | `Int32`            | 4 bytes      |
+  | `"s64"` | `Int64`            | 8 bytes      |
+  | `"u8"`  | `UInt8`            | 1 byte       |
+  | `"u16"` | `UInt16`           | 2 bytes      |
+  | `"u32"` | `UInt32`           | 4 bytes      |
+  | `"u64"` | `UInt64`           | 8 bytes      |
+  | `"f32"` | `Float32`          | 4 bytes      |
+  | `"f64"` | `Float64`          | 8 bytes      |
+
+  ### Boolean
+
+  `"bool"` — exactly `length` bytes, one byte per element (0 = false,
+  non-zero = true).
+
+  ### Date and time
+
+  Dates are days or milliseconds since 1970-01-01.  Timestamps are ticks
+  since the Unix epoch in UTC.  Durations are tick counts.  All temporal
+  types are little-endian.
+
+  | dtype  | Arrow type | Rust scalar | element size |
+  |--------|------------|-------------|--------------|
+  | `"date32"`              | `Date32`                            | i32 days   | 4 bytes |
+  | `"date64"`              | `Date64`                            | i64 millis | 8 bytes |
+  | `"timestamp_seconds"`   | `Timestamp(Second, None)`           | i64 sec    | 8 bytes |
+  | `"timestamp_millis"`    | `Timestamp(Millisecond, None)`      | i64 ms     | 8 bytes |
+  | `"timestamp_micros"`    | `Timestamp(Microsecond, None)`      | i64 µs     | 8 bytes |
+  | `"timestamp_nanos"`     | `Timestamp(Nanosecond, None)`       | i64 ns     | 8 bytes |
+  | `"duration_seconds"`    | `Duration(Second)`                  | i64 sec    | 8 bytes |
+  | `"duration_millis"`     | `Duration(Millisecond)`             | i64 ms     | 8 bytes |
+  | `"duration_micros"`     | `Duration(Microsecond)`             | i64 µs     | 8 bytes |
+  | `"duration_nanos"`      | `Duration(Nanosecond)`              | i64 ns     | 8 bytes |
+
+  Timestamps are emitted with no timezone (`None`).  The caller is
+  responsible for ensuring the i64 ticks are in UTC if the consuming
+  server treats the column as zoned.
+
+  ### Variable-length string and binary
+
+  Variable-length columns use a length-prefixed wire format.  The column
+  binary is the concatenation of `length` records, each of the form:
+
+      <<elem_len::unsigned-little-32, elem_bytes::binary-size(elem_len)>>
+
+  | dtype           | Arrow type     |
+  |-----------------|----------------|
+  | `"utf8"`        | `Utf8`         |
+  | `"large_utf8"`  | `LargeUtf8`    |
+  | `"binary"`      | `Binary`       |
+  | `"large_binary"`| `LargeBinary`  |
+
+  `"utf8"` and `"large_utf8"` validate UTF-8 on the entire payload and
+  return `{:error, msg}` if any element is invalid.  `"binary"` and
+  `"large_binary"` accept arbitrary bytes.
+
+  ## Nullability
+
+  `from_columns/4` produces non-nullable columns (`Field.nullable = false`).
+  Pass nulls by binding a separate column or by using a parameter schema
+  that accepts non-null values only.
   """
   alias ExArrow.Native
   alias ExArrow.Schema
@@ -87,42 +163,27 @@ defmodule ExArrow.RecordBatch do
   @doc """
   Create a `RecordBatch` from column-oriented binary data.
 
-  Each column is provided as a raw little-endian binary, paired with an
-  Arrow dtype string and shared row count.  This is the primary constructor
-  for building parameter batches for Flight SQL prepared statement binding.
+  Each column is provided as a raw binary paired with an Arrow dtype
+  string and a shared row count.  This is the primary constructor for
+  building parameter batches for Flight SQL prepared statement binding.
 
   ## Parameters
 
   - `names` — list of column name strings
-  - `binaries` — list of raw column data binaries (little-endian for
-    integers and floats; one byte per element for `"bool"`)
-  - `dtypes` — list of Arrow dtype strings (see below)
+  - `binaries` — list of column data binaries (one per column).  See the
+    [supported dtypes](#module-supported-dtype-strings-from_columns-4)
+    table in the moduledoc for the wire format of each dtype.
+  - `dtypes` — list of Arrow dtype strings, one per column
   - `length` — number of rows (must be the same for every column)
 
-  ## Supported dtype strings
-
-  | dtype  | Arrow type | element size |
-  |--------|------------|--------------|
-  | `"s8"`  | Int8       | 1 byte       |
-  | `"s16"` | Int16      | 2 bytes      |
-  | `"s32"` | Int32      | 4 bytes      |
-  | `"s64"` | Int64      | 8 bytes      |
-  | `"u8"`  | UInt8      | 1 byte       |
-  | `"u16"` | UInt16     | 2 bytes      |
-  | `"u32"` | UInt32     | 4 bytes      |
-  | `"u64"` | UInt64     | 8 bytes      |
-  | `"f32"` | Float32    | 4 bytes      |
-  | `"f64"` | Float64    | 8 bytes      |
-  | `"bool"` | Boolean   | 1 byte (0 = false, non-zero = true) |
-
-  String, binary, date, timestamp, and duration types are not yet supported
-  by this constructor.
+  All four lists must have the same length and at least one entry.
 
   ## Returns
 
   - `{:ok, %ExArrow.RecordBatch{}}` on success
-  - `{:error, message}` if the inputs are inconsistent (mismatched lengths,
-    binary size doesn't match `length × element_size`, unknown dtype, etc.)
+  - `{:error, message}` if the inputs are inconsistent (mismatched
+    list lengths, malformed binary, unknown dtype, invalid UTF-8 in a
+    `"utf8"`/`"large_utf8"` column, etc.)
 
   ## Examples
 
@@ -134,13 +195,23 @@ defmodule ExArrow.RecordBatch do
         1
       )
 
-      # Multiple columns: int64 and float64
+      # Mixed primitives
       {:ok, batch} = ExArrow.RecordBatch.from_columns(
         ["id", "score"],
         [<<1::little-signed-64>>, <<3.14::little-float-64>>],
         ["s64", "f64"],
         1
       )
+
+      # utf8 column with two rows ("hello", "world") using length-prefixed
+      # records: <<len::little-32, bytes::binary-size(len)>>
+      utf8 = <<5::little-32, "hello", 5::little-32, "world">>
+      {:ok, batch} = ExArrow.RecordBatch.from_columns(["s"], [utf8], ["utf8"], 2)
+
+      # timestamp_micros column
+      ts = <<1_700_000_000_000_000::little-signed-64>>
+      {:ok, batch} =
+        ExArrow.RecordBatch.from_columns(["t"], [ts], ["timestamp_micros"], 1)
   """
   @spec from_columns([String.t()], [binary()], [String.t()], non_neg_integer()) ::
           {:ok, t()} | {:error, String.t()}

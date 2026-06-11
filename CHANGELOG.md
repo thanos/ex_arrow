@@ -26,10 +26,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ExArrow.RecordBatch.from_columns/4`** — creates a `RecordBatch` from
   column-oriented binary data (names, binaries, dtype strings, row count).
   Returns `{:ok, t()} | {:error, String.t()}`.  Primary constructor for
-  building parameter batches.  Supported dtypes: `"s8"`, `"s16"`, `"s32"`,
-  `"s64"`, `"u8"`, `"u16"`, `"u32"`, `"u64"`, `"f32"`, `"f64"`, `"bool"`.
-  String, binary, date, timestamp, and duration types are not yet supported
-  by this constructor and will be added in a future release.
+  building parameter batches.  Supported dtypes:
+  - Signed integers: `"s8"`, `"s16"`, `"s32"`, `"s64"`
+  - Unsigned integers: `"u8"`, `"u16"`, `"u32"`, `"u64"`
+  - Floats: `"f32"`, `"f64"`
+  - Boolean: `"bool"`
+  - Date/time: `"date32"`, `"date64"`, `"timestamp_seconds"`,
+    `"timestamp_millis"`, `"timestamp_micros"`, `"timestamp_nanos"`,
+    `"duration_seconds"`, `"duration_millis"`, `"duration_micros"`,
+    `"duration_nanos"`
+  - Variable-length: `"utf8"`, `"large_utf8"`, `"binary"`, `"large_binary"`
+    (length-prefixed records, see `ExArrow.RecordBatch` moduledoc for the
+    wire format)
 - **Rust NIF: `flight_sql_prepared_bind`** — binds a `RecordBatch` to a
   prepared statement via `PreparedStatement::set_parameters`.
 - **Rust NIF: `flight_sql_prepared_close`** — closes a prepared statement via

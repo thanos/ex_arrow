@@ -879,6 +879,17 @@ pub fn flight_sql_prepared_parameter_schema<'a>(
 ///
 /// Close is idempotent — calling it on an already-closed statement returns `:ok`.
 ///
+/// ## Behaviour on error
+///
+/// `PreparedStatement::close(self)` consumes the statement, so even when the
+/// underlying gRPC call fails the statement is taken out of the resource's
+/// `Mutex<Option<...>>` and dropped.  This means:
+///
+/// - The Elixir resource is in the closed state regardless of return value.
+/// - A retry call to this NIF returns `:ok` (idempotent path).
+/// - The server-side resource may or may not be freed; transient transport
+///   errors may leave it allocated until the connection is dropped.
+///
 /// Returns `:ok` on success, `{:error, {code, grpc_status, message}}` on failure.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn flight_sql_prepared_close<'a>(

@@ -201,4 +201,137 @@ defmodule ExArrow.RecordBatchTest do
       assert msg =~ "binary length mismatch"
     end
   end
+
+  describe "from_columns/4 — date and time dtypes" do
+    test "date32 (i32 days since epoch)" do
+      bin = <<19_000::little-signed-32, 19_001::little-signed-32>>
+
+      assert {:ok, %RecordBatch{} = batch} =
+               RecordBatch.from_columns(["d"], [bin], ["date32"], 2)
+
+      assert RecordBatch.num_rows(batch) == 2
+    end
+
+    test "date64 (i64 millis since epoch)" do
+      bin = <<1_700_000_000_000::little-signed-64>>
+
+      assert {:ok, %RecordBatch{} = batch} =
+               RecordBatch.from_columns(["d"], [bin], ["date64"], 1)
+
+      assert RecordBatch.num_rows(batch) == 1
+    end
+
+    test "timestamp dtypes (all four time units)" do
+      ts_bin = <<1_700_000_000_000_000::little-signed-64>>
+
+      for dtype <- ~w(timestamp_seconds timestamp_millis timestamp_micros timestamp_nanos) do
+        assert {:ok, %RecordBatch{} = batch} =
+                 RecordBatch.from_columns(["t"], [ts_bin], [dtype], 1),
+               "expected dtype #{dtype} to succeed"
+
+        assert RecordBatch.num_rows(batch) == 1
+      end
+    end
+
+    test "duration dtypes (all four time units)" do
+      d_bin = <<3_600::little-signed-64>>
+
+      for dtype <- ~w(duration_seconds duration_millis duration_micros duration_nanos) do
+        assert {:ok, %RecordBatch{} = batch} =
+                 RecordBatch.from_columns(["d"], [d_bin], [dtype], 1),
+               "expected dtype #{dtype} to succeed"
+
+        assert RecordBatch.num_rows(batch) == 1
+      end
+    end
+
+    test "date32 reports binary length mismatch" do
+      assert {:error, msg} =
+               RecordBatch.from_columns(["d"], [<<1::little-signed-32>>], ["date32"], 2)
+
+      assert msg =~ "binary length mismatch"
+    end
+  end
+
+  describe "from_columns/4 — variable-length string and binary dtypes" do
+    # Wire format: <<elem_len::little-32, elem_bytes::binary-size(elem_len)>> × length
+    defp varlen([]), do: <<>>
+
+    defp varlen([head | tail]) when is_binary(head) do
+      <<byte_size(head)::little-32, head::binary, varlen(tail)::binary>>
+    end
+
+    test "utf8 with multiple elements" do
+      bin = varlen(["hello", "world", ""])
+
+      assert {:ok, %RecordBatch{} = batch} =
+               RecordBatch.from_columns(["s"], [bin], ["utf8"], 3)
+
+      assert RecordBatch.num_rows(batch) == 3
+    end
+
+    test "large_utf8 accepts the same wire format" do
+      bin = varlen(["a", "bb", "ccc"])
+
+      assert {:ok, %RecordBatch{} = batch} =
+               RecordBatch.from_columns(["s"], [bin], ["large_utf8"], 3)
+
+      assert RecordBatch.num_rows(batch) == 3
+    end
+
+    test "binary accepts arbitrary bytes" do
+      bin = varlen([<<0, 1, 2>>, <<255, 254>>])
+
+      assert {:ok, %RecordBatch{} = batch} =
+               RecordBatch.from_columns(["b"], [bin], ["binary"], 2)
+
+      assert RecordBatch.num_rows(batch) == 2
+    end
+
+    test "large_binary accepts arbitrary bytes" do
+      bin = varlen([<<0xFF, 0xFE>>])
+
+      assert {:ok, %RecordBatch{} = batch} =
+               RecordBatch.from_columns(["b"], [bin], ["large_binary"], 1)
+
+      assert RecordBatch.num_rows(batch) == 1
+    end
+
+    test "empty utf8 column" do
+      assert {:ok, %RecordBatch{} = batch} =
+               RecordBatch.from_columns(["s"], [<<>>], ["utf8"], 0)
+
+      assert RecordBatch.num_rows(batch) == 0
+    end
+
+    test "utf8 rejects invalid utf-8 bytes" do
+      bin = varlen([<<0xFF, 0xFE>>])
+
+      assert {:error, msg} = RecordBatch.from_columns(["s"], [bin], ["utf8"], 1)
+      assert msg =~ "invalid utf-8"
+    end
+
+    test "utf8 rejects truncated length prefix" do
+      # Declares a 4-byte length but provides only 2 bytes of header data.
+      bin = <<10::little-32, "ab">>
+
+      assert {:error, msg} = RecordBatch.from_columns(["s"], [bin], ["utf8"], 1)
+      assert msg =~ "truncated"
+    end
+
+    test "utf8 rejects trailing bytes after the declared element count" do
+      bin = varlen(["a"]) <> <<0::little-32>>
+
+      assert {:error, msg} = RecordBatch.from_columns(["s"], [bin], ["utf8"], 1)
+      assert msg =~ "trailing bytes"
+    end
+
+    test "binary rejects truncated payload" do
+      # Declares 5 bytes for the first element but provides only 3.
+      bin = <<5::little-32, "abc">>
+
+      assert {:error, msg} = RecordBatch.from_columns(["b"], [bin], ["binary"], 1)
+      assert msg =~ "truncated"
+    end
+  end
 end
