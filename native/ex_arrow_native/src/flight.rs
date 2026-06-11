@@ -4,7 +4,6 @@ use std::io::Cursor;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use arrow::record_batch::RecordBatch;
-use arrow_schema::SchemaRef;
 use arrow_flight::decode::FlightRecordBatchStream;
 use arrow_flight::encode::FlightDataEncoderBuilder;
 use arrow_flight::flight_service_server::{FlightService, FlightServiceServer};
@@ -15,18 +14,19 @@ use arrow_flight::{
 use arrow_flight::{IpcMessage, SchemaAsIpc};
 use arrow_ipc::reader::StreamReader;
 use arrow_ipc::writer::{IpcWriteOptions, StreamWriter};
+use arrow_schema::SchemaRef;
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use rustler::ResourceArc;
 use rustler::{Encoder, Env, Term};
+use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Identity, Server, ServerTlsConfig};
 use tonic::{Request, Response, Status, Streaming};
-use tokio_stream::wrappers::TcpListenerStream;
 
-use crate::util::{err_encode, ok_encode};
 use crate::resources::{ExArrowIpcStream, ExArrowRecordBatch, ExArrowSchema, IpcStreamBacking};
+use crate::util::{err_encode, ok_encode};
 
 // Pre-registered atoms used when encoding/decoding descriptor tuples and TLS mode.
 rustler::atoms! {
@@ -88,7 +88,10 @@ fn parse_tls_mode<'a>(term: Term<'a>) -> Result<TlsMode, String> {
         }
     }
 
-    Err("invalid tls_mode; expected :plaintext, :system_certs, or {:custom_ca, binary()}".to_string())
+    Err(
+        "invalid tls_mode; expected :plaintext, :system_certs, or {:custom_ca, binary()}"
+            .to_string(),
+    )
 }
 
 /// Encode a `&[u8]` slice as an Elixir **binary** (not a charlist).
@@ -115,7 +118,11 @@ enum ServerTlsMode {
     /// One-way TLS: server presents a certificate; clients verify it.
     Tls { cert_pem: Vec<u8>, key_pem: Vec<u8> },
     /// Mutual TLS: server and client both present certificates.
-    Mtls { cert_pem: Vec<u8>, key_pem: Vec<u8>, ca_pem: Vec<u8> },
+    Mtls {
+        cert_pem: Vec<u8>,
+        key_pem: Vec<u8>,
+        ca_pem: Vec<u8>,
+    },
 }
 
 /// Decode the `server_tls` term sent from Elixir:
@@ -129,17 +136,22 @@ fn parse_server_tls<'a>(term: Term<'a>) -> Result<ServerTlsMode, String> {
         }
         return Err("server_tls atom must be :plaintext".to_string());
     }
-    let tuple = rustler::types::tuple::get_tuple(term)
-        .map_err(|_| "server_tls must be :plaintext, {:tls, cert, key}, or {:mtls, cert, key, ca}".to_string())?;
+    let tuple = rustler::types::tuple::get_tuple(term).map_err(|_| {
+        "server_tls must be :plaintext, {:tls, cert, key}, or {:mtls, cert, key, ca}".to_string()
+    })?;
 
     if tuple.len() == 3 {
         if let Ok(tag) = tuple[0].decode::<rustler::Atom>() {
             if tag == tls() {
-                let cert: rustler::Binary = tuple[1].decode().map_err(|_| "tls cert must be a binary".to_string())?;
-                let key: rustler::Binary  = tuple[2].decode().map_err(|_| "tls key must be a binary".to_string())?;
+                let cert: rustler::Binary = tuple[1]
+                    .decode()
+                    .map_err(|_| "tls cert must be a binary".to_string())?;
+                let key: rustler::Binary = tuple[2]
+                    .decode()
+                    .map_err(|_| "tls key must be a binary".to_string())?;
                 return Ok(ServerTlsMode::Tls {
                     cert_pem: cert.as_slice().to_vec(),
-                    key_pem:  key.as_slice().to_vec(),
+                    key_pem: key.as_slice().to_vec(),
                 });
             }
         }
@@ -147,18 +159,27 @@ fn parse_server_tls<'a>(term: Term<'a>) -> Result<ServerTlsMode, String> {
     if tuple.len() == 4 {
         if let Ok(tag) = tuple[0].decode::<rustler::Atom>() {
             if tag == mtls() {
-                let cert: rustler::Binary = tuple[1].decode().map_err(|_| "mtls cert must be a binary".to_string())?;
-                let key: rustler::Binary  = tuple[2].decode().map_err(|_| "mtls key must be a binary".to_string())?;
-                let ca: rustler::Binary   = tuple[3].decode().map_err(|_| "mtls ca must be a binary".to_string())?;
+                let cert: rustler::Binary = tuple[1]
+                    .decode()
+                    .map_err(|_| "mtls cert must be a binary".to_string())?;
+                let key: rustler::Binary = tuple[2]
+                    .decode()
+                    .map_err(|_| "mtls key must be a binary".to_string())?;
+                let ca: rustler::Binary = tuple[3]
+                    .decode()
+                    .map_err(|_| "mtls ca must be a binary".to_string())?;
                 return Ok(ServerTlsMode::Mtls {
                     cert_pem: cert.as_slice().to_vec(),
-                    key_pem:  key.as_slice().to_vec(),
-                    ca_pem:   ca.as_slice().to_vec(),
+                    key_pem: key.as_slice().to_vec(),
+                    ca_pem: ca.as_slice().to_vec(),
                 });
             }
         }
     }
-    Err("invalid server_tls; expected :plaintext, {:tls, cert, key}, or {:mtls, cert, key, ca}".to_string())
+    Err(
+        "invalid server_tls; expected :plaintext, {:tls, cert, key}, or {:mtls, cert, key, ca}"
+            .to_string(),
+    )
 }
 
 const ECHO_TICKET: &[u8] = b"echo";
@@ -181,8 +202,9 @@ fn schema_ipc_bytes(schema: &SchemaRef) -> Result<Bytes, Status> {
 /// Decode an Elixir descriptor term (`{:cmd, binary()}` or `{:path, [String.t()]}`)
 /// into a `FlightDescriptor`.
 fn decode_descriptor<'a>(term: Term<'a>) -> Result<FlightDescriptor, String> {
-    let tuple = rustler::types::tuple::get_tuple(term)
-        .map_err(|_| "descriptor must be a 2-tuple {:cmd, binary()} or {:path, [string]}".to_string())?;
+    let tuple = rustler::types::tuple::get_tuple(term).map_err(|_| {
+        "descriptor must be a 2-tuple {:cmd, binary()} or {:path, [string]}".to_string()
+    })?;
 
     if tuple.len() != 2 {
         return Err("descriptor tuple must have exactly 2 elements".to_string());
@@ -240,9 +262,7 @@ fn encode_descriptor<'a>(env: Env<'a>, desc: Option<&FlightDescriptor>) -> Optio
                 &[cmd().encode(env), cmd_term],
             ))
         }
-        Some(d) if d.r#type == DESCRIPTOR_PATH => {
-            Some((path(), d.path.clone()).encode(env))
-        }
+        Some(d) if d.r#type == DESCRIPTOR_PATH => Some((path(), d.path.clone()).encode(env)),
         Some(_) => {
             // Unknown/unsupported descriptor type returned by a non-echo server.
             // Emit :nil rather than silently mis-encoding the value as a PATH.
@@ -359,7 +379,9 @@ impl FlightService for EchoFlightService {
                         ..Default::default()
                     }),
                     endpoint: vec![FlightEndpoint {
-                        ticket: Some(Ticket { ticket: ticket_bytes }),
+                        ticket: Some(Ticket {
+                            ticket: ticket_bytes,
+                        }),
                         ..Default::default()
                     }],
                     total_records: total_rows,
@@ -390,7 +412,9 @@ impl FlightService for EchoFlightService {
                     schema: schema_bytes,
                     flight_descriptor: Some(desc),
                     endpoint: vec![FlightEndpoint {
-                        ticket: Some(Ticket { ticket: ticket_bytes }),
+                        ticket: Some(Ticket {
+                            ticket: ticket_bytes,
+                        }),
                         ..Default::default()
                     }],
                     total_records: total_rows,
@@ -418,7 +442,10 @@ impl FlightService for EchoFlightService {
         }
     }
 
-    async fn do_get(&self, request: Request<Ticket>) -> Result<Response<Self::DoGetStream>, Status> {
+    async fn do_get(
+        &self,
+        request: Request<Ticket>,
+    ) -> Result<Response<Self::DoGetStream>, Status> {
         let ticket_key = String::from_utf8_lossy(request.into_inner().ticket.as_ref()).into_owned();
         let (schema, batches) = {
             let guard = self.state.lock().map_err(|_| Status::internal("lock"))?;
@@ -467,17 +494,16 @@ impl FlightService for EchoFlightService {
             .try_collect()
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
-        let schema = batches
-            .first()
-            .map(|b| b.schema())
-            .ok_or_else(|| Status::invalid_argument(
-                "do_put rejected: stream contained no record batches",
-            ))?;
+        let schema = batches.first().map(|b| b.schema()).ok_or_else(|| {
+            Status::invalid_argument("do_put rejected: stream contained no record batches")
+        })?;
         {
             let mut guard = self.state.lock().map_err(|_| Status::internal("lock"))?;
             guard.datasets.insert(ticket_key, (schema, batches));
         }
-        Ok(Response::new(Box::pin(futures::stream::iter([Ok(PutResult::default())]))))
+        Ok(Response::new(Box::pin(futures::stream::iter([Ok(
+            PutResult::default(),
+        )]))))
     }
 
     async fn do_action(
@@ -487,7 +513,9 @@ impl FlightService for EchoFlightService {
         let action = request.into_inner();
         match action.r#type.as_str() {
             "ping" => {
-                let result = arrow_flight::Result { body: Bytes::from("pong") };
+                let result = arrow_flight::Result {
+                    body: Bytes::from("pong"),
+                };
                 Ok(Response::new(Box::pin(futures::stream::iter([Ok(result)]))))
             }
             "clear" => {
@@ -501,7 +529,11 @@ impl FlightService for EchoFlightService {
                 let results: Vec<Result<arrow_flight::Result, Status>> = guard
                     .datasets
                     .keys()
-                    .map(|k| Ok(arrow_flight::Result { body: Bytes::from(k.as_bytes().to_vec()) }))
+                    .map(|k| {
+                        Ok(arrow_flight::Result {
+                            body: Bytes::from(k.as_bytes().to_vec()),
+                        })
+                    })
                     .collect();
                 Ok(Response::new(Box::pin(futures::stream::iter(results))))
             }
@@ -520,11 +552,13 @@ impl FlightService for EchoFlightService {
             }),
             Ok(ArrowActionType {
                 r#type: "ping".to_string(),
-                description: "Responds with 'pong'. Used to verify the server is alive.".to_string(),
+                description: "Responds with 'pong'. Used to verify the server is alive."
+                    .to_string(),
             }),
             Ok(ArrowActionType {
                 r#type: "list_tickets".to_string(),
-                description: "Return one result per stored dataset, each body is the ticket bytes.".to_string(),
+                description: "Return one result per stored dataset, each body is the ticket bytes."
+                    .to_string(),
             }),
         ];
         Ok(Response::new(Box::pin(futures::stream::iter(actions))))
@@ -574,7 +608,12 @@ impl rustler::Resource for FlightServerHandle {}
 /// isolates servers from each other.  Keep the number of simultaneously
 /// live handles small (single digits) to avoid thread exhaustion.
 #[rustler::nif(schedule = "DirtyIo")]
-pub fn flight_server_start<'a>(env: Env<'a>, host: String, port: u16, server_tls: Term<'a>) -> Term<'a> {
+pub fn flight_server_start<'a>(
+    env: Env<'a>,
+    host: String,
+    port: u16,
+    server_tls: Term<'a>,
+) -> Term<'a> {
     let tls_mode = match parse_server_tls(server_tls) {
         Ok(m) => m,
         Err(e) => return err_encode(env, e.as_str()),
@@ -583,21 +622,32 @@ pub fn flight_server_start<'a>(env: Env<'a>, host: String, port: u16, server_tls
         datasets: std::collections::HashMap::new(),
     }));
     let service = EchoFlightService { state };
-    let (tx, rx) = std::sync::mpsc::channel::<Result<(String, u16, tokio::sync::oneshot::Sender<()>), String>>();
+    let (tx, rx) = std::sync::mpsc::channel::<
+        Result<(String, u16, tokio::sync::oneshot::Sender<()>), String>,
+    >();
     let join = std::thread::spawn(move || {
         let rt = match tokio::runtime::Runtime::new() {
             Ok(r) => r,
-            Err(e) => { let _ = tx.send(Err(e.to_string())); return; }
+            Err(e) => {
+                let _ = tx.send(Err(e.to_string()));
+                return;
+            }
         };
         rt.block_on(async move {
             let addr_str = format!("{}:{}", host, port);
             let addr: std::net::SocketAddr = match addr_str.parse() {
                 Ok(a) => a,
-                Err(e) => { let _ = tx.send(Err(e.to_string())); return; }
+                Err(e) => {
+                    let _ = tx.send(Err(e.to_string()));
+                    return;
+                }
             };
             let listener = match tokio::net::TcpListener::bind(addr).await {
                 Ok(l) => l,
-                Err(e) => { let _ = tx.send(Err(e.to_string())); return; }
+                Err(e) => {
+                    let _ = tx.send(Err(e.to_string()));
+                    return;
+                }
             };
             let local = listener.local_addr().unwrap_or_else(|_| addr);
             let actual_port = local.port();
@@ -605,25 +655,32 @@ pub fn flight_server_start<'a>(env: Env<'a>, host: String, port: u16, server_tls
             let incoming = TcpListenerStream::new(listener);
             let svc = FlightServiceServer::new(service);
             let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-            let shutdown_fut = async { let _ = shutdown_rx.await; };
+            let shutdown_fut = async {
+                let _ = shutdown_rx.await;
+            };
 
             // Build the tonic Server, optionally with TLS config.
             let mut builder = Server::builder();
             let server_fut_result = match tls_mode {
-                ServerTlsMode::Plaintext => {
-                    Ok(builder
-                        .add_service(svc)
-                        .serve_with_incoming_shutdown(incoming, shutdown_fut))
-                }
+                ServerTlsMode::Plaintext => Ok(builder
+                    .add_service(svc)
+                    .serve_with_incoming_shutdown(incoming, shutdown_fut)),
                 ServerTlsMode::Tls { cert_pem, key_pem } => {
                     let identity = Identity::from_pem(&cert_pem, &key_pem);
                     let tls_cfg = ServerTlsConfig::new().identity(identity);
                     builder
                         .tls_config(tls_cfg)
-                        .map(|mut b| b.add_service(svc).serve_with_incoming_shutdown(incoming, shutdown_fut))
+                        .map(|mut b| {
+                            b.add_service(svc)
+                                .serve_with_incoming_shutdown(incoming, shutdown_fut)
+                        })
                         .map_err(|e| e.to_string())
                 }
-                ServerTlsMode::Mtls { cert_pem, key_pem, ca_pem } => {
+                ServerTlsMode::Mtls {
+                    cert_pem,
+                    key_pem,
+                    ca_pem,
+                } => {
                     let identity = Identity::from_pem(&cert_pem, &key_pem);
                     let ca_cert = Certificate::from_pem(&ca_pem);
                     let tls_cfg = ServerTlsConfig::new()
@@ -631,13 +688,19 @@ pub fn flight_server_start<'a>(env: Env<'a>, host: String, port: u16, server_tls
                         .client_ca_root(ca_cert);
                     builder
                         .tls_config(tls_cfg)
-                        .map(|mut b| b.add_service(svc).serve_with_incoming_shutdown(incoming, shutdown_fut))
+                        .map(|mut b| {
+                            b.add_service(svc)
+                                .serve_with_incoming_shutdown(incoming, shutdown_fut)
+                        })
                         .map_err(|e| e.to_string())
                 }
             };
             let server_fut = match server_fut_result {
                 Ok(f) => f,
-                Err(e) => { let _ = tx.send(Err(e)); return; }
+                Err(e) => {
+                    let _ = tx.send(Err(e));
+                    return;
+                }
             };
             let server_handle = tokio::spawn(server_fut);
             let probe_ip = if actual_host == "0.0.0.0" || actual_host == "::" {
@@ -656,7 +719,8 @@ pub fn flight_server_start<'a>(env: Env<'a>, host: String, port: u16, server_tls
             }
             if !ready {
                 let _ = tx.send(Err(format!(
-                    "server on {}:{} did not become ready within 2s", actual_host, actual_port
+                    "server on {}:{} did not become ready within 2s",
+                    actual_host, actual_port
                 )));
                 return;
             }
@@ -704,7 +768,9 @@ pub fn flight_server_stop<'a>(env: Env<'a>, handle: ResourceArc<FlightServerHand
             let _ = join.join();
         }
     }
-    rustler::types::atom::Atom::from_str(env, "ok").unwrap().encode(env)
+    rustler::types::atom::Atom::from_str(env, "ok")
+        .unwrap()
+        .encode(env)
 }
 
 // ── Shared client Tokio runtime ───────────────────────────────────────────────
@@ -859,7 +925,9 @@ pub fn flight_client_do_put<'a>(
     match client.rt.block_on(guard.do_put(flight_data)) {
         Ok(mut result_stream) => {
             while client.rt.block_on(result_stream.next()).is_some() {}
-            rustler::types::atom::Atom::from_str(env, "ok").unwrap().encode(env)
+            rustler::types::atom::Atom::from_str(env, "ok")
+                .unwrap()
+                .encode(env)
         }
         Err(e) => err_encode(env, &e.to_string()),
     }
@@ -983,10 +1051,7 @@ pub fn flight_client_list_flights<'a>(
             }
         }
     };
-    let terms: Option<Vec<Term<'a>>> = flights
-        .iter()
-        .map(|f| encode_flight_info(env, f))
-        .collect();
+    let terms: Option<Vec<Term<'a>>> = flights.iter().map(|f| encode_flight_info(env, f)).collect();
     match terms {
         Some(t) => ok_encode(env, t),
         None => err_encode(env, "binary allocation failed while encoding FlightInfo"),
@@ -1069,7 +1134,12 @@ pub fn flight_client_get_schema<'a>(
             }
         }
     };
-    ok_encode(env, ResourceArc::new(ExArrowSchema { schema: schema_ref.into() }))
+    ok_encode(
+        env,
+        ResourceArc::new(ExArrowSchema {
+            schema: schema_ref.into(),
+        }),
+    )
 }
 
 /// list_actions: enumerate the action types supported by the server.
@@ -1165,10 +1235,13 @@ pub fn flight_client_do_action<'a>(
             }
         }
     };
-    let body_terms: Option<Vec<Term<'a>>> = results.iter().map(|r| try_encode_binary(env, r)).collect();
+    let body_terms: Option<Vec<Term<'a>>> =
+        results.iter().map(|r| try_encode_binary(env, r)).collect();
     match body_terms {
         Some(t) => ok_encode(env, t),
-        None => err_encode(env, "binary allocation failed while encoding action results"),
+        None => err_encode(
+            env,
+            "binary allocation failed while encoding action results",
+        ),
     }
 }
-

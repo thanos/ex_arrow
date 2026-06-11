@@ -51,7 +51,7 @@ defmodule ExArrow.FlightSQL.Statement do
   returns `:ok`.
 
   If `close/1` returns `{:error, ...}` (for example a transport error mid-
-  call) the statement handle is still consumed locally — retrying `close/1`
+  call) the statement handle is still consumed locally; retrying `close/1`
   is a no-op and returns `:ok`, but the server-side resource may not have
   been released and can leak until the underlying connection is closed.
   See `close/1` for details.
@@ -82,7 +82,7 @@ defmodule ExArrow.FlightSQL.Statement do
   Binding replaces any previously bound parameters.  After binding, call
   `execute/1` or `execute_update/1` to run the statement with the parameters.
 
-  Returns `:ok` on success or `{:error, %Error{}}` on failure (including
+  Succeeds with `:ok`, or fails with `{:error, %Error{}}` (including
   `:protocol_error` if the statement has been closed).
 
   ## Examples
@@ -106,13 +106,15 @@ defmodule ExArrow.FlightSQL.Statement do
   The schema describes the column names and Arrow types that `bind/2`
   expects.  An empty schema means the statement takes no parameters.
 
-  Returns `{:ok, %ExArrow.Schema{}}` or `{:error, %Error{}}` (including
-  `:protocol_error` if the statement has been closed).
+  The schema is returned as `{:ok, %ExArrow.Schema{}}`.  Fails with
+  `{:error, %Error{}}` on a closed handle (`:protocol_error`) or transport
+  error.
 
   ## Examples
 
       {:ok, schema} = ExArrow.FlightSQL.Statement.parameter_schema(stmt)
-      [%ExArrow.Field{name: "id", dtype: "int64"}] = ExArrow.Schema.fields(schema)
+      [%ExArrow.Field{name: "id", type: :int64, nullable: _}] =
+        ExArrow.Schema.fields(schema)
   """
   @spec parameter_schema(t()) :: {:ok, Schema.t()} | {:error, Error.t()}
   def parameter_schema(%__MODULE__{resource: ref}) do
@@ -129,8 +131,9 @@ defmodule ExArrow.FlightSQL.Statement do
   on the returned endpoint.  If parameters were bound with `bind/2`, they
   are sent to the server as part of the execution.
 
-  Returns `{:ok, %ExArrow.Stream{}}` or `{:error, %ExArrow.FlightSQL.Error{}}`
-  (including `:protocol_error` if the statement has been closed).
+  Yields `{:ok, %ExArrow.Stream{}}` for lazy iteration, or
+  `{:error, %ExArrow.FlightSQL.Error{}}` on failure (including
+  `:protocol_error` if the statement has been closed).
 
   ## Examples
 
@@ -150,9 +153,8 @@ defmodule ExArrow.FlightSQL.Statement do
 
   Returns `{:ok, n}` where `n` is the number of affected rows, or
   `{:ok, :unknown}` when the server does not report a count.
-
-  Returns `{:error, %ExArrow.FlightSQL.Error{}}` on failure (including
-  `:protocol_error` if the statement has been closed).
+  Fails with `{:error, %ExArrow.FlightSQL.Error{}}` on a closed handle
+  or other error.
 
   ## Examples
 
@@ -181,9 +183,8 @@ defmodule ExArrow.FlightSQL.Statement do
 
   ## Return values
 
-  - `:ok` — the server acknowledged `ActionClosePreparedStatement` and
-    released the resource.
-  - `{:error, %Error{}}` — a transport, protocol, or server error
+  - `:ok`: the server acknowledged `ActionClosePreparedStatement` and released the resource.
+  - `{:error, %Error{}}`: a transport, protocol, or server error
     occurred while closing.
 
   ## Behaviour on error
@@ -223,7 +224,7 @@ defmodule ExArrow.FlightSQL.Statement do
     end
   end
 
-  # ── Helpers ───────────────────────────────────────────────────────────────────
+  # Helpers
 
   defp native,
     do: Application.get_env(:ex_arrow, :flight_sql_statement_native, ExArrow.Native)

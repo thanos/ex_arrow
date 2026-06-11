@@ -23,7 +23,10 @@ use arrow_ipc::writer::{FileWriter, StreamWriter};
 use rustler::ResourceArc;
 use rustler::{Encoder, Env, Term};
 
-use crate::resources::{ExArrowIpcFile, ExArrowIpcStream, ExArrowRecordBatch, ExArrowSchema, IpcFileBacking, IpcStreamBacking};
+use crate::resources::{
+    ExArrowIpcFile, ExArrowIpcStream, ExArrowRecordBatch, ExArrowSchema, IpcFileBacking,
+    IpcStreamBacking,
+};
 use crate::util::{err_encode, ok_encode};
 
 /// Builds a small IPC stream fixture (schema: id int64, name utf8; 2 rows) for tests.
@@ -188,7 +191,9 @@ fn data_type_to_atom(env: Env, dt: &arrow_schema::DataType) -> rustler::types::a
 
 /// Return the schema ref of a record batch.
 #[rustler::nif]
-pub fn record_batch_schema(batch: ResourceArc<ExArrowRecordBatch>) -> rustler::ResourceArc<ExArrowSchema> {
+pub fn record_batch_schema(
+    batch: ResourceArc<ExArrowRecordBatch>,
+) -> rustler::ResourceArc<ExArrowSchema> {
     let schema_handle = ExArrowSchema {
         schema: batch.batch.schema().clone(),
     };
@@ -221,9 +226,7 @@ pub fn ipc_stream_schema<'a>(env: Env<'a>, stream: ResourceArc<ExArrowIpcStream>
             guard.schema()
         }
     };
-    let schema_handle = ExArrowSchema {
-        schema: schema_ref,
-    };
+    let schema_handle = ExArrowSchema { schema: schema_ref };
     ResourceArc::new(schema_handle).encode(env)
 }
 
@@ -247,7 +250,9 @@ pub fn ipc_stream_next<'a>(env: Env<'a>, stream: ResourceArc<ExArrowIpcStream>) 
         }
     };
     match next_result {
-        None => rustler::types::atom::Atom::from_str(env, "done").unwrap().encode(env),
+        None => rustler::types::atom::Atom::from_str(env, "done")
+            .unwrap()
+            .encode(env),
         Some(Err(e)) => err_encode(env, &e.to_string()),
         Some(Ok(batch)) => {
             let handle = ExArrowRecordBatch { batch };
@@ -330,9 +335,7 @@ pub fn ipc_file_schema<'a>(env: Env<'a>, file: ResourceArc<ExArrowIpcFile>) -> T
             Err(_) => return err_encode(env, "file lock"),
         },
     };
-    let schema_handle = ExArrowSchema {
-        schema: schema_ref,
-    };
+    let schema_handle = ExArrowSchema { schema: schema_ref };
     ResourceArc::new(schema_handle).encode(env)
 }
 
@@ -415,7 +418,9 @@ pub fn ipc_writer_to_file<'a>(
     if let Err(e) = writer.finish() {
         return err_encode(env, &e.to_string());
     }
-    rustler::types::atom::Atom::from_str(env, "ok").unwrap().encode(env)
+    rustler::types::atom::Atom::from_str(env, "ok")
+        .unwrap()
+        .encode(env)
 }
 
 // ── Nx support NIFs ──────────────────────────────────────────────────────────
@@ -427,7 +432,7 @@ pub fn ipc_writer_to_file<'a>(
 /// `type_string` is one of `"s8"`, `"s16"`, `"s32"`, `"s64"`, `"u8"`, `"u16"`,
 /// `"u32"`, `"u64"`, `"f32"`, `"f64"`.  Float columns use IEEE 754 native byte order.
 ///
-/// Null/validity bitmaps are ignored — null positions are returned as zero bytes.
+/// Null/validity bitmaps are ignored; null positions are returned as zero bytes.
 #[rustler::nif]
 pub fn record_batch_column_buffer<'a>(
     env: Env<'a>,
@@ -457,9 +462,8 @@ macro_rules! primitive_buffer {
             std::mem::size_of::<<$ArrowType as arrow_array::types::ArrowPrimitiveType>::Native>();
         // SAFETY: slice is a valid aligned slice of a numeric primitive type whose
         // in-memory representation is exactly `len * byte_size` bytes.
-        let bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(slice.as_ptr() as *const u8, len * byte_size)
-        };
+        let bytes: &[u8] =
+            unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const u8, len * byte_size) };
         let mut owned = match rustler::OwnedBinary::new(bytes.len()) {
             Some(b) => b,
             None => return err_encode($env, "binary alloc"),
@@ -604,11 +608,11 @@ pub fn record_batch_concat<'a>(
 // Wire formats accepted by `build_column_array`:
 //
 // * Fixed-width primitives (s8..s64, u8..u64, f32, f64, date32, date64,
-//   timestamp_*, duration_*) — `length × element_size` bytes, little-endian
+//   timestamp_*, duration_*): `length × element_size` bytes, little-endian
 //   for multi-byte types.
-// * `bool` — exactly `length` bytes, one byte per element (0 = false,
+// * `bool`: exactly `length` bytes, one byte per element (0 = false,
 //   non-zero = true).
-// * `utf8`, `large_utf8`, `binary`, `large_binary` — concatenation of N
+// * `utf8`, `large_utf8`, `binary`, `large_binary`: concatenation of N
 //   length-prefixed records, each of the form
 //   `<<elem_len::u32-little, elem_bytes::binary-size(elem_len)>>`.
 
@@ -642,13 +646,13 @@ fn build_column_array(
 ) -> Result<(DataType, ArrayRef), String> {
     let pair = match dtype_str {
         // ── Signed integers ─────────────────────────────────────────
-        "s8"  => build_fixed_col!(bytes, length, i8,  Int8Type,  DataType::Int8),
+        "s8" => build_fixed_col!(bytes, length, i8, Int8Type, DataType::Int8),
         "s16" => build_fixed_col!(bytes, length, i16, Int16Type, DataType::Int16),
         "s32" => build_fixed_col!(bytes, length, i32, Int32Type, DataType::Int32),
         "s64" => build_fixed_col!(bytes, length, i64, Int64Type, DataType::Int64),
 
         // ── Unsigned integers ───────────────────────────────────────
-        "u8"  => build_fixed_col!(bytes, length, u8,  UInt8Type,  DataType::UInt8),
+        "u8" => build_fixed_col!(bytes, length, u8, UInt8Type, DataType::UInt8),
         "u16" => build_fixed_col!(bytes, length, u16, UInt16Type, DataType::UInt16),
         "u32" => build_fixed_col!(bytes, length, u32, UInt32Type, DataType::UInt32),
         "u64" => build_fixed_col!(bytes, length, u64, UInt64Type, DataType::UInt64),
@@ -680,36 +684,60 @@ fn build_column_array(
         "date64" => build_fixed_col!(bytes, length, i64, Date64Type, DataType::Date64),
 
         "timestamp_seconds" => build_fixed_col!(
-            bytes, length, i64, TimestampSecondType,
+            bytes,
+            length,
+            i64,
+            TimestampSecondType,
             DataType::Timestamp(TimeUnit::Second, None)
         ),
         "timestamp_millis" => build_fixed_col!(
-            bytes, length, i64, TimestampMillisecondType,
+            bytes,
+            length,
+            i64,
+            TimestampMillisecondType,
             DataType::Timestamp(TimeUnit::Millisecond, None)
         ),
         "timestamp_micros" => build_fixed_col!(
-            bytes, length, i64, TimestampMicrosecondType,
+            bytes,
+            length,
+            i64,
+            TimestampMicrosecondType,
             DataType::Timestamp(TimeUnit::Microsecond, None)
         ),
         "timestamp_nanos" => build_fixed_col!(
-            bytes, length, i64, TimestampNanosecondType,
+            bytes,
+            length,
+            i64,
+            TimestampNanosecondType,
             DataType::Timestamp(TimeUnit::Nanosecond, None)
         ),
 
         "duration_seconds" => build_fixed_col!(
-            bytes, length, i64, DurationSecondType,
+            bytes,
+            length,
+            i64,
+            DurationSecondType,
             DataType::Duration(TimeUnit::Second)
         ),
         "duration_millis" => build_fixed_col!(
-            bytes, length, i64, DurationMillisecondType,
+            bytes,
+            length,
+            i64,
+            DurationMillisecondType,
             DataType::Duration(TimeUnit::Millisecond)
         ),
         "duration_micros" => build_fixed_col!(
-            bytes, length, i64, DurationMicrosecondType,
+            bytes,
+            length,
+            i64,
+            DurationMicrosecondType,
             DataType::Duration(TimeUnit::Microsecond)
         ),
         "duration_nanos" => build_fixed_col!(
-            bytes, length, i64, DurationNanosecondType,
+            bytes,
+            length,
+            i64,
+            DurationNanosecondType,
             DataType::Duration(TimeUnit::Nanosecond)
         ),
 
@@ -734,8 +762,9 @@ fn build_column_array(
         }
         "binary" => {
             let elems = decode_varlen_records(bytes, length, "binary")?;
-            let array: ArrayRef =
-                Arc::new(BinaryArray::from(elems.iter().map(|e| e.as_ref()).collect::<Vec<&[u8]>>()));
+            let array: ArrayRef = Arc::new(BinaryArray::from(
+                elems.iter().map(|e| e.as_ref()).collect::<Vec<&[u8]>>(),
+            ));
             (DataType::Binary, array)
         }
         "large_binary" => {
@@ -830,5 +859,7 @@ pub fn ipc_file_writer_to_file<'a>(
     if let Err(e) = writer.finish() {
         return err_encode(env, &e.to_string());
     }
-    rustler::types::atom::Atom::from_str(env, "ok").unwrap().encode(env)
+    rustler::types::atom::Atom::from_str(env, "ok")
+        .unwrap()
+        .encode(env)
 }

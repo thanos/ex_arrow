@@ -52,7 +52,7 @@ defmodule ExArrow.FlightSQL.Client do
   validation requires a live server; see the `flight_sql_integration` test tag.
 
   Multi-endpoint `FlightInfo` responses (distributed queries) are not supported in
-  v0.5.0 — `query/2` returns `{:error, %Error{code: :multi_endpoint}}` in that case.
+  v0.5.0: `query/2` returns `{:error, %Error{code: :multi_endpoint}}` in that case.
 
   Transaction operations (`BEGIN`, `COMMIT`, `ROLLBACK`) are deferred to v0.6.0.
   """
@@ -68,7 +68,7 @@ defmodule ExArrow.FlightSQL.Client do
     Application.get_env(:ex_arrow, :flight_sql_client_impl, ExArrow.FlightSQL.ClientImpl)
   end
 
-  # ── Connection ────────────────────────────────────────────────────────────────
+  # Connection
 
   @doc """
   Connect to a Flight SQL server at the given URI.
@@ -103,7 +103,7 @@ defmodule ExArrow.FlightSQL.Client do
     impl().close(client)
   end
 
-  # ── Queries ───────────────────────────────────────────────────────────────────
+  # Queries
 
   @doc """
   Execute a SQL query and return a materialized result.
@@ -114,8 +114,8 @@ defmodule ExArrow.FlightSQL.Client do
   Returns `{:ok, %ExArrow.FlightSQL.Result{}}` or `{:error, %ExArrow.FlightSQL.Error{}}`.
 
   > #### Concurrency {: .warning}
-  > Concurrent calls on the **same** client handle are serialised — the underlying
-  > gRPC client requires exclusive access per call.  For parallel queries, create
+  > Concurrent calls on the **same** client handle are serialised; the underlying
+  > gRPC client requires exclusive access per call; for parallel queries, create
   > separate client handles with `connect/2`.
 
   ## Examples
@@ -163,15 +163,15 @@ defmodule ExArrow.FlightSQL.Client do
   Prefer this over `query/2` for large result sets.
 
   > #### Concurrency {: .warning}
-  > Concurrent calls on the **same** client handle are serialised — the underlying
-  > gRPC client requires exclusive access per call.  For parallel queries, create
+  > Concurrent calls on the **same** client handle are serialised; the underlying
+  > gRPC client requires exclusive access per call; for parallel queries, create
   > separate client handles with `connect/2`.
 
   ## Examples
 
       {:ok, stream} = ExArrow.FlightSQL.Client.stream_query(client, "SELECT * FROM large_table")
       schema = ExArrow.Stream.schema(stream)
-      ExArrow.Stream.to_list(stream)  # collect all — or iterate lazily with next/1
+      ExArrow.Stream.to_list(stream)  # collect all, or iterate lazily with next/1
   """
   @spec stream_query(t(), String.t()) :: {:ok, Stream.t()} | {:error, Error.t()}
   # sobelow_skip ["SQL.Query"]
@@ -181,7 +181,7 @@ defmodule ExArrow.FlightSQL.Client do
     impl().query(client, sql, [])
   end
 
-  # ── DML ───────────────────────────────────────────────────────────────────────
+  # DML
 
   @doc """
   Execute a DML or DDL statement.
@@ -206,7 +206,7 @@ defmodule ExArrow.FlightSQL.Client do
     impl().execute(client, sql, [])
   end
 
-  # ── Prepared statements ───────────────────────────────────────────────────────
+  # Prepared statements
 
   @doc """
   Prepare a SQL query on the server and return a reusable statement handle.
@@ -261,7 +261,7 @@ defmodule ExArrow.FlightSQL.Client do
     impl().prepare(client, sql, [])
   end
 
-  # ── Metadata ─────────────────────────────────────────────────────────────────
+  # Metadata
 
   @doc """
   List tables visible to the connected user.
@@ -281,12 +281,12 @@ defmodule ExArrow.FlightSQL.Client do
 
   ## Options
 
-  - `:catalog` — filter by exact catalog name (default: no filter)
-  - `:db_schema_filter` — SQL `LIKE` pattern for schema names (default: no filter)
-  - `:table_name_filter` — SQL `LIKE` pattern for table names (default: no filter)
-  - `:table_types` — list of type strings to include, e.g. `["TABLE", "VIEW"]`
+  - `:catalog`: filter by exact catalog name (default: no filter)
+  - `:db_schema_filter`: SQL `LIKE` pattern for schema names (default: no filter)
+  - `:table_name_filter`: SQL `LIKE` pattern for table names (default: no filter)
+  - `:table_types`: list of type strings to include, e.g. `["TABLE", "VIEW"]`
     (default: all types)
-  - `:include_schema` — `true` to include IPC-encoded column schema in results
+  - `:include_schema`: `true` to include IPC-encoded column schema in results
     (default: `false`)
 
   ## Server compatibility
@@ -323,8 +323,8 @@ defmodule ExArrow.FlightSQL.Client do
 
   ## Options
 
-  - `:catalog` — filter by exact catalog name (default: no filter)
-  - `:db_schema_filter` — SQL `LIKE` pattern for schema names (default: no filter)
+  - `:catalog`: filter by exact catalog name (default: no filter)
+  - `:db_schema_filter`: SQL `LIKE` pattern for schema names (default: no filter)
 
   ## Server compatibility
 
@@ -354,7 +354,7 @@ defmodule ExArrow.FlightSQL.Client do
   | Column | Type | Description |
   |--------|------|-------------|
   | `info_name` | `uint32` | Numeric `SqlInfo` code |
-  | `value` | `dense_union(...)` | Value — type depends on the info code |
+  | `value` | `dense_union(...)` | Value: type depends on the info code |
 
   All available `SqlInfo` entries are returned.  The exact set depends on the
   server; not all servers expose all codes.

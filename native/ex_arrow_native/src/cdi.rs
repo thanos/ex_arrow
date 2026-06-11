@@ -189,7 +189,9 @@ pub fn cdi_mark_consumed<'a>(env: Env<'a>, handle: ResourceArc<ExArrowCdiHandle>
         }
     }
 
-    rustler::types::atom::Atom::from_str(env, "ok").unwrap().encode(env)
+    rustler::types::atom::Atom::from_str(env, "ok")
+        .unwrap()
+        .encode(env)
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────

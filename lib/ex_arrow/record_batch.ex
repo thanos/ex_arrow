@@ -41,7 +41,7 @@ defmodule ExArrow.RecordBatch do
 
   ### Boolean
 
-  `"bool"` — exactly `length` bytes, one byte per element (0 = false,
+  `"bool"`: exactly `length` bytes, one byte per element (0 = false,
   non-zero = true).
 
   ### Date and time
@@ -129,7 +129,7 @@ defmodule ExArrow.RecordBatch do
   @doc """
   Returns the number of columns in this batch.
 
-  Derived from the batch's schema — no separate NIF call is needed.
+  Derived from the batch's schema; no separate NIF call is needed.
 
   ## Examples
 
@@ -164,17 +164,16 @@ defmodule ExArrow.RecordBatch do
   Create a `RecordBatch` from column-oriented binary data.
 
   Each column is provided as a raw binary paired with an Arrow dtype
-  string and a shared row count.  This is the primary constructor for
-  building parameter batches for Flight SQL prepared statement binding.
+  string and a shared row count.  This constructor builds parameter batches for Flight SQL prepared statement binding.
 
   ## Parameters
 
-  - `names` — list of column name strings
-  - `binaries` — list of column data binaries (one per column).  See the
+  - `names`: list of column name strings
+  - `binaries`: list of column data binaries (one per column).  See the
     [supported dtypes](#module-supported-dtype-strings-from_columns-4)
     table in the moduledoc for the wire format of each dtype.
-  - `dtypes` — list of Arrow dtype strings, one per column
-  - `length` — number of rows (must be the same for every column)
+  - `dtypes`: list of Arrow dtype strings, one per column
+  - `length`: number of rows (must be the same for every column)
 
   All four lists must have the same length and at least one entry.
 

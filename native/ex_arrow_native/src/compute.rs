@@ -32,7 +32,10 @@ pub fn compute_filter<'a>(
         return err_encode(env, "predicate first column must be boolean");
     };
     match filter_record_batch(&batch.batch, bool_array) {
-        Ok(filtered) => ok_encode(env, ResourceArc::new(ExArrowRecordBatch { batch: filtered })),
+        Ok(filtered) => ok_encode(
+            env,
+            ResourceArc::new(ExArrowRecordBatch { batch: filtered }),
+        ),
         Err(e) => err_encode(env, &e.to_string()),
     }
 }
@@ -60,7 +63,10 @@ pub fn compute_project<'a>(
         Err(e) => return err_encode(env, e.as_str()),
     };
     match batch.batch.project(&indices) {
-        Ok(projected) => ok_encode(env, ResourceArc::new(ExArrowRecordBatch { batch: projected })),
+        Ok(projected) => ok_encode(
+            env,
+            ResourceArc::new(ExArrowRecordBatch { batch: projected }),
+        ),
         Err(e) => err_encode(env, &e.to_string()),
     }
 }
@@ -82,22 +88,24 @@ pub fn compute_sort<'a>(
         Err(_) => return err_encode(env, &format!("column '{}' not found", column_name)),
     };
     let column: &Arc<dyn Array> = batch.batch.column(col_idx);
-    let sort_opts = SortOptions { descending: !ascending, nulls_first: true };
+    let sort_opts = SortOptions {
+        descending: !ascending,
+        nulls_first: true,
+    };
     let indices = match sort_to_indices(column.as_ref(), Some(sort_opts), None) {
         Ok(i) => i,
         Err(e) => return err_encode(env, &e.to_string()),
     };
-    let new_columns: Vec<ArrayRef> =
-        match batch
-            .batch
-            .columns()
-            .iter()
-            .map(|col| take(col.as_ref(), &indices, None).map_err(|e| e.to_string()))
-            .collect::<Result<Vec<_>, _>>()
-        {
-            Ok(cols) => cols,
-            Err(e) => return err_encode(env, e.as_str()),
-        };
+    let new_columns: Vec<ArrayRef> = match batch
+        .batch
+        .columns()
+        .iter()
+        .map(|col| take(col.as_ref(), &indices, None).map_err(|e| e.to_string()))
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(cols) => cols,
+        Err(e) => return err_encode(env, e.as_str()),
+    };
     match RecordBatch::try_new(batch.batch.schema(), new_columns) {
         Ok(sorted) => ok_encode(env, ResourceArc::new(ExArrowRecordBatch { batch: sorted })),
         Err(e) => err_encode(env, &e.to_string()),

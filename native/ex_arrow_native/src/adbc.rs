@@ -63,37 +63,72 @@ impl rustler::Resource for AdbcResultStream {}
 
 fn decode_driver_spec<'a>(term: Term<'a>) -> Result<DriverSpec, String> {
     if let Ok(path) = term.decode::<String>() {
-        return Ok(DriverSpec::Path { path, uri: None, db_path: None, entrypoint: None });
+        return Ok(DriverSpec::Path {
+            path,
+            uri: None,
+            db_path: None,
+            entrypoint: None,
+        });
     }
-    let list: rustler::types::list::ListIterator = term.decode().map_err(|_| "opts must be a list")?;
+    let list: rustler::types::list::ListIterator =
+        term.decode().map_err(|_| "opts must be a list")?;
     let mut driver_path_val = None;
     let mut driver_name_val = None;
     let mut uri_val = None;
     let mut db_path_val: Option<String> = None;
     let mut entrypoint_val: Option<String> = None;
     for item in list {
-        let tuple = rustler::types::tuple::get_tuple(item).map_err(|_| "opt must be {key, value}")?;
+        let tuple =
+            rustler::types::tuple::get_tuple(item).map_err(|_| "opt must be {key, value}")?;
         if tuple.len() != 2 {
             continue;
         }
         let key: rustler::Atom = tuple[0].decode().map_err(|_| "opt key must be atom")?;
         if key == driver_path() {
-            driver_path_val = Some(tuple[1].decode::<String>().map_err(|_| "driver_path must be string")?);
+            driver_path_val = Some(
+                tuple[1]
+                    .decode::<String>()
+                    .map_err(|_| "driver_path must be string")?,
+            );
         } else if key == driver_name() {
-            driver_name_val = Some(tuple[1].decode::<String>().map_err(|_| "driver_name must be string")?);
+            driver_name_val = Some(
+                tuple[1]
+                    .decode::<String>()
+                    .map_err(|_| "driver_name must be string")?,
+            );
         } else if key == uri() {
-            uri_val = Some(tuple[1].decode::<String>().map_err(|_| "uri must be string")?);
+            uri_val = Some(
+                tuple[1]
+                    .decode::<String>()
+                    .map_err(|_| "uri must be string")?,
+            );
         } else if key == path() {
             // Driver-specific database path (e.g. DuckDB uses "path", not "uri").
-            db_path_val = Some(tuple[1].decode::<String>().map_err(|_| "path must be string")?);
+            db_path_val = Some(
+                tuple[1]
+                    .decode::<String>()
+                    .map_err(|_| "path must be string")?,
+            );
         } else if key == entrypoint() {
-            entrypoint_val = Some(tuple[1].decode::<String>().map_err(|_| "entrypoint must be string")?);
+            entrypoint_val = Some(
+                tuple[1]
+                    .decode::<String>()
+                    .map_err(|_| "entrypoint must be string")?,
+            );
         }
     }
     if let Some(p) = driver_path_val {
-        Ok(DriverSpec::Path { path: p, uri: uri_val, db_path: db_path_val, entrypoint: entrypoint_val })
+        Ok(DriverSpec::Path {
+            path: p,
+            uri: uri_val,
+            db_path: db_path_val,
+            entrypoint: entrypoint_val,
+        })
     } else if let Some(n) = driver_name_val {
-        Ok(DriverSpec::Name { name: n, uri: uri_val })
+        Ok(DriverSpec::Name {
+            name: n,
+            uri: uri_val,
+        })
     } else {
         Err("opts must include driver_path or driver_name".to_string())
     }
@@ -101,12 +136,14 @@ fn decode_driver_spec<'a>(term: Term<'a>) -> Result<DriverSpec, String> {
 
 enum DriverSpec {
     /// path to .so; optional entrypoint (default: "AdbcDriverInit"); optional uri or db_path.
-    Path { path: String, uri: Option<String>, db_path: Option<String>, entrypoint: Option<String> },
-    /// name: driver library name; uri: only set when caller provides :uri (no default).
-    Name {
-        name: String,
+    Path {
+        path: String,
         uri: Option<String>,
+        db_path: Option<String>,
+        entrypoint: Option<String>,
     },
+    /// name: driver library name; uri: only set when caller provides :uri (no default).
+    Name { name: String, uri: Option<String> },
 }
 
 /// Open a database: load driver from path or by name (env), init database.
@@ -119,7 +156,12 @@ pub fn adbc_database_open<'a>(env: Env<'a>, driver_path_or_opts: Term<'a>) -> Te
     };
     let version = AdbcVersion::V100;
     let (driver, database) = match spec {
-        DriverSpec::Path { path, uri, db_path, entrypoint } => {
+        DriverSpec::Path {
+            path,
+            uri,
+            db_path,
+            entrypoint,
+        } => {
             let ep: Option<&[u8]> = entrypoint.as_deref().map(|s| s.as_bytes());
             let mut d = match ManagedDriver::load_dynamic_from_filename(path, ep, version) {
                 Ok(d) => d,
@@ -131,7 +173,10 @@ pub fn adbc_database_open<'a>(env: Env<'a>, driver_path_or_opts: Term<'a>) -> Te
                 db_opts.push((OptionDatabase::Uri, OptionValue::String(u)));
             }
             if let Some(p) = db_path {
-                db_opts.push((OptionDatabase::Other("path".to_string()), OptionValue::String(p)));
+                db_opts.push((
+                    OptionDatabase::Other("path".to_string()),
+                    OptionValue::String(p),
+                ));
             }
             let db = if db_opts.is_empty() {
                 match d.new_database() {
@@ -177,10 +222,7 @@ pub fn adbc_database_open<'a>(env: Env<'a>, driver_path_or_opts: Term<'a>) -> Te
 
 /// Open a connection from a database. Returns {:ok, connection_ref} or {:error, msg}.
 #[rustler::nif(schedule = "DirtyIo")]
-pub fn adbc_connection_open<'a>(
-    env: Env<'a>,
-    database: ResourceArc<AdbcDatabase>,
-) -> Term<'a> {
+pub fn adbc_connection_open<'a>(env: Env<'a>, database: ResourceArc<AdbcDatabase>) -> Term<'a> {
     let conn = match database.database.new_connection() {
         Ok(c) => c,
         Err(e) => return err_encode(env, &e.to_string()),
@@ -193,10 +235,7 @@ pub fn adbc_connection_open<'a>(
 
 /// Create a new statement from a connection. Returns {:ok, statement_ref} or {:error, msg}.
 #[rustler::nif(schedule = "DirtyIo")]
-pub fn adbc_statement_new<'a>(
-    env: Env<'a>,
-    connection: ResourceArc<AdbcConnection>,
-) -> Term<'a> {
+pub fn adbc_statement_new<'a>(env: Env<'a>, connection: ResourceArc<AdbcConnection>) -> Term<'a> {
     let mut guard = match connection.connection.lock() {
         Ok(g) => g,
         Err(_) => return err_encode(env, "connection lock"),
@@ -223,17 +262,16 @@ pub fn adbc_statement_set_sql<'a>(
         Err(_) => return err_encode(env, "statement lock"),
     };
     match guard.set_sql_query(sql.as_str()) {
-        Ok(()) => rustler::types::atom::Atom::from_str(env, "ok").unwrap().encode(env),
+        Ok(()) => rustler::types::atom::Atom::from_str(env, "ok")
+            .unwrap()
+            .encode(env),
         Err(e) => err_encode(env, &e.to_string()),
     }
 }
 
 /// Execute the statement and return a stream of record batches. Returns {:ok, stream_ref} or {:error, msg}.
 #[rustler::nif(schedule = "DirtyIo")]
-pub fn adbc_statement_execute<'a>(
-    env: Env<'a>,
-    statement: ResourceArc<AdbcStatement>,
-) -> Term<'a> {
+pub fn adbc_statement_execute<'a>(env: Env<'a>, statement: ResourceArc<AdbcStatement>) -> Term<'a> {
     let mut guard = match statement.statement.lock() {
         Ok(g) => g,
         Err(_) => return err_encode(env, "statement lock"),
@@ -278,7 +316,9 @@ pub fn adbc_stream_next<'a>(env: Env<'a>, stream: ResourceArc<AdbcResultStream>)
         Err(_) => return err_encode(env, "stream index lock"),
     };
     if *index_guard >= len {
-        return rustler::types::atom::Atom::from_str(env, "done").unwrap().encode(env);
+        return rustler::types::atom::Atom::from_str(env, "done")
+            .unwrap()
+            .encode(env);
     }
     let i = *index_guard;
     *index_guard += 1;
@@ -309,8 +349,7 @@ pub fn adbc_connection_get_table_types<'a>(
     let out = match guard.get_table_types() {
         Ok(reader) => {
             let schema = reader.schema();
-            let batches: Vec<RecordBatch> = match reader
-                .collect::<std::result::Result<Vec<_>, _>>()
+            let batches: Vec<RecordBatch> = match reader.collect::<std::result::Result<Vec<_>, _>>()
             {
                 Ok(b) => b,
                 Err(e) => return err_encode(env, &e.to_string()),
@@ -419,8 +458,7 @@ pub fn adbc_connection_get_objects<'a>(
     ) {
         Ok(reader) => {
             let schema = reader.schema();
-            let batches: Vec<RecordBatch> = match reader
-                .collect::<std::result::Result<Vec<_>, _>>()
+            let batches: Vec<RecordBatch> = match reader.collect::<std::result::Result<Vec<_>, _>>()
             {
                 Ok(b) => b,
                 Err(e) => return err_encode(env, &e.to_string()),
@@ -454,8 +492,9 @@ pub fn adbc_statement_bind<'a>(
         Err(_) => return err_encode(env, "statement lock"),
     };
     match guard.bind(batch.batch.clone()) {
-        Ok(()) => rustler::types::atom::Atom::from_str(env, "ok").unwrap().encode(env),
+        Ok(()) => rustler::types::atom::Atom::from_str(env, "ok")
+            .unwrap()
+            .encode(env),
         Err(e) => err_encode(env, &e.to_string()),
     }
 }
-
