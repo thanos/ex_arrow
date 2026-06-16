@@ -7,11 +7,10 @@ defmodule ExArrow.Native do
   unless System.get_env("EX_ARROW_SKIP_NIF") in ["1", "true"] do
     version = Mix.Project.config()[:version]
 
-    use RustlerPrecompiled,
+    rustler_precompiled_opts = [
       otp_app: :ex_arrow,
       crate: "ex_arrow_native",
       base_url: "https://github.com/thanos/ex_arrow/releases/download/v#{version}",
-      force_build: System.get_env("EX_ARROW_BUILD") in ["1", "true"],
       version: version,
       nif_versions: ["2.15", "2.16"],
       targets: [
@@ -27,6 +26,18 @@ defmodule ExArrow.Native do
         "x86_64-pc-windows-gnu",
         "x86_64-pc-windows-msvc"
       ]
+    ]
+
+    # Mix.install compiles path deps as :prod, so rely on EX_ARROW_BUILD or
+    # config :rustler_precompiled, :force_build, ex_arrow: true when not in dev/test.
+    rustler_precompiled_opts =
+      if System.get_env("EX_ARROW_BUILD") in ["1", "true"] or Mix.env() in [:dev, :test] do
+        Keyword.put(rustler_precompiled_opts, :force_build, true)
+      else
+        rustler_precompiled_opts
+      end
+
+    use RustlerPrecompiled, rustler_precompiled_opts
   end
 
   @doc false

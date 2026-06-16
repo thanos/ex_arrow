@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] - 2026-06-16
+
+### Fixed
+
+- **`mix compile` in dev/test**: `ExArrow.Native` no longer passes `force_build: false`
+  to RustlerPrecompiled when `EX_ARROW_BUILD` is unset, which blocked the
+  `config :rustler_precompiled, :force_build, ex_arrow: true` setting in
+  `config/config.exs` and caused checksum download failures for local checkouts.
+- **`Mix.install` path dependencies**: when not in dev/test, omit explicit
+  `force_build` so `config :rustler_precompiled, :force_build, ex_arrow: true`
+  in the install config can take effect (`Mix.install` compiles path deps as
+  `:prod`).
+- **Compile warning** when `nimble_pool` is absent: `AdbcPackageManager` resolves
+  `AdbcPackagePool` at runtime via `apply/3` instead of a compile-time call.
+
+### Changed
+
+- **Livebooks** (`00`–`04`): unified setup cell (Hex release by default; auto-detect
+  local checkout when opened from `livebook/` in the repo).  ADBC notebooks use
+  the `:adbc_package` backend so SQLite works without a native `.dylib`.
+  Flight tutorial fixes `Server.port/1` to match `{:ok, port}`.  ADBC setup cells
+  call `Adbc.download_driver!/1` before opening databases.
+
 ## [0.6.2] - 2026-06-11
 
 ### Changed

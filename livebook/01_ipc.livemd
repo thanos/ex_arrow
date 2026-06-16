@@ -1,10 +1,34 @@
 # ExArrow Tutorial 1: IPC (Stream and File)
 
 ```elixir
-Mix.install([
-  {:ex_arrow, path: Path.join(__DIR__, "..")},
-  {:explorer, "~> 0.11"}
-])
+deps = [
+  {:explorer, "~> 0.11"},
+  {:kino, "~> 0.19.0"},
+  {:adbc, "~> 0.12"},
+  {:nx, "~> 0.12.1"},
+  {:nimble_pool, "~> 1.1"}
+]
+
+local? = File.exists?(Path.join(__DIR__, "../native/ex_arrow_native/Cargo.toml"))
+
+{ex_arrow_dep, extra_deps, config} =
+  if local? do
+    System.put_env("EX_ARROW_BUILD", "1")
+
+    {
+      {:ex_arrow, path: Path.expand("..", __DIR__)},
+      [{:rustler, "~> 0.36", optional: true}],
+      [adbc: [drivers: [:sqlite]], rustler_precompiled: [force_build: [ex_arrow: true]]]
+    }
+  else
+    {
+      {:ex_arrow, "~> 0.6.3"},
+      [],
+      [adbc: [drivers: [:sqlite]]]
+    }
+  end
+
+Mix.install(deps ++ [ex_arrow_dep] ++ extra_deps, config: config)
 ```
 
 ## Section

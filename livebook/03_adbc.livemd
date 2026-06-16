@@ -1,10 +1,40 @@
 # ExArrow Tutorial 3: ADBC (Arrow Database Connectivity)
 
+```elixir
+deps = [
+  {:explorer, "~> 0.11"},
+  {:kino, "~> 0.19.0"},
+  {:adbc, "~> 0.12"},
+  {:nimble_pool, "~> 1.1"}
+]
+
+local? = File.exists?(Path.join(__DIR__, "../native/ex_arrow_native/Cargo.toml"))
+
+{ex_arrow_dep, extra_deps, config} =
+  if local? do
+    System.put_env("EX_ARROW_BUILD", "1")
+
+    {
+      {:ex_arrow, path: Path.expand("..", __DIR__)},
+      [{:rustler, "~> 0.36", optional: true}],
+      [adbc: [drivers: [:sqlite]], rustler_precompiled: [force_build: [ex_arrow: true]]]
+    }
+  else
+    {
+      {:ex_arrow, "~> 0.6.3"},
+      [],
+      [adbc: [drivers: [:sqlite]]]
+    }
+  end
+
+Mix.install(deps ++ [ex_arrow_dep] ++ extra_deps, config: config)
+```
+
 ## Section
 
 ADBC exposes databases through the Arrow Database Connectivity API. You open a **Database** (driver + options), then a **Connection**, then run **Statement** (SQL) and get an **Arrow stream** of result batches—the same `ExArrow.Stream` you use for IPC and Flight.
 
-This notebook covers: opening a database (with optional `adbc` package), executing SQL, consuming the result stream, and optional metadata APIs.
+This notebook covers: opening a database, executing SQL, consuming the result stream, and optional metadata APIs.
 
 ---
 
@@ -22,43 +52,50 @@ Flow: **Database.open** → **Connection.open** → **Statement.new(conn, sql)**
 
 ## 2. Driver loading
 
-ExArrow does not install or download ADBC drivers. You either:
+ExArrow supports two ways to reach a database:
 
-* **By path**: Pass the path to the driver shared library (e.g. `libadbc_driver_sqlite.so`).
-* **By name**: Pass `driver_name: "adbc_driver_sqlite"` and optionally `uri: ":memory:"`. The ADBC driver manager looks up the library by name (environment or system path).
+* **`:adbc_package` backend (this notebook)** — uses the [`adbc`](https://hex.pm/packages/adbc) Hex package to download SQLite and query via supervised `Adbc.Database` / `Adbc.Connection`. Results are converted to `ExArrow.Stream`. **No native ADBC `.dylib` required** — works in Livebook.
+* **Native C driver** — ExArrow’s NIF loads `libadbc_driver_sqlite.dylib` (or `.so`) via the ADBC driver manager. Use `driver_path:` or `driver_name:` + `ADBC_DRIVER`. See [Installing an ADBC driver](INSTALL_ADBC_DRIVER.md).
 
-If the [`adbc`](https://github.com/livebook-dev/adbc) package is available, you can use it to download drivers on demand and then open with ExArrow.
+`DriverHelper.ensure_driver_and_open/2` calls `Adbc.download_driver/1` then opens by `driver_name`; that only works when a **loadable C driver** is on disk. In Livebook, prefer `:adbc_package` instead.
 
 ---
 
-## 3. Open database (with adbc package)
+## 3. Open database (adbc_package backend)
 
-When `adbc` is in your deps, use `DriverHelper.ensure_driver_and_open/2` to ensure the driver is present and open the database:
+Configure the backend, download the SQLite driver for the adbc package, start the manager, and open an in-memory database:
 
 ```elixir
-# Ensures SQLite driver is available (downloads if needed), then opens :memory: DB
-case ExArrow.ADBC.DriverHelper.ensure_driver_and_open(:sqlite, ":memory:") do
-  {:ok, db} ->
-    IO.puts("Database opened (in-memory SQLite)")
-    # We'll use db in the next cells
+:ok = Adbc.download_driver!(:sqlite)
+Application.put_env(:adbc, :drivers, [:sqlite])
+Application.put_env(:ex_arrow, :adbc_package, driver: :sqlite, uri: ":memory:")
 
+unless Process.whereis(ExArrow.ADBC.AdbcPackageManager) do
+  {:ok, _pid} = ExArrow.ADBC.AdbcPackageManager.start_link()
+end
+
+db = 
+  case ExArrow.ADBC.Database.open(:adbc_package) do
+  {:ok, db} ->
+    IO.puts("Database opened (in-memory SQLite via adbc_package)")
+    db
   {:error, msg} ->
-    IO.puts("Driver not available: #{msg}")
-    IO.puts("Add {:adbc, \"~> 0.9\"} to deps to use DriverHelper, or install an ADBC driver and open by path/name.")
-    db = nil
+    IO.puts("Failed to open database: #{msg}")
+    nil
 end
 ```
 
 ---
 
-## 4. Open database (by name, no adbc)
+## 4. Open database (native C driver, optional)
 
-If you have the driver installed (e.g. via system package or manual install), open by name:
+If you have a native ADBC driver installed (build from [Apache Arrow ADBC](https://github.com/apache/arrow-adbc) or system package), open by name or path:
 
 ```elixir
-# Uncomment and run if you don't use DriverHelper above
+# Uncomment when a native driver is available (not needed for cells below):
 # {:ok, db} = ExArrow.ADBC.Database.open(driver_name: "adbc_driver_sqlite", uri: ":memory:")
-# Or with a file: uri: "file:my.db"
+# Or by path:
+# {:ok, db} = ExArrow.ADBC.Database.open(driver_path: "/path/to/libadbc_driver_sqlite.dylib", uri: ":memory:")
 ```
 
 ---
@@ -109,35 +146,37 @@ end
 
 ---
 
-## 7. Metadata APIs (when supported by driver)
+## 7. Metadata APIs (native driver only)
 
-When the driver supports them, you can query catalog metadata without SQL.
+When using a **native C driver**, you can query catalog metadata without SQL:
 
 * **get_table_types/1** — stream of table types (e.g. TABLE, VIEW).
 * **get_table_schema/3** — Arrow schema for a table: `(conn, catalog, db_schema, table_name)`; use `nil` for catalog/db_schema where not applicable.
 * **get_objects/2** — hierarchical view (catalogs, schemas, tables, columns) with optional filters.
 
+The `:adbc_package` backend does not implement these yet. With the setup above, expect `{:error, ...}`. DDL such as `CREATE TABLE` also fails to produce an `ExArrow.Stream` on this backend — use a native driver (section 4) for metadata and schema setup.
+
 ```elixir
 if db do
   {:ok, conn} = ExArrow.ADBC.Connection.open(db)
 
-  # Create a table so we can ask for its schema
-  {:ok, stmt_create} = ExArrow.ADBC.Statement.new(conn, "CREATE TABLE demo (id INTEGER, name TEXT)")
-  {:ok, _} = ExArrow.ADBC.Statement.execute(stmt_create)
-
-  # Get table schema (SQLite: catalog/db_schema often nil)
   case ExArrow.ADBC.Connection.get_table_schema(conn, nil, nil, "demo") do
     {:ok, schema} ->
       IO.puts("Table 'demo' columns: #{inspect(ExArrow.Schema.fields(schema) |> Enum.map(& &1.name))}")
+
     {:error, msg} ->
-      IO.puts("get_table_schema not supported or failed: #{msg}")
+      IO.puts("get_table_schema: #{msg}")
   end
 
-  # get_objects (depth and optional filters)
   case ExArrow.ADBC.Connection.get_objects(conn, depth: "tables") do
     {:ok, stream} ->
-      count = Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end) |> Enum.take_while(&is_struct(&1, ExArrow.RecordBatch)) |> length
+      count =
+        Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end)
+        |> Enum.take_while(&is_struct(&1, ExArrow.RecordBatch))
+        |> length()
+
       IO.puts("get_objects returned #{count} batch(es)")
+
     {:error, msg} ->
       IO.puts("get_objects: #{msg}")
   end
@@ -146,14 +185,24 @@ else
 end
 ```
 
+With a **native driver**, create a table first, then call the metadata APIs:
+
+```elixir
+# Native driver only (after opening via section 4):
+# {:ok, conn} = ExArrow.ADBC.Connection.open(db)
+# {:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "CREATE TABLE demo (id INTEGER, name TEXT)")
+# {:ok, _stream} = ExArrow.ADBC.Statement.execute(stmt)
+# ExArrow.ADBC.Connection.get_table_schema(conn, nil, nil, "demo")
+```
+
 ---
 
 ## 8. Statement.bind (when supported)
 
-Some drivers support binding a record batch to a statement (e.g. for bulk insert or prepared parameters). Use `Statement.new(conn, sql, bind: record_batch)` for an initial bind, or `Statement.bind(stmt, record_batch)` to rebind; unsupported drivers return `{:error, message}`.
+Some drivers support binding a record batch to a statement (e.g. for bulk insert or prepared parameters). Use `Statement.new(conn, sql, bind: record_batch)` for an initial bind, or `Statement.bind(stmt, record_batch)` to rebind; unsupported drivers return `{:error, message}`. Not supported on the `:adbc_package` backend.
 
 ```elixir
-# Example (driver support varies):
+# Example (native driver; support varies):
 # {:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT * FROM t WHERE id = ?", bind: record_batch)
 # {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
 # Rebinding:
@@ -200,9 +249,8 @@ end
 
 ## Summary
 
-* **Database.open**: by path (string) or by `driver_name` + optional `uri`. Use `DriverHelper.ensure_driver_and_open/2` when the `adbc` package is available.
-* **Connection.open** → **Statement.new(conn, sql)** → **execute** → **Stream**: same `schema/1` and `next/1` as IPC and Flight.
-* **Metadata**: get_table_types, get_table_schema, get_objects when the driver supports them.
-* **Statement.bind**: optional; driver-dependent.
+* **Livebook / quick start**: configure `:ex_arrow, :adbc_package`, then `Database.open(:adbc_package)` → same Statement/Stream API as IPC and Flight.
+* **Production / native driver**: `Database.open` by `driver_path` or `driver_name` + `uri`; metadata and `bind` when the driver supports them.
+* **Connection pooling** with the adbc package: see [04_adbc_integration.livemd](04_adbc_integration.livemd).
 
 You’ve now seen **IPC**, **Flight**, and **ADBC**. ExArrow keeps Arrow data in native memory and gives you a single stream/batch API across all three—ideal for pipelines, ETL, and interchanging with Explorer or other Arrow consumers.

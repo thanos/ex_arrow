@@ -1,11 +1,45 @@
 # ExArrow Quick Start
 
+```elixir
+deps = [
+  {:explorer, "~> 0.11"},
+  {:kino, "~> 0.19.0"},
+  {:adbc, "~> 0.12"},
+  {:nimble_pool, "~> 1.1"}
+]
+
+# Opened from livebook/ in the repo → local source; otherwise Hex (precompiled NIF).
+local? = File.exists?(Path.join(__DIR__, "../native/ex_arrow_native/Cargo.toml"))
+
+{ex_arrow_dep, extra_deps, config} =
+  if local? do
+    System.put_env("EX_ARROW_BUILD", "1")
+
+    {
+      {:ex_arrow, path: Path.expand("..", __DIR__)},
+      [{:rustler, "~> 0.36", optional: true}],
+      [adbc: [drivers: [:sqlite]], rustler_precompiled: [force_build: [ex_arrow: true]]]
+    }
+  else
+    {
+      {:ex_arrow, "~> 0.6.3"},
+      [],
+      [adbc: [drivers: [:sqlite]]]
+    }
+  end
+
+Mix.install(deps ++ [ex_arrow_dep] ++ extra_deps, config: config)
+```
+
+## Start
+
 Get up and running with ExArrow in a few minutes. This notebook touches all major features: **IPC** (read/write Arrow streams), **Arrow Flight** (client/server), **Flight SQL** (parameterized queries), **ADBC** (query databases), and **data interchange** (Explorer/Nx).
 
 Configure adbc to use the SQLite driver (for section 5):
 
 ```elixir
 Application.put_env(:adbc, :drivers, [:sqlite])
+:ok = Adbc.download_driver!(:sqlite)
 ```
 
 ```elixir
@@ -81,19 +115,15 @@ Arrow Flight is a gRPC-based protocol for streaming Arrow data. ExArrow includes
 
 Start the server (one cell), then use the client in the next.
 
-```
-
-## Start the built-in echo server on port 9999
-
+```elixir
+# Start the built-in echo server on port 9999
 {:ok, server} = ExArrow.Flight.Server.start_link(9999, [])
-ExArrow.Flight.Server.port(server)
-
+{:ok, port} = ExArrow.Flight.Server.port(server)
+port
 ```
 
-```
-
-## Connect and upload our fixture data
-
+```elixir
+# Connect and upload our fixture data
 {:ok, ipc_bytes} = ExArrow.Native.ipc_test_fixture_binary()
 {:ok, stream} = ExArrow.IPC.Reader.from_binary(ipc_bytes)
 {:ok, schema} = ExArrow.Stream.schema(stream)
@@ -102,20 +132,10 @@ batches = Stream.repeatedly(fn -> ExArrow.Stream.next(stream) end) |> Enum.take_
 {:ok, client} = ExArrow.Flight.Client.connect("localhost", 9999, [])
 :ok = ExArrow.Flight.Client.do_put(client, schema, batches)
 
-## Download the same data via do_get
-
+# Download the same data via do_get
 {:ok, down_stream} = ExArrow.Flight.Client.do_get(client, "echo")
 {:ok, down_schema} = ExArrow.Stream.schema(down_stream)
 
-```elixir
-Mix.install([
-  {:ex_arrow, path: Path.join(__DIR__, "..")},
-  {:rustler, "~> 0.36", optional: true},
-  {:adbc, "~> 0.9"},
-  {:kino_explorer, "~> 0.1.20"}
-],
-  config: [adbc: [drivers: [:sqlite]]]
-)
 first = ExArrow.Stream.next(down_stream)
 ExArrow.RecordBatch.num_rows(first)
 
@@ -129,40 +149,29 @@ ExArrow.Flight.Server.stop(server)
 
 With ADBC you open a database (e.g. SQLite), run SQL, and get an **Arrow stream** of result batches—same `ExArrow.Stream` API as IPC and Flight.
 
-**Note:** ExArrow's ADBC layer uses the **C driver manager** and needs a **loadable shared library** (e.g. `libadbc_driver_sqlite.so`). The [`adbc`](https://hex.pm/packages/adbc) Hex package has its own process-based Database/Connection and native stack; its drivers are not necessarily loadable by ExArrow. So if opening with ExArrow fails below, we fall back to the adbc package's API so you still see a working query. To use ExArrow's ADBC (and get `ExArrow.Stream` batches), see [Installing an ADBC driver](INSTALL_ADBC_DRIVER.md).
+This cell uses the **`:adbc_package`** backend (see [03 ADBC](03_adbc.livemd) and [04 ADBC integration](04_adbc_integration.livemd)): the [`adbc`](https://hex.pm/packages/adbc) package downloads SQLite; ExArrow returns `ExArrow.Stream` batches without a native `.dylib`. For native C drivers in production, see [Installing an ADBC driver](INSTALL_ADBC_DRIVER.md).
 
 ```elixir
-# Try ExArrow first (needs a driver loadable by the ADBC C driver manager)
-ex_arrow_db =
-  ExArrow.ADBC.Database.open(driver_name: "adbc_driver_sqlite", uri: ":memory:")
-  |> case do
-    {:ok, _} = ok -> ok
-    {:error, _} -> ExArrow.ADBC.DriverHelper.ensure_driver_and_open(:sqlite, ":memory:")
-  end
+:ok = Adbc.download_driver!(:sqlite)
+Application.put_env(:adbc, :drivers, [:sqlite])
+Application.put_env(:ex_arrow, :adbc_package, driver: :sqlite, uri: ":memory:")
 
-case ex_arrow_db do
+unless Process.whereis(ExArrow.ADBC.AdbcPackageManager) do
+  {:ok, _pid} = ExArrow.ADBC.AdbcPackageManager.start_link()
+end
+
+case ExArrow.ADBC.Database.open(:adbc_package) do
   {:ok, db} ->
-    # ExArrow path: Arrow stream of record batches
     {:ok, conn} = ExArrow.ADBC.Connection.open(db)
     {:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT 1 AS n, 'hello' AS msg")
     {:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
     {:ok, schema} = ExArrow.Stream.schema(stream)
     batch = ExArrow.Stream.next(stream)
-    IO.inspect(ExArrow.Schema.fields(schema), label: "Columns (ExArrow)")
+    IO.inspect(ExArrow.Schema.fields(schema), label: "Columns")
     IO.inspect(ExArrow.RecordBatch.num_rows(batch), label: "Rows")
 
   {:error, msg} ->
-    # Fallback: adbc package's own API (works when the package is in deps)
-    if Code.ensure_loaded?(Kino) and Code.ensure_loaded?(Adbc.Database) do
-      db = Kino.start_child!({Adbc.Database, driver: :sqlite})
-      conn = Kino.start_child!({Adbc.Connection, database: db})
-      {:ok, result} = Adbc.Connection.query(conn, "SELECT 1 AS n, 'hello' AS msg")
-      IO.inspect(result, label: "Query result (adbc package API)")
-      IO.puts("\n(ExArrow's ADBC could not load a driver. This uses the adbc package's Database/Connection. For ExArrow Arrow streams, install a standalone ADBC C driver: see livebook/INSTALL_ADBC_DRIVER.md)")
-    else
-      IO.puts("ADBC driver not available: #{msg}")
-      IO.puts("See livebook/INSTALL_ADBC_DRIVER.md for how to install a driver ExArrow can load.")
-    end
+    IO.puts("ADBC query failed: #{msg}")
 end
 ```
 
