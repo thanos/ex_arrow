@@ -4,6 +4,7 @@
 [![Hex version](https://img.shields.io/hexpm/v/ex_arrow.svg)](https://hex.pm/packages/ex_arrow)
 [![Hex docs](https://img.shields.io/badge/docs-hexdocs.pm-blue)](https://hexdocs.pm/ex_arrow)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Coverage Status](https://coveralls.io/repos/github/thanos/ex_arrow/badge.svg?branch=main)](https://coveralls.io/github/thanos/ex_arrow?branch=main)
 
 
 Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, Arrow Flight SQL, and ADBC database bindings. Column data lives in Rust buffers; Elixir holds lightweight opaque handles. Precompiled NIFs for Linux, macOS, and Windows — no Rust required to use.
