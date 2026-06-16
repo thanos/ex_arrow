@@ -1,22 +1,50 @@
 # ExArrow Quick Start
 
 ```elixir
-# Use the Hex release so Livebook downloads the precompiled NIF (no Rust needed).
-# To try local changes instead, swap in:
-#   {:ex_arrow, path: Path.join(__DIR__, "..")},
-#   {:rustler, "~> 0.36", optional: true},
-# and set config: [adbc: [drivers: [:sqlite]], rustler_precompiled: [force_build: [ex_arrow: true]]]
-Mix.install(
+# Default: Hex release (precompiled NIF, no Rust).
+# Local source: set EX_ARROW_PATH to your clone before running this cell, e.g.
+#   export EX_ARROW_PATH=/Users/thanos/work/ex_arrow
+# Livebook autosaves notebooks outside the repo, so Path.join(__DIR__, "..") alone
+# is unreliable — use EX_ARROW_PATH when testing local changes.
+ex_arrow_path =
+  [System.get_env("EX_ARROW_PATH"), Path.expand("..", __DIR__)]
+  |> Enum.reject(&(&1 in [nil, ""]))
+  |> Enum.find_value(fn dir ->
+    root = Path.expand(dir)
+
+    if File.exists?(Path.join(root, "native/ex_arrow_native/Cargo.toml")) do
+      root
+    end
+  end)
+
+use_local = is_binary(ex_arrow_path)
+
+deps =
   [
     {:explorer, "~> 0.11"},
-    {:ex_arrow, "~> 0.6.2"},
+    if(use_local, do: {:ex_arrow, path: ex_arrow_path}, else: {:ex_arrow, "~> 0.6.2"}),
     {:kino, "~> 0.19.0"},
     {:adbc, "~> 0.12"},
     {:nx, "~> 0.12.1"},
     {:nimble_pool, "~> 1.1"}
-  ],
-  config: [adbc: [drivers: [:sqlite]]]
-)
+  ] ++ if(use_local, do: [{:rustler, "~> 0.36", optional: true}], else: [])
+
+config =
+  if use_local do
+    [adbc: [drivers: [:sqlite]], rustler_precompiled: [force_build: [ex_arrow: true]]]
+  else
+    [adbc: [drivers: [:sqlite]]]
+  end
+
+if System.get_env("EX_ARROW_PATH") && !use_local do
+  raise "EX_ARROW_PATH is set but is not an ex_arrow checkout: #{System.get_env("EX_ARROW_PATH")}"
+end
+
+if use_local, do: System.put_env("EX_ARROW_BUILD", "1")
+
+Mix.install(deps, config: config)
+
+IO.puts(if(use_local, do: "ex_arrow: local source at #{ex_arrow_path}", else: "ex_arrow: Hex ~> 0.6.2"))
 ```
 
 ## Start
