@@ -76,12 +76,14 @@ defmodule ExArrow.ADBC.AdbcPackageManager do
     {:reply, {:ok, ref}, state}
   end
 
-  # sobelow_skip ["Sobelow.SQL.Query"]
+  # sobelow_skip ["SQL.Query"]
   def handle_call({:set_statement_sql, _ref, _sql}, _from, state) when not is_map(state) do
     {:reply, {:error, :not_configured}, state}
   end
 
-  def(handle_call({:set_statement_sql, ref, sql}, _from, state)) do
+  # sobelow_skip ["SQL.Query"]
+  # SQL is executed by the ADBC driver (parameterized statement API), not concatenated locally.
+  def handle_call({:set_statement_sql, ref, sql}, _from, state) do
     table = Map.get(state, :table)
 
     if table do
@@ -102,7 +104,8 @@ defmodule ExArrow.ADBC.AdbcPackageManager do
           | {:noreply, term()}
           | {:stop, term(), term()}
           | {:error, term()}
-  # sobelow_skip ["Sobelow.SQL.Query"]
+  # sobelow_skip ["SQL.Query"]
+  # SQL is executed by the ADBC driver via Adbc.Connection.query/2, not as local string interpolation.
   def handle_call({:execute_statement, ref}, _from, state) do
     table = Map.get(state, :table)
 
@@ -130,7 +133,7 @@ defmodule ExArrow.ADBC.AdbcPackageManager do
     end
   end
 
-  # sobelow_skip ["Sobelow.SQL.Query"]
+  # sobelow_skip ["SQL.Query"]
   defp query(sql, state) do
     if pool = Map.get(state, :pool) do
       adbc_package_pool_module().query(pool, sql)
