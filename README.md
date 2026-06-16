@@ -200,28 +200,27 @@ Windows x8664.
 
 **Building from source**
 If no precompiled NIF exists for your platform, or you are developing ExArrow
-itself, set `EX_ARROW_BUILD=1` and have Rust installed:
+itself, have Rust installed.  In **dev/test**, `mix compile` builds the NIF from
+source automatically.  For other environments, set `EX_ARROW_BUILD=1`:
 
 ```bash
-EX_ARROW_BUILD=1 mix deps.get
-EX_ARROW_BUILD=1 mix compile
+mix deps.get
+mix compile
 ```
 
 The optional dependency `{:rustler, "~> 0.36 or ~> 0.38", optional: true}` is required
 for source builds and is already listed in ExArrow's own `mix.exs`.
 
-For **path dependencies** (e.g. Livebook or `Mix.install`), add `rustler`
-explicitly and have Rust available:
+For **path dependencies** in Livebook (`Mix.install`), open notebooks from
+`livebook/` in a clone (setup cells set `EX_ARROW_BUILD=1` when a local checkout
+is detected) or use the Hex package:
 
 ```elixir
-Mix.install([
-  {:ex_arrow, path: "/path/to/ex_arrow"},
-  {:rustler, "~> 0.36 or ~> 0.38", optional: true}
-])
+Mix.install([{:ex_arrow, "~> 0.6.3"}, {:rustler, "~> 0.36", optional: true}])
 ```
 
 Alternatively, use the published Hex package so the precompiled NIF is used
-and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.6"}])`.
+and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.6.3"}])`.
 
 ---
 
@@ -286,12 +285,13 @@ batch = ExArrow.Stream.next(stream)
 
 Interactive notebooks (open in [Livebook](https://livebook.dev)):
 
-- **[Quick start](livebook/00_quickstart.livemd)** — IPC, Flight, and ADBC in one notebook.
+- **[Quick start](livebook/00_quickstart.livemd)** — IPC, Flight, ADBC (`:adbc_package`), Explorer/Nx interchange.
 - **[01 IPC](livebook/01_ipc.livemd)** — Stream vs file format, read/write, schema, Explorer interop.
-- **[02 Flight](livebook/02_flight.livemd)** — Echo server, client, listflights, getschema, actions.
-- **[03 ADBC](livebook/03_adbc.livemd)** — Database, Connection, Statement, Stream, metadata APIs.
+- **[02 Flight](livebook/02_flight.livemd)** — Echo server, client, metadata APIs, Flight SQL prepared statements.
+- **[03 ADBC](livebook/03_adbc.livemd)** — Database, Connection, Statement, Stream (`:adbc_package` in Livebook).
+- **[04 ADBC integration](livebook/04_adbc_integration.livemd)** — Connection pooling with NimblePool.
 
-See [livebook/README.md](livebook/README.md) for run instructions.
+See [livebook/README.md](livebook/README.md) for run instructions.  Notebooks use Hex `~> 0.6.3` by default; opening from `livebook/` in a clone builds from source.
 
 ---
 

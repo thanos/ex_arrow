@@ -1,32 +1,33 @@
 # ExArrow Tutorial 3: ADBC (Arrow Database Connectivity)
 
 ```elixir
-# Use the Hex release so Livebook downloads the precompiled NIF (no Rust needed).
-# To try local changes instead, use:
-# System.put_env("EX_ARROW_BUILD", "1")
-# Mix.install(
-#   [
-#     {:explorer, "~> 0.11"},
-#     {:ex_arrow, path: Path.join(__DIR__, "..")},
-#     {:rustler, "~> 0.36", optional: true},
-#     {:kino, "~> 0.19.0"},
-#     {:adbc, "~> 0.12"},
-#     {:nimble_pool, "~> 1.1"}
-#   ],
-#   config: [adbc: [drivers: [:sqlite]], rustler_precompiled: [force_build: [ex_arrow: true]]]
-# )
-#
-# make sure Path.join(__DIR__, "..") is the actual repo path and not the livebook autosave path
-Mix.install(
-  [
-    {:explorer, "~> 0.11"},
-    {:ex_arrow, "~> 0.6.2"},
-    {:kino, "~> 0.19.0"},
-    {:adbc, "~> 0.12"},
-    {:nimble_pool, "~> 1.1"}
-  ],
-  config: [adbc: [drivers: [:sqlite]]]
-)
+deps = [
+  {:explorer, "~> 0.11"},
+  {:kino, "~> 0.19.0"},
+  {:adbc, "~> 0.12"},
+  {:nimble_pool, "~> 1.1"}
+]
+
+local? = File.exists?(Path.join(__DIR__, "../native/ex_arrow_native/Cargo.toml"))
+
+{ex_arrow_dep, extra_deps, config} =
+  if local? do
+    System.put_env("EX_ARROW_BUILD", "1")
+
+    {
+      {:ex_arrow, path: Path.expand("..", __DIR__)},
+      [{:rustler, "~> 0.36", optional: true}],
+      [adbc: [drivers: [:sqlite]], rustler_precompiled: [force_build: [ex_arrow: true]]]
+    }
+  else
+    {
+      {:ex_arrow, "~> 0.6.3"},
+      [],
+      [adbc: [drivers: [:sqlite]]]
+    }
+  end
+
+Mix.install(deps ++ [ex_arrow_dep] ++ extra_deps, config: config)
 ```
 
 ## Section

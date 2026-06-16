@@ -6,19 +6,35 @@ Tutorial notebooks for the **ex_arrow** library, suitable for an introductory Me
 
 | File | Purpose |
 |------|---------|
-| **00_quickstart.livemd** | Get something running in minutes: IPC read/write, Flight echo client/server, ADBC SQLite query. |
+| **00_quickstart.livemd** | Get something running in minutes: IPC read/write, Flight echo client/server, ADBC SQLite query, Explorer/Nx interchange. |
 | **01_ipc.livemd** | IPC deep dive: stream vs file format, reading from binary/file, writing, schema and types, optional Explorer interop. |
-| **02_flight.livemd** | Arrow Flight: echo server, client, do_put/do_get, list_flights, get_flight_info, get_schema, actions. |
-| **03_adbc.livemd** | ADBC: driver setup (optional `adbc` package), Database → Connection → Statement → Stream, metadata APIs, optional Explorer roundtrip. |
-| **04_adbc_integration.livemd** | **adbc_package** backend: single Setup cell (Mix.install + config + manager), SQLite in-memory queries, then connection pooling with NimblePool. |
+| **02_flight.livemd** | Arrow Flight: echo server, client, do_put/do_get, list_flights, get_flight_info, get_schema, actions, Flight SQL prepared statements. |
+| **03_adbc.livemd** | ADBC: `:adbc_package` backend, Database → Connection → Statement → Stream, metadata APIs (native driver), Explorer roundtrip. |
+| **04_adbc_integration.livemd** | **adbc_package** backend with connection pooling (NimblePool), concurrent queries. |
 
-Together they demonstrate all ExArrow functionality: IPC (stream + file), Flight (client + server), and ADBC (Database/Connection/Statement and Arrow result streams).
+Together they demonstrate ExArrow functionality: IPC (stream + file), Flight (client + server + Flight SQL), and ADBC (Arrow result streams).
 
 ## How to run
 
-1. In a project that has `{:ex_arrow, "~> 0.1.0"}` in `deps`, start Livebook (e.g. `mix livebook.server` or from the Livebook app).
-2. Open the notebooks in order: quickstart first, then 01 → 02 → 03.
-3. For **ADBC** (00 and 03), you need a native ADBC driver (e.g. SQLite). See **[Installing an ADBC driver](INSTALL_ADBC_DRIVER.md)** for step-by-step options: the [`adbc`](https://hex.pm/packages/adbc) Hex package (precompiled artifacts; see [livebook-dev/adbc](https://github.com/livebook-dev/adbc) and their [CI](https://github.com/livebook-dev/adbc/blob/main/.github/workflows/ci.yml)), or building/installing from [Apache Arrow ADBC](https://github.com/apache/arrow-adbc). Without a driver, the ADBC cells will report an error and point you to that guide.
+1. Install [Livebook](https://livebook.dev) or run `mix livebook.server` from a project that depends on `ex_arrow`.
+2. Open notebooks from this repo’s **`livebook/`** directory (File → Open) so the setup cell can find a local checkout when developing.
+3. Run the **first cell** in each notebook (`Mix.install`).  It installs Hex packages and, when opened from the repo, builds `ex_arrow` from source (requires **Rust**).
+4. Run remaining cells in order.
 
-**Running from the repo (path dependency)**  
-Livebook often autosaves notebooks under `~/Library/Application Support/livebook/autosaved/`, so `Path.join(__DIR__, "..")` does **not** point at this repo. To build local source in Livebook, set **`EX_ARROW_PATH`** to your clone before running the setup cell (e.g. `export EX_ARROW_PATH=/path/to/ex_arrow`), and ensure **Rust** is installed. The setup cell auto-detects a local checkout (via `EX_ARROW_PATH` or when the notebook is opened directly from `livebook/` in the repo) and adds `rustler` + `force_build`; otherwise it uses the Hex release with precompiled NIFs.
+### Setup cell behaviour
+
+| Where you open the notebook | `ex_arrow` source |
+|----------------------------|-------------------|
+| From `livebook/` in a git clone | Local path + `EX_ARROW_BUILD=1` (compile NIF from Rust) |
+| From Livebook autosave or elsewhere | Hex `~> 0.6.3` (precompiled NIF, no Rust) |
+
+### ADBC in Livebook
+
+Notebooks **00**, **03**, and **04** use the [`adbc`](https://hex.pm/packages/adbc) package to download the SQLite driver.  Tutorials **03** and **04** use ExArrow’s **`:adbc_package`** backend so you get `ExArrow.Stream` results **without** a native ADBC `.dylib`.
+
+For production deployments with a native C driver (PostgreSQL, DuckDB, etc.), see [Installing an ADBC driver](INSTALL_ADBC_DRIVER.md) and [docs/adbc_guide.md](../docs/adbc_guide.md).
+
+### Local development tips
+
+- If autosaved notebooks fall back to Hex but you want local source, reopen the file from `livebook/` in the repo or set `EX_ARROW_BUILD=1` and use a path dependency manually (see commented block in each setup cell).
+- First local NIF build takes 1–2 minutes; later runs use the cache.
