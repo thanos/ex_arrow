@@ -2,7 +2,6 @@ defmodule ExArrow.ADBC.AdbcPackageManager do
   @moduledoc false
   use GenServer
 
-  alias ExArrow.ADBC.AdbcPackagePool
   alias ExArrow.IPC.Reader
 
   @pool_name ExArrow.ADBC.AdbcPackagePool
@@ -134,8 +133,7 @@ defmodule ExArrow.ADBC.AdbcPackageManager do
   # sobelow_skip ["Sobelow.SQL.Query"]
   defp query(sql, state) do
     if pool = Map.get(state, :pool) do
-      pool_module = Module.safe_concat(["Elixir", "ExArrow", "ADBC", "AdbcPackagePool"])
-      pool_module.query(pool, sql)
+      adbc_package_pool_module().query(pool, sql)
     else
       conn_pid = Map.get(state, :conn)
       apply(adbc_conn_module(), :query, [conn_pid, sql])
@@ -171,9 +169,9 @@ defmodule ExArrow.ADBC.AdbcPackageManager do
 
   defp use_pool? do
     pool_size = Application.get_env(:ex_arrow, :adbc_package_pool_size, 1)
+    pool_module = adbc_package_pool_module()
 
-    pool_size > 1 and Code.ensure_loaded?(NimblePool) and
-      Code.ensure_loaded?(AdbcPackagePool)
+    pool_size > 1 and Code.ensure_loaded?(NimblePool) and Code.ensure_loaded?(pool_module)
   end
 
   defp start_pool_or_connection(db_pid, state) do
@@ -194,12 +192,11 @@ defmodule ExArrow.ADBC.AdbcPackageManager do
 
   defp start_pool(db_pid, state) do
     pool_size = Application.get_env(:ex_arrow, :adbc_package_pool_size, 1)
+    pool_module = adbc_package_pool_module()
 
-    case AdbcPackagePool.start_link(
-           database: db_pid,
-           name: @pool_name,
-           pool_size: pool_size
-         ) do
+    case apply(pool_module, :start_link, [
+           [database: db_pid, name: @pool_name, pool_size: pool_size]
+         ]) do
       {:ok, _pid} -> {:ok, Map.merge(state, %{db: db_pid, pool: @pool_name})}
       {:error, reason} -> {:error, reason}
     end
@@ -211,6 +208,9 @@ defmodule ExArrow.ADBC.AdbcPackageManager do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp adbc_package_pool_module,
+    do: Module.safe_concat(["Elixir", "ExArrow", "ADBC", "AdbcPackagePool"])
 
   defp adbc_db_module,
     do:
