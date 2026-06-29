@@ -103,6 +103,20 @@ Scenarios:
 - **materialise → Flight** — read the file, collect every batch into BEAM
   first, then upload.  Shows the overhead of materialisation.
 
+### v0.7.0 stream / Flow / pipeline (`bench/v070_stream_flow_pipeline_bench.exs`)
+
+Measures Parquet and IPC stream drains, Flow execution, and Pipeline
+`map_batches` + `write_parquet` at 1K / 100K / 1M rows.  Compares the cost
+of draining a stream through `ExArrow.Stream.to_list/1` versus flowing the
+same stream through `ExArrow.Flow.from_batches/1` and writing through
+`ExArrow.Pipeline.write_parquet/2`.
+
+### v0.7.0 RecordBatch vs list(map()) (`bench/v070_record_batch_vs_maps_bench.exs`)
+
+Compares Arrow `RecordBatch` against `list(map())` for build, transform
+(column select), and drain (sum a column) at 1K / 100K / 1M rows.  Quantifies
+the cost of going through row maps versus staying in native Arrow memory.
+
 ## Published results
 
 Benchmark results from every push to `main` are stored in the `gh-pages`

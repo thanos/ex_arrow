@@ -6,13 +6,13 @@ Tutorial notebooks for the **ex_arrow** library, suitable for an introductory Me
 
 | File | Purpose |
 |------|---------|
-| **00_quickstart.livemd** | Get something running in minutes: IPC read/write, Flight echo client/server, ADBC SQLite query, Explorer/Nx interchange. |
+| **00_quickstart.livemd** | Get something running in minutes: IPC read/write, Flight echo client/server, ADBC SQLite query, Explorer/Nx interchange, and v0.7.0 streaming pipelines. |
 | **01_ipc.livemd** | IPC deep dive: stream vs file format, reading from binary/file, writing, schema and types, optional Explorer interop. |
 | **02_flight.livemd** | Arrow Flight: echo server, client, do_put/do_get, list_flights, get_flight_info, get_schema, actions, Flight SQL prepared statements. |
 | **03_adbc.livemd** | ADBC: `:adbc_package` backend, Database → Connection → Statement → Stream, metadata APIs (native driver), Explorer roundtrip. |
 | **04_adbc_integration.livemd** | **adbc_package** backend with connection pooling (NimblePool), concurrent queries. |
 
-Together they demonstrate ExArrow functionality: IPC (stream + file), Flight (client + server + Flight SQL), and ADBC (Arrow result streams).
+Together they demonstrate ExArrow functionality: IPC (stream + file), Flight (client + server + Flight SQL), ADBC (Arrow result streams), and the v0.7.0 pipeline DSL (`ExArrow.Stream`, `ExArrow.Batch`, `ExArrow.Pipeline`, telemetry).
 
 ## How to run
 
@@ -26,7 +26,7 @@ Together they demonstrate ExArrow functionality: IPC (stream + file), Flight (cl
 | Where you open the notebook | `ex_arrow` source |
 |----------------------------|-------------------|
 | From `livebook/` in a git clone | Local path + `EX_ARROW_BUILD=1` (compile NIF from Rust) |
-| From Livebook autosave or elsewhere | Hex `~> 0.6.3` (precompiled NIF, no Rust) |
+| From Livebook autosave or elsewhere | Hex `~> 0.7.0` (precompiled NIF, no Rust) |
 
 ### ADBC in Livebook
 

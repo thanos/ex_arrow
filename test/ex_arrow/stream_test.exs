@@ -284,3 +284,226 @@ defmodule ExArrow.StreamTest do
     stream_ref
   end
 end
+
+defmodule ExArrow.StreamConstructorsTest do
+  use ExUnit.Case, async: false
+
+  alias ExArrow.Schema
+  alias ExArrow.Stream
+
+  # Build a small IPC binary once per test module.
+  defp ipc_binary do
+    {:ok, bin} = ExArrow.Native.ipc_test_fixture_binary()
+    bin
+  end
+
+  defp parquet_binary do
+    {:ok, reader} = ExArrow.Native.ipc_reader_from_binary(ipc_binary())
+    schema_ref = ExArrow.Native.ipc_stream_schema(reader)
+    {:ok, batch_ref} = ExArrow.Native.ipc_stream_next(reader)
+    {:ok, parquet_bin} = ExArrow.Native.parquet_writer_to_binary(schema_ref, [batch_ref])
+    parquet_bin
+  end
+
+  describe "from_ipc/1 and from_ipc_file/1" do
+    @tag :nif
+    test "from_ipc/1 returns a stream tagged with {:ipc, :binary}" do
+      assert {:ok, %Stream{backend: :ipc} = stream} = Stream.from_ipc(ipc_binary())
+      assert Stream.source(stream) == {:ipc, :binary}
+      assert {:ok, %ExArrow.Schema{}} = Stream.schema(stream)
+    end
+
+    @tag :tmp_dir
+    test "from_ipc_file/1 tags the stream with the path", %{tmp_dir: dir} do
+      path = Path.join(dir, "ipc.arrows")
+      File.write!(path, ipc_binary())
+
+      assert {:ok, %Stream{backend: :ipc} = stream} = Stream.from_ipc_file(path)
+      assert Stream.source(stream) == {:ipc, path}
+    end
+
+    test "from_ipc/1 returns error for non-IPC binary" do
+      assert {:error, _} = Stream.from_ipc(<<"not ipc">>)
+    end
+  end
+
+  describe "from_parquet/1 and from_parquet_binary/1" do
+    @tag :nif
+    test "from_parquet_binary/1 returns a stream tagged with {:parquet, :binary}" do
+      assert {:ok, %Stream{backend: :parquet} = stream} =
+               Stream.from_parquet_binary(parquet_binary())
+
+      assert Stream.source(stream) == {:parquet, :binary}
+      assert {:ok, %ExArrow.Schema{}} = Stream.schema(stream)
+    end
+
+    @tag :tmp_dir
+    test "from_parquet/1 tags the stream with the path", %{tmp_dir: dir} do
+      path = Path.join(dir, "events.parquet")
+      File.write!(path, parquet_binary())
+
+      assert {:ok, %Stream{backend: :parquet} = stream} = Stream.from_parquet(path)
+      assert Stream.source(stream) == {:parquet, path}
+      assert {:ok, %ExArrow.Schema{}} = Stream.schema(stream)
+    end
+
+    test "from_parquet/1 returns error for missing file" do
+      assert {:error, _} =
+               Stream.from_parquet(
+                 "/tmp/ex_arrow_missing_#{:erlang.unique_integer([:positive])}.parquet"
+               )
+    end
+  end
+
+  describe "from_flight_sql/2 (delegation)" do
+    setup context do
+      prev = Application.get_env(:ex_arrow, :flight_sql_client_impl)
+      Application.put_env(:ex_arrow, :flight_sql_client_impl, ExArrow.FlightSQL.ClientMock)
+      Mox.set_mox_from_context(context)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :flight_sql_client_impl) end)
+      :ok
+    end
+
+    test "delegates to FlightSQL.Client.stream_query/2 and tags source" do
+      ExArrow.FlightSQL.ClientMock
+      |> Mox.expect(:query, fn _client, _sql, _opts ->
+        {:ok, %Stream{resource: make_ref(), backend: :flight_sql}}
+      end)
+
+      client = %ExArrow.FlightSQL.Client{resource: make_ref()}
+
+      assert {:ok, %Stream{backend: :flight_sql} = stream} =
+               Stream.from_flight_sql(client, "SELECT 1")
+
+      assert Stream.source(stream) == {:flight_sql, "SELECT 1"}
+    end
+
+    test "passes errors through unchanged" do
+      ExArrow.FlightSQL.ClientMock
+      |> Mox.expect(:query, fn _client, _sql, _opts ->
+        {:error, %ExArrow.FlightSQL.Error{code: :unavailable}}
+      end)
+
+      client = %ExArrow.FlightSQL.Client{resource: make_ref()}
+
+      assert {:error, %ExArrow.FlightSQL.Error{code: :unavailable}} =
+               Stream.from_flight_sql(client, "SELECT 1")
+    end
+  end
+
+  describe "from_flight/2 (delegation)" do
+    setup context do
+      prev = Application.get_env(:ex_arrow, :flight_client_impl)
+      Application.put_env(:ex_arrow, :flight_client_impl, ExArrow.Flight.ClientMock)
+      Mox.set_mox_from_context(context)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :flight_client_impl) end)
+      :ok
+    end
+
+    test "delegates to Flight.Client.do_get/2 and tags source" do
+      ExArrow.Flight.ClientMock
+      |> Mox.expect(:do_get, fn _client, _ticket ->
+        {:ok, %Stream{resource: make_ref(), backend: :ipc}}
+      end)
+
+      client = %ExArrow.Flight.Client{resource: make_ref()}
+      assert {:ok, %Stream{} = stream} = Stream.from_flight(client, "sales_2024")
+      assert Stream.source(stream) == {:flight, "sales_2024"}
+    end
+  end
+
+  describe "from_adbc/1 and from_adbc/2 (delegation)" do
+    setup context do
+      prev = Application.get_env(:ex_arrow, :adbc_statement_impl)
+      Application.put_env(:ex_arrow, :adbc_statement_impl, ExArrow.ADBC.StatementMock)
+      Mox.set_mox_from_context(context)
+      on_exit(fn -> Application.delete_env(:ex_arrow, :adbc_statement_impl) end)
+      :ok
+    end
+
+    test "from_adbc/1 executes a pre-built statement" do
+      ExArrow.ADBC.StatementMock
+      |> Mox.expect(:execute, fn _stmt -> {:ok, %Stream{resource: make_ref(), backend: :adbc}} end)
+
+      stmt = %ExArrow.ADBC.Statement{resource: make_ref()}
+      assert {:ok, %Stream{backend: :adbc} = stream} = Stream.from_adbc(stmt)
+      assert Stream.source(stream) == {:adbc, :statement}
+    end
+
+    test "from_adbc/2 builds and executes a one-shot statement" do
+      conn = %ExArrow.ADBC.Connection{resource: make_ref()}
+      stmt = %ExArrow.ADBC.Statement{resource: make_ref()}
+
+      ExArrow.ADBC.StatementMock
+      |> Mox.expect(:new, fn ^conn -> {:ok, stmt} end)
+      |> Mox.expect(:set_sql, fn ^stmt, "SELECT 1" -> :ok end)
+      |> Mox.expect(:execute, fn ^stmt -> {:ok, %Stream{resource: make_ref(), backend: :adbc}} end)
+
+      assert {:ok, %Stream{backend: :adbc} = stream} = Stream.from_adbc(conn, "SELECT 1")
+      assert Stream.source(stream) == {:adbc, "SELECT 1"}
+    end
+
+    test "from_adbc/2 propagates statement-creation errors" do
+      conn = %ExArrow.ADBC.Connection{resource: make_ref()}
+
+      ExArrow.ADBC.StatementMock
+      |> Mox.expect(:new, fn ^conn -> {:error, "no connection"} end)
+
+      assert {:error, "no connection"} = Stream.from_adbc(conn, "SELECT 1")
+    end
+  end
+
+  describe "telemetry on stream open" do
+    @tag :nif
+    test "from_parquet_binary/1 emits [:ex_arrow, :parquet, :read]" do
+      ref = make_ref()
+
+      :telemetry.attach(
+        {:ex_arrow_parquet_read, ref},
+        [:ex_arrow, :parquet, :read],
+        fn _event, _measurements, metadata, config ->
+          send(config[:pid], {:parquet_read, metadata})
+        end,
+        %{pid: self()}
+      )
+
+      Stream.from_parquet_binary(parquet_binary())
+
+      assert_received {:parquet_read, %{source: :binary}}
+
+      :telemetry.detach({:ex_arrow_parquet_read, ref})
+    end
+
+    test "from_parquet/1 does NOT emit telemetry on error" do
+      ref = make_ref()
+
+      :telemetry.attach(
+        {:ex_arrow_parquet_read_err, ref},
+        [:ex_arrow, :parquet, :read],
+        fn _event, _measurements, _metadata, config ->
+          send(config[:pid], :parquet_read_event)
+        end,
+        %{pid: self()}
+      )
+
+      Stream.from_parquet("/nonexistent_#{:erlang.unique_integer([:positive])}.parquet")
+
+      refute_received :parquet_read_event, 100
+
+      :telemetry.detach({:ex_arrow_parquet_read_err, ref})
+    end
+  end
+
+  describe "schema preservation through constructors" do
+    @tag :nif
+    test "from_ipc/1 round-trips field names" do
+      {:ok, orig_stream} = ExArrow.IPC.Reader.from_binary(ipc_binary())
+      {:ok, orig_schema} = Stream.schema(orig_stream)
+      expected_names = Schema.field_names(orig_schema)
+
+      assert {:ok, stream} = Stream.from_ipc(ipc_binary())
+      assert {:ok, schema} = Stream.schema(stream)
+      assert Schema.field_names(schema) == expected_names
+    end
+  end
+end

@@ -2,6 +2,11 @@
 
 ExArrow supports the Arrow IPC format: streaming (sequential) and file format (random access). You can read and write record batches as a stream of bytes or to a file.
 
+> **v0.7.0**: `ExArrow.Stream.from_ipc/1` and `from_ipc_file/1` are the
+> preferred entry points for the streaming format — they tag the stream with
+> `source` metadata for telemetry.  `ExArrow.IPC.Reader.from_binary/1` and
+> `from_file/1` continue to work unchanged.
+
 ## Stream vs file
 
 - **Stream**: Sequential read/write. Use `Reader.from_binary/1` or `Reader.from_file/1` to get an `ExArrow.Stream` that yields record batches via `ExArrow.Stream.next/1`. Use `Writer.to_binary/2` or `Writer.to_file/3` to write batches. No random access.

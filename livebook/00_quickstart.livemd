@@ -22,7 +22,7 @@ local? = File.exists?(Path.join(__DIR__, "../native/ex_arrow_native/Cargo.toml")
     }
   else
     {
-      {:ex_arrow, "~> 0.6.3"},
+      {:ex_arrow, "~> 0.7.0"},
       [],
       [adbc: [drivers: [:sqlite]]]
     }
@@ -255,6 +255,73 @@ Connect to a Flight SQL server, prepare a query, bind parameters, and execute:
 # :ok = ExArrow.FlightSQL.Statement.close(stmt)
 
 IO.puts("Uncomment the cells above when a Flight SQL server is available.")
+```
+
+---
+
+## 9. Streaming pipelines (v0.7.0)
+
+v0.7.0 introduces first-class streaming and a pipeline DSL.  The unit of
+execution is the Arrow `RecordBatch`.
+
+**Stream constructors** — one entry point per source:
+
+```elixir
+# From an IPC binary (built-in fixture)
+{:ok, ipc_bytes} = ExArrow.Native.ipc_test_fixture_binary()
+{:ok, stream} = ExArrow.Stream.from_ipc(ipc_bytes)
+{:ok, schema} = ExArrow.Stream.schema(stream)
+ExArrow.Schema.field_names(schema)
+```
+
+**Batch operations** — lightweight, Arrow-native transforms:
+
+```elixir
+batch = ExArrow.Stream.next(stream)
+
+{:ok, slim} = ExArrow.Batch.select(batch, ["id"])
+ExArrow.RecordBatch.column_names(slim)
+
+{:ok, renamed} = ExArrow.Batch.rename(slim, %{"id" => "user_id"})
+ExArrow.RecordBatch.column_names(renamed)
+
+{:ok, first1} = ExArrow.Batch.take(renamed, 1)
+ExArrow.RecordBatch.num_rows(first1)
+```
+
+**Pipeline DSL** — lazy `map_batches` + sink:
+
+```elixir
+# Re-open the stream (the previous one was consumed)
+{:ok, stream2} = ExArrow.Stream.from_ipc(ipc_bytes)
+out_path = Path.join(System.tmp_dir!(), "ex_arrow_quickstart_pipeline.parquet")
+
+{:ok, stream2}
+|> ExArrow.Pipeline.map_batches(fn b ->
+  {:ok, s} = ExArrow.Batch.select(b, ["id"])
+  s
+end)
+|> ExArrow.Pipeline.write_parquet(out_path)
+
+File.exists?(out_path)
+```
+
+**Telemetry** — attach a handler and observe every batch:
+
+```elixir
+:telemetry.attach(
+  "ex-arrow-quickstart",
+  [:ex_arrow, :stream, :batch],
+  fn _event, measurements, metadata, _config ->
+    IO.puts("batch: #{measurements[:rows]} rows from #{inspect(metadata[:source])}")
+  end,
+  nil
+)
+
+{:ok, stream3} = ExArrow.Stream.from_ipc(ipc_bytes)
+_ = ExArrow.Stream.to_list(stream3)
+
+:telemetry.detach("ex-arrow-quickstart")
 ```
 
 Docs: [hexdocs.pm/ex_arrow](https://hexdocs.pm/ex_arrow).
