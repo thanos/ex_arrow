@@ -21,7 +21,7 @@ local? = File.exists?(Path.join(__DIR__, "../native/ex_arrow_native/Cargo.toml")
     }
   else
     {
-      {:ex_arrow, "~> 0.6.3"},
+      {:ex_arrow, "~> 0.7.0"},
       [],
       [adbc: [drivers: [:sqlite]]]
     }

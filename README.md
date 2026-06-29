@@ -7,7 +7,9 @@
 [![Coverage Status](https://coveralls.io/repos/github/thanos/ex_arrow/badge.svg?branch=main)](https://coveralls.io/github/thanos/ex_arrow?branch=main)
 
 
-Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, Arrow Flight SQL, and ADBC database bindings. Column data lives in Rust buffers; Elixir holds lightweight opaque handles. Precompiled NIFs for Linux, macOS, and Windows — no Rust required to use.
+Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, Arrow Flight SQL, ADBC database bindings, and Arrow-native pipelines. Column data lives in Rust buffers; Elixir holds lightweight opaque handles. Precompiled NIFs for Linux, macOS, and Windows — no Rust required to use.
+
+> **v0.7.0 — Arrow-native pipelines.** New: `ExArrow.Stream` constructors for every source, `ExArrow.Batch` transforms, `ExArrow.Pipeline` DSL, `ExArrow.Flow` / `ExArrow.GenStage` / `ExArrow.Broadway` integrations, `ExArrow.Sink.*` destinations, and `ExArrow.Telemetry` events. The unit of execution is the Arrow `RecordBatch`. See [What's changed in v0.7.0](#whats-changed-in-v070).
 
 ---
 
@@ -21,6 +23,7 @@ Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, Arrow Flight SQL,
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
+- [What's changed in v0.7.0](#whats-changed-in-v070)
 - [Livebook tutorials](#livebook-tutorials)
 - [IPC: stream and file](#ipc-stream-and-file)
 - [Arrow Flight: client and server](#arrow-flight-client-and-server)
@@ -28,6 +31,8 @@ Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, Arrow Flight SQL,
 - [ADBC: database to Arrow streams](#adbc-database-to-arrow-streams)
 - [Parquet: read and write](#parquet-read-and-write)
 - [Arrow compute kernels](#arrow-compute-kernels)
+- [Batch operations](#batch-operations)
+- [Streaming pipelines](#streaming-pipelines)
 - [Using ExArrow with Explorer](#using-exarrow-with-explorer)
 - [Using ExArrow with Nx](#using-exarrow-with-nx)
 - [Use case examples](#use-case-examples)
@@ -39,6 +44,7 @@ Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, Arrow Flight SQL,
   - [Shipped (v0.3.0)](#shipped-v030)
   - [Shipped (v0.4.0)](#shipped-v040)
   - [Shipped (v0.5.0)](#shipped-v050)
+  - [Shipped (v0.7.0)](#shipped-v070)
 - [FAQ](#faq)
 - [License](#license)
 
@@ -90,8 +96,13 @@ BEAM terms unless you ask for them.
 there until consumed. The BEAM scheduler is never stalled on large copies.
 Dirty NIF schedulers are used for blocking I/O.
 - **A uniform stream abstraction** — `ExArrow.Stream` works identically for
-IPC, Flight, and ADBC results. Code that processes batches does not know or
-care where the data came from.
+  IPC, Flight, and ADBC results. Code that processes batches does not know or
+  care where the data came from.
+- **Arrow-native pipelines (v0.7.0)** — `ExArrow.Pipeline` provides a lazy,
+  composable DSL for transforming and sinking streams of `RecordBatch` values.
+  `ExArrow.Flow`, `ExArrow.GenStage`, and `ExArrow.Broadway` integrations
+  cover parallel, demand-driven, and ingestion workloads.  Telemetry events
+  fire at every stage.
 
 ---
 
@@ -123,15 +134,19 @@ flowchart TB
 
     App --> Explorer("Explorer\ndataframes & analysis")
     App --> Nx("Nx\ntensors & ML")
-    App --> ExArrow("ExArrow\nIPC · Flight · ADBC")
+    App --> ExArrow("ExArrow\nIPC · Flight · ADBC · Pipelines")
     App --> ExZarr("ExZarr\nZarr chunked arrays")
 
     ExArrow --> IPC("Arrow IPC\nstream & file")
     ExArrow --> FlightSvr("Arrow Flight\ngRPC server")
     ExArrow --> FlightSQL("Arrow Flight SQL\nremote query server")
     ExArrow --> ADBCDrv("ADBC\ndriver")
+    ExArrow --> Pipeline("Pipelines\nStream · Batch · Sink")
+    ExArrow --> Flow("Flow · GenStage · Broadway")
 
     IPC -. "interop via IPC binary" .-> Explorer
+    Pipeline -. "RecordBatch" .-> Explorer
+    Pipeline -. "RecordBatch" .-> Nx
 
     FlightSvr --> FlightSvcs("Dremio · InfluxDB IOx\nCustom Flight services")
     FlightSQL --> SQLSvcs("DuckDB · DataFusion\nDremio · InfluxDB v3")
@@ -144,7 +159,7 @@ flowchart TB
 
     class App app
     class Explorer,Nx,ExArrow,ExZarr lib
-    class IPC,FlightSvr,FlightSQL,ADBCDrv proto
+    class IPC,FlightSvr,FlightSQL,ADBCDrv,Pipeline,Flow proto
     class FlightSvcs,SQLSvcs,Databases external
 ```
 
@@ -189,7 +204,7 @@ Add the dependency:
 
 ```elixir
 def deps do
-  [{:ex_arrow, "~> 0.6"}]
+  [{:ex_arrow, "~> 0.7"}]
 end
 ```
 
@@ -217,15 +232,37 @@ For **path dependencies** in Livebook (`Mix.install`), open notebooks from
 is detected) or use the Hex package:
 
 ```elixir
-Mix.install([{:ex_arrow, "~> 0.6.3"}, {:rustler, "~> 0.36", optional: true}])
+Mix.install([{:ex_arrow, "~> 0.7.0"}, {:rustler, "~> 0.36", optional: true}])
 ```
 
 Alternatively, use the published Hex package so the precompiled NIF is used
-and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.6.3"}])`.
+and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.7.0"}])`.
 
 ---
 
 ## Quick start
+
+**Read an Arrow stream with the v0.7.0 constructors** (one entry point for
+every source):
+
+```elixir
+{:ok, stream} = ExArrow.Stream.from_parquet("/data/events.parquet")
+{:ok, schema} = ExArrow.Stream.schema(stream)
+Enum.each(stream, fn batch ->
+  IO.puts("rows: #{ExArrow.RecordBatch.num_rows(batch)}")
+end)
+```
+
+**Build a pipeline** (lazy `map_batches` + sink):
+
+```elixir
+ExArrow.Stream.from_parquet("/data/events.parquet")
+|> ExArrow.Pipeline.map_batches(fn batch ->
+  {:ok, slim} = ExArrow.Batch.select(batch, ["id", "score"])
+  slim
+end)
+|> ExArrow.Pipeline.write_parquet("/data/slim.parquet")
+```
 
 **Read an Arrow IPC stream:**
 
@@ -282,6 +319,72 @@ batch = ExArrow.Stream.next(stream)
 
 ---
 
+## What's changed in v0.7.0
+
+v0.7.0 turns ExArrow from a transport and interchange library into the
+foundation for **Arrow-native data pipelines on the BEAM**.  The central
+architectural principle: **operate on Arrow `RecordBatch` values** — not
+`list(map())`, not `Explorer.DataFrame`, not `Nx.Tensor`.  Explorer and Nx
+remain downstream consumers; ExArrow is the Arrow layer.
+
+### New modules
+
+| Module                       | Purpose                                                          |
+|------------------------------|------------------------------------------------------------------|
+| `ExArrow.Stream`             | `from_parquet/1`, `from_ipc/1`, `from_flight/2`, `from_flight_sql/2`, `from_adbc/1,2` constructors with source tracking and telemetry |
+| `ExArrow.Batch`              | Lightweight RecordBatch transforms: `schema/1`, `select/2`, `drop/2`, `rename/2`, `take/2`, `filter/2` |
+| `ExArrow.Pipeline`           | Lazy pipeline DSL: `map_batches/2`, `each_batch/2`, `write_parquet/2`, `write_flight/3`, `write_dataframe/1` |
+| `ExArrow.Flow`               | Arrow-native Flow execution: `from_batches/1`, `map_batches/2`, `each_batch/2` |
+| `ExArrow.GenStage`           | Demand-driven producers: `ParquetProducer`, `FlightProducer`, `ADBCProducer` |
+| `ExArrow.Broadway`           | Ingestion pipelines: `BatchBuilder`, `ParquetSink`, `FlightSink` |
+| `ExArrow.Sink.Parquet`       | Write a stream to a Parquet file                                  |
+| `ExArrow.Sink.Flight`        | Upload a stream to a Flight server                                |
+| `ExArrow.Sink.DataFrame`     | Convert a stream to an Explorer DataFrame                         |
+| `ExArrow.Sink.Nx`            | Convert a batch to an Nx tensor                                   |
+| `ExArrow.Telemetry`          | Telemetry events for every transport and pipeline operation       |
+
+### Optional dependencies added
+
+```elixir
+{:telemetry, "~> 1.0", optional: true},
+{:flow, "~> 1.2", optional: true},
+{:gen_stage, "~> 1.2", optional: true},
+{:broadway, "~> 1.0", optional: true}
+```
+
+All degrade gracefully when absent — `ExArrow.Telemetry.execute/3` is a no-op
+without `:telemetry`, the Flow/GenStage/Broadway modules return
+`{:error, "..."}` without their respective deps.
+
+### Telemetry events
+
+`[:ex_arrow, :flight, :query]`, `[:ex_arrow, :flight_sql, :query]`,
+`[:ex_arrow, :parquet, :read]`, `[:ex_arrow, :parquet, :write]`,
+`[:ex_arrow, :stream, :batch]`, `[:ex_arrow, :pipeline, :batch]`.  See
+`ExArrow.Telemetry` for measurements and metadata.
+
+### New guides
+
+- [06 Arrow streams](guides/06_arrow_streams.md)
+- [07 Arrow and Flow](guides/07_arrow_and_flow.md)
+- [08 Arrow and GenStage](guides/08_arrow_and_genstage.md)
+- [09 Arrow and Broadway](guides/09_arrow_and_broadway.md)
+- [10 Arrow pipeline patterns](guides/10_arrow_pipeline_patterns.md)
+
+### New benchmarks
+
+- `bench/v070_stream_flow_pipeline_bench.exs` — Parquet/IPC stream drains,
+  Flow execution, Pipeline `map_batches` + `write_parquet` at 1K/100K/1M rows.
+- `bench/v070_record_batch_vs_maps_bench.exs` — Arrow `RecordBatch` vs
+  `list(map())` for build, transform, and drain.
+
+### Stats
+
+825 tests, 16 properties, 89.9% coverage.  `mix format`, `mix credo --strict`,
+`mix dialyzer`, `mix sobelow`, `mix docs --warnings-as-errors` all pass.
+
+---
+
 ## Livebook tutorials
 
 Interactive notebooks (open in [Livebook](https://livebook.dev)):
@@ -292,7 +395,7 @@ Interactive notebooks (open in [Livebook](https://livebook.dev)):
 - **[03 ADBC](livebook/03_adbc.livemd)** — Database, Connection, Statement, Stream (`:adbc_package` in Livebook).
 - **[04 ADBC integration](livebook/04_adbc_integration.livemd)** — Connection pooling with NimblePool.
 
-See [livebook/README.md](livebook/README.md) for run instructions.  Notebooks use Hex `~> 0.6.3` by default; opening from `livebook/` in a clone builds from source.
+See [livebook/README.md](livebook/README.md) for run instructions.  Notebooks use Hex `~> 0.7.0` by default; opening from `livebook/` in a clone builds from source.
 
 ---
 
@@ -637,6 +740,78 @@ All operations run entirely in native memory. Results are new
 
 ---
 
+## Batch operations
+
+`ExArrow.Batch` (v0.7.0) provides lightweight `RecordBatch` transforms that
+stay in native Arrow memory.  It is not a dataframe — use Explorer for
+analytics.  All functions return `{:ok, batch} | {:error, message}`.
+
+```elixir
+# Project a subset of columns (works for every Arrow type)
+{:ok, slim} = ExArrow.Batch.select(batch, ["id", "score"])
+
+# Drop columns
+{:ok, rest} = ExArrow.Batch.drop(batch, ["internal_flag"])
+
+# Rename columns (numeric/boolean columns; utf8 not supported by buffer extract)
+{:ok, renamed} = ExArrow.Batch.rename(batch, %{"id" => "user_id"})
+
+# Take rows: first N, or a list of zero-based indices
+{:ok, first10} = ExArrow.Batch.take(batch, 10)
+{:ok, picked}  = ExArrow.Batch.take(batch, [0, 2, 4])
+
+# Filter rows with a boolean predicate batch
+{:ok, mask}     = ExArrow.Compute.project(batch, ["is_active"])
+{:ok, filtered} = ExArrow.Batch.filter(batch, mask)
+```
+
+---
+
+## Streaming pipelines
+
+`ExArrow.Pipeline` (v0.7.0) is a thin, lazy abstraction for transforming and
+sinking Arrow streams.  Pipelines compose with `|>/2` and short-circuit on
+error.
+
+```elixir
+ExArrow.Stream.from_flight_sql(client, "SELECT * FROM events")
+|> ExArrow.Pipeline.map_batches(fn batch ->
+  {:ok, slim} = ExArrow.Batch.select(batch, ["id", "ts", "amount"])
+  slim
+end)
+|> ExArrow.Pipeline.each_batch(fn batch ->
+  IO.puts("processed #{ExArrow.RecordBatch.num_rows(batch)} rows")
+end)
+|> ExArrow.Pipeline.write_parquet("/data/events_slim.parquet")
+```
+
+Sinks: `write_parquet/2`, `write_flight/3`, `write_dataframe/1`.
+
+### Sinks
+
+`ExArrow.Sink.*` modules provide the same destinations with a stream-or-batch
+input shape, for use outside the Pipeline DSL:
+
+```elixir
+:ok = ExArrow.Sink.Parquet.write(stream, "/data/out.parquet")
+:ok = ExArrow.Sink.Flight.write(stream, client, descriptor: {:cmd, "events"})
+{:ok, df} = ExArrow.Sink.DataFrame.write(stream)
+```
+
+### Flow, GenStage, Broadway
+
+For parallel or demand-driven workloads, drop down to the integration layers:
+
+- **`ExArrow.Flow`** — parallel batch processing via the Flow library.
+- **`ExArrow.GenStage.{Parquet,Flight,ADBC}Producer`** — demand-driven
+  producers with backpressure for long-running pipelines.
+- **`ExArrow.Broadway`** — ingestion pipelines with `BatchBuilder`,
+  `ParquetSink`, and `FlightSink`.
+
+See the [guides](#documentation) for full examples and tradeoffs.
+
+---
+
 ## Using ExArrow with Explorer
 
 [Explorer](https://hex.pm/packages/explorer) handles in-memory analysis.
@@ -854,6 +1029,8 @@ HTML reports are written to `bench/output/` (gitignored).
 | `pipeline_bench.exs`       | End-to-end: IPC file on disk to Flight doput without materialising in BEAM     |
 | `explorer_arrow_bench.exs` | Explorer <-> Arrow interchange at 1K/100K/1M rows                             |
 | `nx_arrow_bench.exs`       | Nx <-> Arrow interchange at 1K/100K/1M rows (rank-1 and rank-2)              |
+| `v070_stream_flow_pipeline_bench.exs` | Parquet/IPC stream drains, Flow execution, Pipeline map_batches + write_parquet at 1K/100K/1M rows (v0.7.0) |
+| `v070_record_batch_vs_maps_bench.exs` | Arrow `RecordBatch` vs `list(map())` for build, transform, and drain at 1K/100K/1M rows (v0.7.0) |
 
 
 ### Published results
@@ -872,6 +1049,11 @@ The CI workflow posts a PR alert comment when any scenario regresses more than
 - [Explorer Integration](guides/02_explorer_integration.md) — from_dataframe, to_dataframe, type mapping, limitations
 - [Nx Integration](guides/03_nx_integration.md) — from_nx, to_nx, boolean tensors, rank-2
 - [Arrow Ecosystem](guides/04_arrow_ecosystem.md) — how ExArrow complements Explorer, Nx, ADBC, Flight, Parquet, ExZarr
+- [Arrow Streams](guides/06_arrow_streams.md) — the v0.7.0 streaming abstraction, constructors, consumption patterns
+- [Arrow and Flow](guides/07_arrow_and_flow.md) — parallel batch processing with `ExArrow.Flow`
+- [Arrow and GenStage](guides/08_arrow_and_genstage.md) — demand-driven producers with backpressure
+- [Arrow and Broadway](guides/09_arrow_and_broadway.md) — ingestion pipelines with `BatchBuilder` and sinks
+- [Arrow Pipeline Patterns](guides/10_arrow_pipeline_patterns.md) — composable `ExArrow.Pipeline` transforms and sinks
 - [Memory model](docs/memory_model.md) — handles, copying rules, NIF scheduling
 - [IPC guide](docs/ipc_guide.md) — stream vs file, types, limitations
 - [Parquet guide](docs/parquet_guide.md) — read/write Parquet, streaming, comparison with IPC
@@ -987,11 +1169,34 @@ welcome for any of them.
   data (names, binaries, dtype strings, row count).  21 dtypes including
   timestamps, durations, utf8, and binary columns.
 
+### Shipped (v0.7.0)
+
+- **First-class streaming** — `ExArrow.Stream.from_parquet/1`,
+  `from_ipc/1`, `from_flight/2`, `from_flight_sql/2`, `from_adbc/1,2`
+  constructors with source tracking and telemetry.  The unit of streaming is
+  the Arrow `RecordBatch`.
+- **Batch operations** — `ExArrow.Batch`: `schema/1`, `select/2`, `drop/2`,
+  `rename/2`, `take/2`, `filter/2`.  Lightweight, Arrow-native transforms.
+- **Pipeline DSL** — `ExArrow.Pipeline`: `map_batches/2`, `each_batch/2`,
+  `write_parquet/2`, `write_flight/3`, `write_dataframe/1`.  Lazy; composes
+  with `|>/2`; errors short-circuit.
+- **Flow integration** — `ExArrow.Flow.from_batches/1`, `map_batches/2`,
+  `each_batch/2` for parallel batch processing.
+- **GenStage integration** — `ExArrow.GenStage.ParquetProducer`,
+  `FlightProducer`, `ADBCProducer` with demand-driven backpressure.
+- **Broadway integration** — `ExArrow.Broadway.BatchBuilder`,
+  `ParquetSink`, `FlightSink` for ingestion pipelines.
+- **Pipeline sinks** — `ExArrow.Sink.Parquet`, `Flight`, `DataFrame`, `Nx`.
+- **Telemetry** — `ExArrow.Telemetry` with events for every transport and
+  pipeline operation.  Optional `:telemetry` dep.
+- **Benchmarks** — stream/Flow/pipeline and RecordBatch vs `list(map())` at
+  1K/100K/1M rows.
+- **Educational guides** — `guides/06..10` covering streams, Flow, GenStage,
+  Broadway, and pipeline patterns.
+
 ### Longer-term
 
 - **Streaming writes to Delta Lake** — sink for data pipeline nodes.
-- **OTel / telemetry integration** — `:telemetry` events for IPC read/write
-  throughput, Flight request latency, and ADBC query duration.
 - **Windows aarch64 precompiled NIF** — once GitHub-hosted Windows arm64
   runners are generally available.
 

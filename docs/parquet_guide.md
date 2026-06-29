@@ -5,6 +5,12 @@ ExArrow supports reading and writing Apache Parquet files via the Arrow Rust
 get the same `ExArrow.Stream` interface on the read side and the same
 schema + batches pattern on the write side.
 
+> **v0.7.0**: `ExArrow.Stream.from_parquet/1` and
+> `from_parquet_binary/1` are the preferred entry points — they tag the
+> stream with `source` metadata and emit `[:ex_arrow, :parquet, :read]`
+> telemetry.  `ExArrow.Parquet.Reader.from_file/1` and `from_binary/1`
+> continue to work unchanged.
+
 ---
 
 ## Reading

@@ -3,7 +3,26 @@
 The main overview, installation, quick start, and usage examples live in the
 [README on GitHub](https://github.com/thanos/ex_arrow/blob/main/README.md).
 
-This doc set covers:
+## What's changed in v0.7.0
+
+v0.7.0 adds Arrow-native streaming and pipeline infrastructure.  The unit of
+execution is the Arrow `RecordBatch` — not `list(map())`, not
+`Explorer.DataFrame`, not `Nx.Tensor`.  Explorer and Nx remain downstream
+consumers; ExArrow is the Arrow layer.
+
+New modules: `ExArrow.Stream` (constructors), `ExArrow.Batch` (transforms),
+`ExArrow.Pipeline` (DSL), `ExArrow.Flow`, `ExArrow.GenStage.*Producer`,
+`ExArrow.Broadway` (`BatchBuilder`, `ParquetSink`, `FlightSink`),
+`ExArrow.Sink.*`, and `ExArrow.Telemetry`.  Optional deps added:
+`:telemetry`, `:flow`, `:gen_stage`, `:broadway`.
+
+New guides: [06 Arrow streams](06_arrow_streams.md),
+[07 Arrow and Flow](07_arrow_and_flow.md),
+[08 Arrow and GenStage](08_arrow_and_genstage.md),
+[09 Arrow and Broadway](09_arrow_and_broadway.md),
+[10 Arrow pipeline patterns](10_arrow_pipeline_patterns.md).
+
+## Doc set
 
 | Topic | Guide |
 |-------|--------|
@@ -30,5 +49,9 @@ This doc set covers:
 | `ExArrow.ADBC.ConnectionPool` | `{:nimble_pool, "~> 1.1"}` | NimblePool-backed connection pool for ADBC databases |
 | `:adbc_package` backend | `{:adbc, "~> 0.9"}` + `{:explorer, "~> 0.11"}` | Supervised pure-Elixir ADBC backend; `Database.open(:adbc_package)` |
 | ADBC driver download | `{:adbc, "~> 0.9"}` | `ExArrow.ADBC.DriverHelper.ensure_driver_and_open/2` |
+| `ExArrow.Telemetry` | `{:telemetry, "~> 1.0"}` | Emit and observe telemetry events for every transport and pipeline operation |
+| `ExArrow.Flow` | `{:flow, "~> 1.2"}` | Arrow-native Flow execution: `from_batches/1`, `map_batches/2`, `each_batch/2` |
+| `ExArrow.GenStage.*Producer` | `{:gen_stage, "~> 1.2"}` | Demand-driven producers: `ParquetProducer`, `FlightProducer`, `ADBCProducer` |
+| `ExArrow.Broadway` | `{:broadway, "~> 1.0"}` | Ingestion pipelines: `BatchBuilder`, `ParquetSink`, `FlightSink` |
 
 API reference: `mix docs` or [Hex Docs](https://hexdocs.pm/ex_arrow).
