@@ -473,6 +473,25 @@ defmodule ExArrow.StreamConstructorsTest do
 
       :telemetry.detach({:ex_arrow_parquet_read, ref})
     end
+
+    test "from_parquet/1 does NOT emit telemetry on error" do
+      ref = make_ref()
+
+      :telemetry.attach(
+        {:ex_arrow_parquet_read_err, ref},
+        [:ex_arrow, :parquet, :read],
+        fn _event, _measurements, _metadata, config ->
+          send(config[:pid], :parquet_read_event)
+        end,
+        %{pid: self()}
+      )
+
+      Stream.from_parquet("/nonexistent_#{:erlang.unique_integer([:positive])}.parquet")
+
+      refute_received :parquet_read_event, 100
+
+      :telemetry.detach({:ex_arrow_parquet_read_err, ref})
+    end
   end
 
   describe "schema preservation through constructors" do

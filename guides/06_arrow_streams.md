@@ -51,10 +51,15 @@ gives you explicit control over error handling.
 
     {:ok, stream} = ExArrow.Stream.from_parquet("/data/events.parquet")
 
-    stream
-    |> Stream.iterate(&ExArrow.Stream.next/1)
-    |> Enum.take_while(&(&1 != nil))
-    |> Enum.each(fn batch ->
+    loop = fn s, f ->
+      case ExArrow.Stream.next(s) do
+        nil -> :done
+        {:error, reason} -> {:error, reason}
+        batch -> f.(batch); loop.(s, f)
+      end
+    end
+
+    loop.(stream, fn batch ->
       IO.puts("rows: #{ExArrow.RecordBatch.num_rows(batch)}")
     end)
 

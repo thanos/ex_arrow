@@ -101,7 +101,7 @@ project, filter, or sort within a stage.
 
     stream
     |> ExArrow.Flow.from_batches()
-    |> Flow.partition(key: fn batch -> ExArrow.Batch.column_names(batch) end)
+    |> Flow.partition(key: fn batch -> ExArrow.RecordBatch.column_names(batch) end)
     |> Flow.reduce(fn -> %{} end, fn batch, acc ->
       # merge batch into acc keyed by user_id
       Map.merge(acc, summarise(batch), fn _k, a, b -> a + b end)

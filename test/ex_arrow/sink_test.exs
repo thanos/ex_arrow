@@ -1,35 +1,13 @@
 defmodule ExArrow.SinkTest do
   use ExUnit.Case, async: false
 
+  import ExArrow.TestFixtures
   alias ExArrow.RecordBatch
   alias ExArrow.Sink.DataFrame
   alias ExArrow.Sink.Flight
   alias ExArrow.Sink.Parquet
   # NOTE: do not alias ExArrow.Sink.Nx as `Nx` — bare `Nx` must resolve to the
   # Nx library so Nx.shape/Nx.to_number work in assertions.
-
-  defp s64_batch(values, name \\ "v") do
-    n = length(values)
-
-    bin =
-      values
-      |> Enum.map(&<<&1::little-signed-64>>)
-      |> IO.iodata_to_binary()
-
-    {:ok, batch} = RecordBatch.from_columns([name], [bin], ["s64"], n)
-    batch
-  end
-
-  defp ipc_stream(num_batches) do
-    {:ok, fixture} = ExArrow.Native.ipc_test_fixture_binary()
-    {:ok, reader} = ExArrow.Native.ipc_reader_from_binary(fixture)
-    schema_ref = ExArrow.Native.ipc_stream_schema(reader)
-    {:ok, batch_ref} = ExArrow.Native.ipc_stream_next(reader)
-    batch_refs = for _ <- 1..num_batches, do: batch_ref
-    {:ok, ipc_bin} = ExArrow.Native.ipc_writer_to_binary(schema_ref, batch_refs)
-    {:ok, stream} = ExArrow.IPC.Reader.from_binary(ipc_bin)
-    stream
-  end
 
   describe "Parquet.write/2" do
     @tag :tmp_dir
@@ -92,6 +70,17 @@ defmodule ExArrow.SinkTest do
 
       assert_received {:sink_pq, %{destination: ^path, source: :sink}}
       :telemetry.detach({:ex_arrow_sink_pq, ref})
+    end
+
+    test "returns error for {schema, batches} where batches is not a list" do
+      schema = ExArrow.Schema.from_ref(make_ref())
+      assert {:error, msg} = Parquet.write({schema, :not_a_list}, "/tmp/x.parquet")
+      assert msg =~ "expected {schema, [batches]}"
+    end
+
+    test "returns error for unsupported source type" do
+      assert {:error, msg} = Parquet.write(:atom_source, "/tmp/x.parquet")
+      assert msg =~ "unsupported source"
     end
   end
 

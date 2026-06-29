@@ -72,6 +72,14 @@ defmodule ExArrow.Broadway do
         end
       end
   """
+
+  @broadway_available Code.ensure_loaded?(Broadway)
+
+  @doc """
+  Returns `true` if the `:broadway` dependency is loaded.
+  """
+  @spec broadway_available?() :: boolean()
+  def broadway_available?, do: @broadway_available
 end
 
 defmodule ExArrow.Broadway.BatchBuilder do
@@ -107,13 +115,13 @@ defmodule ExArrow.Broadway.BatchBuilder do
 
   Returns `{:ok, schema, [batch, ...]}` or `{:error, message}`.
   """
-  @spec from_messages([Broadway.Message.t()]) ::
+  @spec from_messages([term()]) ::
           {:ok, ExArrow.Schema.t(), [RecordBatch.t()]} | {:error, String.t()}
   def from_messages(messages) when is_list(messages) do
     from_messages(messages, [])
   end
 
-  @spec from_messages([Broadway.Message.t()], keyword()) ::
+  @spec from_messages([term()], keyword()) ::
           {:ok, ExArrow.Schema.t(), [RecordBatch.t()]} | {:error, String.t()}
   def from_messages(messages, opts) when is_list(messages) and is_list(opts) do
     with {:ok, batches} <- extract_batches(messages) do
@@ -134,7 +142,7 @@ defmodule ExArrow.Broadway.BatchBuilder do
 
   Returns `{:ok, [batch, ...]}` or `{:error, message}`.
   """
-  @spec extract_batches([Broadway.Message.t()]) ::
+  @spec extract_batches([term()]) ::
           {:ok, [RecordBatch.t()]} | {:error, String.t()}
   def extract_batches(messages) when is_list(messages) do
     reduce_result =
@@ -181,8 +189,7 @@ defmodule ExArrow.Broadway.ParquetSink do
   writer's chunking).
 
   Emits a `[:ex_arrow, :parquet, :write]` telemetry event with `:rows`,
-  `:batch_count`, `:bytes` (when available), and `%{destination: path, source:
-  :broadway}` metadata.
+  `:batch_count`, and `%{destination: path, source: :broadway}` metadata.
 
   ## Example
 

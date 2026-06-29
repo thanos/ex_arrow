@@ -2,21 +2,9 @@ defmodule ExArrow.BatchPropertyTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
+  import ExArrow.TestFixtures
   alias ExArrow.Batch
   alias ExArrow.RecordBatch
-
-  # Build an s64 batch with `n` rows and a single column "v".
-  defp s64_batch(values) do
-    n = length(values)
-
-    bin =
-      values
-      |> Enum.map(&<<&1::little-signed-64>>)
-      |> IO.iodata_to_binary()
-
-    {:ok, batch} = RecordBatch.from_columns(["v"], [bin], ["s64"], n)
-    batch
-  end
 
   defp s64_column(batch, name) do
     ref = RecordBatch.resource_ref(batch)

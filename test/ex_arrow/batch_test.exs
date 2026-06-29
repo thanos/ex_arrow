@@ -101,6 +101,20 @@ defmodule ExArrow.BatchTest do
       assert RecordBatch.num_columns(rest) == 0
       assert RecordBatch.num_rows(rest) == 1
     end
+
+    @tag :nif
+    test "returns an error for an unknown column name" do
+      batch = two_col_batch([1], ["a"])
+      assert {:error, msg} = Batch.drop(batch, ["no_such_column"])
+      assert msg =~ "no_such_column"
+    end
+
+    @tag :nif
+    test "returns an error when one of several columns is unknown" do
+      batch = two_col_batch([1], ["a"])
+      assert {:error, msg} = Batch.drop(batch, ["id", "no_such_column"])
+      assert msg =~ "no_such_column"
+    end
   end
 
   describe "rename/2" do

@@ -16,7 +16,8 @@ New modules: `ExArrow.Stream` (constructors), `ExArrow.Batch` (transforms),
 `ExArrow.Sink.*`, and `ExArrow.Telemetry`.  Optional deps added:
 `:telemetry`, `:flow`, `:gen_stage`, `:broadway`.
 
-New guides: [06 Arrow streams](06_arrow_streams.md),
+New guides: [05 Arrow pipelines overview](05_arrow_pipelines_overview.md),
+[06 Arrow streams](06_arrow_streams.md),
 [07 Arrow and Flow](07_arrow_and_flow.md),
 [08 Arrow and GenStage](08_arrow_and_genstage.md),
 [09 Arrow and Broadway](09_arrow_and_broadway.md),

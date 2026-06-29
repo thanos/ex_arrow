@@ -80,7 +80,7 @@ defmodule ExArrow.Stream do
   def stream?(%__MODULE__{}), do: true
   def stream?(_), do: false
 
-  # ── Source constructors (Milestone 1) ───────────────────────────────────────
+  # Source constructors
 
   @doc """
   Open an Arrow IPC stream from an in-memory `binary`.
@@ -118,7 +118,8 @@ defmodule ExArrow.Stream do
 
   Delegates to `ExArrow.Parquet.Reader.from_file/1`, tags the stream with
   `source: {:parquet, path}`, and emits a `[:ex_arrow, :parquet, :read]`
-  telemetry event.  Returns `{:ok, stream}` or `{:error, message}`.
+  telemetry event on successful open.  Returns `{:ok, stream}` or
+  `{:error, message}`.
 
   ## Example
 
@@ -126,9 +127,8 @@ defmodule ExArrow.Stream do
   """
   @spec from_parquet(Path.t()) :: {:ok, t()} | {:error, String.t()}
   def from_parquet(path) when is_binary(path) do
-    ExArrow.Telemetry.execute([:ex_arrow, :parquet, :read], %{}, %{source: path})
-
     with {:ok, stream} <- ExArrow.Parquet.Reader.from_file(path) do
+      ExArrow.Telemetry.execute([:ex_arrow, :parquet, :read], %{}, %{source: path})
       {:ok, %{stream | source: {:parquet, path}}}
     end
   end
@@ -137,13 +137,13 @@ defmodule ExArrow.Stream do
   Open a Parquet stream from an in-memory `binary`.
 
   Delegates to `ExArrow.Parquet.Reader.from_binary/1` and emits a
-  `[:ex_arrow, :parquet, :read]` telemetry event with `source: :binary`.
+  `[:ex_arrow, :parquet, :read]` telemetry event on successful open with
+  `source: :binary`.
   """
   @spec from_parquet_binary(binary()) :: {:ok, t()} | {:error, String.t()}
   def from_parquet_binary(binary) when is_binary(binary) do
-    ExArrow.Telemetry.execute([:ex_arrow, :parquet, :read], %{}, %{source: :binary})
-
     with {:ok, stream} <- ExArrow.Parquet.Reader.from_binary(binary) do
+      ExArrow.Telemetry.execute([:ex_arrow, :parquet, :read], %{}, %{source: :binary})
       {:ok, %{stream | source: {:parquet, :binary}}}
     end
   end
@@ -153,8 +153,8 @@ defmodule ExArrow.Stream do
   batches.
 
   Delegates to `ExArrow.Flight.Client.do_get/2` and emits a
-  `[:ex_arrow, :flight, :query]` telemetry event.  The stream is tagged with
-  `source: {:flight, ticket}`.
+  `[:ex_arrow, :flight, :query]` telemetry event on success.  The stream is
+  tagged with `source: {:flight, ticket}`.
 
   ## Example
 
@@ -163,9 +163,8 @@ defmodule ExArrow.Stream do
   @spec from_flight(ExArrow.Flight.Client.t(), term()) ::
           {:ok, t()} | {:error, term()}
   def from_flight(client, ticket) do
-    ExArrow.Telemetry.execute([:ex_arrow, :flight, :query], %{}, %{source: ticket})
-
     with {:ok, stream} <- ExArrow.Flight.Client.do_get(client, ticket) do
+      ExArrow.Telemetry.execute([:ex_arrow, :flight, :query], %{}, %{source: ticket})
       {:ok, %{stream | source: {:flight, ticket}}}
     end
   end
@@ -175,8 +174,8 @@ defmodule ExArrow.Stream do
   record batches.
 
   Delegates to `ExArrow.FlightSQL.Client.stream_query/2`, emits a
-  `[:ex_arrow, :flight_sql, :query]` telemetry event, and tags the stream with
-  `source: {:flight_sql, sql}`.
+  `[:ex_arrow, :flight_sql, :query]` telemetry event on success, and tags the
+  stream with `source: {:flight_sql, sql}`.
 
   ## Example
 
@@ -187,9 +186,8 @@ defmodule ExArrow.Stream do
   # sobelow_skip ["SQL.Query"]
   # False positive: SQL is forwarded to a remote Flight SQL server over gRPC.
   def from_flight_sql(client, sql) when is_binary(sql) do
-    ExArrow.Telemetry.execute([:ex_arrow, :flight_sql, :query], %{}, %{source: sql})
-
     with {:ok, stream} <- ExArrow.FlightSQL.Client.stream_query(client, sql) do
+      ExArrow.Telemetry.execute([:ex_arrow, :flight_sql, :query], %{}, %{source: sql})
       {:ok, %{stream | source: {:flight_sql, sql}}}
     end
   end

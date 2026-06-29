@@ -1,24 +1,10 @@
 defmodule ExArrow.GenStageTest do
   use ExUnit.Case, async: true
 
+  import ExArrow.TestFixtures
   alias ExArrow.GenStage.ADBCProducer
   alias ExArrow.GenStage.FlightProducer
   alias ExArrow.GenStage.ParquetProducer
-
-  # ── Helpers ─────────────────────────────────────────────────────────────────
-
-  # Build a multi-batch IPC stream (IPC preserves batch count, unlike Parquet
-  # which merges batches into a single row group).
-  defp ipc_stream(num_batches) do
-    {:ok, fixture} = ExArrow.Native.ipc_test_fixture_binary()
-    {:ok, reader} = ExArrow.Native.ipc_reader_from_binary(fixture)
-    schema_ref = ExArrow.Native.ipc_stream_schema(reader)
-    {:ok, batch_ref} = ExArrow.Native.ipc_stream_next(reader)
-    batch_refs = for _ <- 1..num_batches, do: batch_ref
-    {:ok, ipc_bin} = ExArrow.Native.ipc_writer_to_binary(schema_ref, batch_refs)
-    {:ok, stream} = ExArrow.Stream.from_ipc(ipc_bin)
-    stream
-  end
 
   # A single-batch Parquet binary (Parquet merges input batches into one row
   # group, so multi-batch input still yields one batch on read).
@@ -96,7 +82,7 @@ defmodule ExArrow.GenStageTest do
     end
   end
 
-  # ── ParquetProducer ──────────────────────────────────────────────────────────
+  # # ── ParquetProducer ──────────────────────────────────────────────────────────
 
   describe "ParquetProducer" do
     @tag :nif
@@ -154,9 +140,36 @@ defmodule ExArrow.GenStageTest do
       assert {:error, msg} = ParquetProducer.start_link([])
       assert msg =~ "requires one of"
     end
+
+    @tag :nif
+    test ":stream option with nil source falls back to :parquet label" do
+      {:ok, stream} = ExArrow.Stream.from_ipc(ipc_binary(1))
+      # Force source to nil by constructing a stream without source metadata
+      nil_source_stream = %{stream | source: nil}
+      {:ok, producer} = ParquetProducer.start_link(stream: nil_source_stream)
+
+      telem_ref = make_ref()
+
+      :telemetry.attach(
+        {:ex_arrow_gs_nil, telem_ref},
+        [:ex_arrow, :stream, :batch],
+        fn _event, _measurements, metadata, config ->
+          send(config[:pid], {:nil_source_telem, metadata[:source]})
+        end,
+        %{pid: self()}
+      )
+
+      {:ok, consumer} = Collector.start_link(self())
+      GenStage.sync_subscribe(consumer, to: producer, max_demand: 10)
+      collect_all()
+
+      assert_received {:nil_source_telem, :parquet}
+
+      :telemetry.detach({:ex_arrow_gs_nil, telem_ref})
+    end
   end
 
-  # ── FlightProducer ───────────────────────────────────────────────────────────
+  # # ── FlightProducer ───────────────────────────────────────────────────────────
 
   describe "FlightProducer" do
     @tag :nif
@@ -176,7 +189,7 @@ defmodule ExArrow.GenStageTest do
     end
   end
 
-  # ── ADBCProducer ─────────────────────────────────────────────────────────────
+  # # ── ADBCProducer ─────────────────────────────────────────────────────────────
 
   describe "ADBCProducer" do
     @tag :nif
@@ -196,7 +209,7 @@ defmodule ExArrow.GenStageTest do
     end
   end
 
-  # ── Producer-consumer pattern ────────────────────────────────────────────────
+  # # ── Producer-consumer pattern ────────────────────────────────────────────────
 
   describe "producer-consumer pattern" do
     @tag :nif
@@ -212,6 +225,24 @@ defmodule ExArrow.GenStageTest do
 
       # Each transformed batch has exactly one column.
       assert Enum.all?(batches, fn b -> ExArrow.RecordBatch.num_columns(b) == 1 end)
+    end
+  end
+
+  describe "dispatch/2 state preservation" do
+    test "done: true branch preserves source and other state fields" do
+      alias ExArrow.GenStage.State
+
+      state = %State{
+        stream: nil,
+        source: {:parquet, "/data/test.parquet"},
+        demand: 5,
+        done: true
+      }
+
+      {:noreply, [], returned_state} = ExArrow.GenStage.dispatch(state, 10)
+
+      assert returned_state.source == {:parquet, "/data/test.parquet"}
+      assert returned_state.done == true
     end
   end
 end

@@ -365,6 +365,7 @@ without `:telemetry`, the Flow/GenStage/Broadway modules return
 
 ### New guides
 
+- [05 Arrow pipelines overview](guides/05_arrow_pipelines_overview.md)
 - [06 Arrow streams](guides/06_arrow_streams.md)
 - [07 Arrow and Flow](guides/07_arrow_and_flow.md)
 - [08 Arrow and GenStage](guides/08_arrow_and_genstage.md)
@@ -1049,6 +1050,7 @@ The CI workflow posts a PR alert comment when any scenario regresses more than
 - [Explorer Integration](guides/02_explorer_integration.md) — from_dataframe, to_dataframe, type mapping, limitations
 - [Nx Integration](guides/03_nx_integration.md) — from_nx, to_nx, boolean tensors, rank-2
 - [Arrow Ecosystem](guides/04_arrow_ecosystem.md) — how ExArrow complements Explorer, Nx, ADBC, Flight, Parquet, ExZarr
+- [Arrow Pipelines Overview](guides/05_arrow_pipelines_overview.md) — orientation to the v0.7.0 pipeline modules
 - [Arrow Streams](guides/06_arrow_streams.md) — the v0.7.0 streaming abstraction, constructors, consumption patterns
 - [Arrow and Flow](guides/07_arrow_and_flow.md) — parallel batch processing with `ExArrow.Flow`
 - [Arrow and GenStage](guides/08_arrow_and_genstage.md) — demand-driven producers with backpressure

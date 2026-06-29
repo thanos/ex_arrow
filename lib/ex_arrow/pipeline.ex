@@ -112,6 +112,14 @@ defmodule ExArrow.Pipeline do
   Triggers evaluation of all upstream stages.  Emits a
   `[:ex_arrow, :parquet, :write]` telemetry event.  Returns `:ok` or
   `{:error, message}`.
+
+  > #### Memory {: .warning}
+  > This sink materialises all batches into a BEAM list before writing.
+  > For very large streams this can be a memory concern.  The underlying
+  > `ExArrow.Parquet.Writer.to_file/3` currently requires a list; a
+  > streaming write path may be added in a future release.  For datasets
+  > that do not fit in memory, iterate with `ExArrow.Stream.next/1` and
+  > write batches incrementally.
   """
   @spec write_parquet(threaded(), Path.t()) :: :ok | {:error, String.t()}
   def write_parquet(threaded, path) when is_binary(path) do
@@ -136,6 +144,10 @@ defmodule ExArrow.Pipeline do
   `opts` are forwarded to `ExArrow.Flight.Client.do_put/4`.  Emits a
   `[:ex_arrow, :flight, :query]` telemetry event.  Returns `:ok` or
   `{:error, reason}`.
+
+  > #### Memory {: .warning}
+  > This sink materialises all batches into a BEAM list before uploading.
+  > See `write_parquet/2` for details and alternatives.
   """
   @spec write_flight(threaded(), ExArrow.Flight.Client.t(), keyword()) ::
           :ok | {:error, term()}
@@ -164,6 +176,10 @@ defmodule ExArrow.Pipeline do
 
   Requires the optional `{:explorer, "~> 0.11"}` dependency.  Returns
   `{:ok, dataframe}` or `{:error, message}`.
+
+  > #### Memory {: .warning}
+  > This sink materialises all batches into a BEAM list before conversion.
+  > See `write_parquet/2` for details and alternatives.
   """
   @spec write_dataframe(threaded()) ::
           {:ok, Explorer.DataFrame.t()} | {:error, String.t()}
@@ -177,7 +193,7 @@ defmodule ExArrow.Pipeline do
     end
   end
 
-  # ── internals ─────────────────────────────────────────────────────────────────
+  # Internals
 
   defp wrap(%__MODULE__{} = pipeline), do: {:ok, pipeline}
 

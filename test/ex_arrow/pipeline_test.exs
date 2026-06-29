@@ -1,37 +1,15 @@
 defmodule ExArrow.PipelineTest do
   use ExUnit.Case, async: false
 
+  import ExArrow.TestFixtures
   alias ExArrow.Batch
   alias ExArrow.Pipeline
   alias ExArrow.RecordBatch
 
-  defp ipc_stream(num_batches) do
-    {:ok, fixture} = ExArrow.Native.ipc_test_fixture_binary()
-    {:ok, reader} = ExArrow.Native.ipc_reader_from_binary(fixture)
-    schema_ref = ExArrow.Native.ipc_stream_schema(reader)
-    {:ok, batch_ref} = ExArrow.Native.ipc_stream_next(reader)
-    batch_refs = for _ <- 1..num_batches, do: batch_ref
-    {:ok, ipc_bin} = ExArrow.Native.ipc_writer_to_binary(schema_ref, batch_refs)
-    {:ok, stream} = ExArrow.IPC.Reader.from_binary(ipc_bin)
-    stream
-  end
-
-  defp s64_batch(values, name \\ "v") do
-    n = length(values)
-
-    bin =
-      values
-      |> Enum.map(&<<&1::little-signed-64>>)
-      |> IO.iodata_to_binary()
-
-    {:ok, batch} = RecordBatch.from_columns([name], [bin], ["s64"], n)
-    batch
-  end
-
   describe "map_batches/2" do
     @tag :nif
     test "applies a transformation lazily and writes the result" do
-      {:ok, stream} = ExArrow.Stream.from_ipc(build_ipc_bin(3))
+      {:ok, stream} = ExArrow.Stream.from_ipc(ipc_binary(3))
       path = tmp_path("map.parquet")
 
       result =
@@ -60,8 +38,23 @@ defmodule ExArrow.PipelineTest do
     end
 
     @tag :nif
+    test "rejects a fun that returns {:ok, batch} instead of a bare batch" do
+      {:ok, stream} = ExArrow.Stream.from_ipc(ipc_binary(2))
+      path = tmp_path("bad_fun.parquet")
+
+      result =
+        {:ok, stream}
+        |> Pipeline.map_batches(fn b -> ExArrow.Batch.select(b, ["id"]) end)
+        |> Pipeline.write_parquet(path)
+
+      assert {:error, msg} = result
+      assert msg =~ "non-batch"
+      File.rm(path)
+    end
+
+    @tag :nif
     test "emits [:ex_arrow, :pipeline, :batch] telemetry per batch" do
-      {:ok, stream} = ExArrow.Stream.from_ipc(build_ipc_bin(2))
+      {:ok, stream} = ExArrow.Stream.from_ipc(ipc_binary(2))
       path = tmp_path("tel.parquet")
       ref = make_ref()
 
@@ -89,7 +82,7 @@ defmodule ExArrow.PipelineTest do
   describe "each_batch/2" do
     @tag :nif
     test "runs a side effect and preserves batches" do
-      {:ok, stream} = ExArrow.Stream.from_ipc(build_ipc_bin(2))
+      {:ok, stream} = ExArrow.Stream.from_ipc(ipc_binary(2))
       path = tmp_path("each.parquet")
       pid = self()
 
@@ -107,7 +100,7 @@ defmodule ExArrow.PipelineTest do
   describe "write_parquet/2" do
     @tag :nif
     test "writes a stream with no transformations" do
-      {:ok, stream} = ExArrow.Stream.from_ipc(build_ipc_bin(2))
+      {:ok, stream} = ExArrow.Stream.from_ipc(ipc_binary(2))
       path = tmp_path("raw.parquet")
 
       assert :ok = Pipeline.write_parquet({:ok, stream}, path)
@@ -122,7 +115,7 @@ defmodule ExArrow.PipelineTest do
 
     @tag :nif
     test "emits [:ex_arrow, :parquet, :write] telemetry" do
-      {:ok, stream} = ExArrow.Stream.from_ipc(build_ipc_bin(1))
+      {:ok, stream} = ExArrow.Stream.from_ipc(ipc_binary(1))
       path = tmp_path("wt.parquet")
       ref = make_ref()
 
@@ -154,7 +147,7 @@ defmodule ExArrow.PipelineTest do
 
     @tag :nif
     test "uploads the pipeline batches to Flight" do
-      {:ok, stream} = ExArrow.Stream.from_ipc(build_ipc_bin(2))
+      {:ok, stream} = ExArrow.Stream.from_ipc(ipc_binary(2))
       client = %ExArrow.Flight.Client{resource: make_ref()}
 
       ExArrow.Flight.ClientMock
@@ -193,18 +186,6 @@ defmodule ExArrow.PipelineTest do
     test "threads errors" do
       assert {:error, _} = Pipeline.write_dataframe({:error, "boom"})
     end
-  end
-
-  # ── helpers ──────────────────────────────────────────────────────────────────
-
-  defp build_ipc_bin(num_batches) do
-    {:ok, fixture} = ExArrow.Native.ipc_test_fixture_binary()
-    {:ok, reader} = ExArrow.Native.ipc_reader_from_binary(fixture)
-    schema_ref = ExArrow.Native.ipc_stream_schema(reader)
-    {:ok, batch_ref} = ExArrow.Native.ipc_stream_next(reader)
-    batch_refs = for _ <- 1..num_batches, do: batch_ref
-    {:ok, bin} = ExArrow.Native.ipc_writer_to_binary(schema_ref, batch_refs)
-    bin
   end
 
   defp tmp_path(name) do

@@ -1,3 +1,48 @@
+defmodule ExArrow.Sink.Helpers do
+  @moduledoc false
+
+  alias ExArrow.RecordBatch
+  alias ExArrow.Stream
+
+  @spec normalise_source(term(), String.t()) ::
+          {:ok, ExArrow.Schema.t(), [RecordBatch.t()]} | {:error, String.t()}
+  def normalise_source(source, sink_name) do
+    cond do
+      Stream.stream?(source) ->
+        with {:ok, schema} <- Stream.schema(source) do
+          {:ok, schema, Stream.to_list(source)}
+        end
+
+      is_tuple(source) and tuple_size(source) == 2 ->
+        {schema, batches} = source
+
+        if is_list(batches) do
+          {:ok, schema, batches}
+        else
+          {:error, "expected {schema, [batches]}, got: #{inspect(source)}"}
+        end
+
+      is_list(source) ->
+        normalise_list(source, sink_name)
+
+      true ->
+        {:error, "unsupported source for #{sink_name} sink: #{inspect(source)}"}
+    end
+  end
+
+  defp normalise_list([], sink_name) do
+    {:error, "cannot write an empty batch list to #{sink_name}"}
+  end
+
+  defp normalise_list([first | _] = batches, _sink_name) do
+    if RecordBatch.record_batch?(first) do
+      {:ok, RecordBatch.schema(first), batches}
+    else
+      {:error, "expected a list of ExArrow.RecordBatch, got: #{inspect(first)}"}
+    end
+  end
+end
+
 defmodule ExArrow.Sink.Parquet do
   @moduledoc """
   Write an Arrow stream or batch list to a Parquet file.
@@ -15,6 +60,7 @@ defmodule ExArrow.Sink.Parquet do
 
   alias ExArrow.Parquet.Writer
   alias ExArrow.RecordBatch
+  alias ExArrow.Sink.Helpers
   alias ExArrow.Stream
 
   @doc """
@@ -32,7 +78,7 @@ defmodule ExArrow.Sink.Parquet do
   @spec write(Stream.t() | {ExArrow.Schema.t(), [RecordBatch.t()]} | [RecordBatch.t()], Path.t()) ::
           :ok | {:error, String.t()}
   def write(source, path) when is_binary(path) do
-    with {:ok, schema, batches} <- normalise(source) do
+    with {:ok, schema, batches} <- Helpers.normalise_source(source, "Parquet") do
       rows = Enum.sum(Enum.map(batches, &RecordBatch.num_rows/1))
 
       ExArrow.Telemetry.execute(
@@ -42,40 +88,6 @@ defmodule ExArrow.Sink.Parquet do
       )
 
       Writer.to_file(path, schema, batches)
-    end
-  end
-
-  defp normalise(source) do
-    cond do
-      Stream.stream?(source) ->
-        with {:ok, schema} <- Stream.schema(source) do
-          {:ok, schema, Stream.to_list(source)}
-        end
-
-      is_tuple(source) and tuple_size(source) == 2 ->
-        {schema, batches} = source
-
-        if is_list(batches) do
-          {:ok, schema, batches}
-        else
-          {:error, "expected {schema, [batches]}, got: #{inspect(source)}"}
-        end
-
-      is_list(source) ->
-        normalise_list(source)
-
-      true ->
-        {:error, "unsupported source for Parquet sink: #{inspect(source)}"}
-    end
-  end
-
-  defp normalise_list([]), do: {:error, "cannot write an empty batch list to Parquet"}
-
-  defp normalise_list([first | _] = batches) do
-    if RecordBatch.record_batch?(first) do
-      {:ok, RecordBatch.schema(first), batches}
-    else
-      {:error, "expected a list of ExArrow.RecordBatch, got: #{inspect(first)}"}
     end
   end
 end
@@ -96,6 +108,7 @@ defmodule ExArrow.Sink.Flight do
 
   alias ExArrow.Flight.Client
   alias ExArrow.RecordBatch
+  alias ExArrow.Sink.Helpers
   alias ExArrow.Stream
 
   @doc """
@@ -116,43 +129,9 @@ defmodule ExArrow.Sink.Flight do
   def write([], _client, _opts), do: :ok
 
   def write(source, client, opts) do
-    with {:ok, schema, batches} <- normalise_flight(source) do
+    with {:ok, schema, batches} <- Helpers.normalise_source(source, "Flight") do
       emit_flight_telemetry(batches, Keyword.get(opts, :descriptor))
       Client.do_put(client, schema, batches, opts)
-    end
-  end
-
-  defp normalise_flight(source) do
-    cond do
-      Stream.stream?(source) ->
-        with {:ok, schema} <- Stream.schema(source) do
-          {:ok, schema, Stream.to_list(source)}
-        end
-
-      is_tuple(source) and tuple_size(source) == 2 ->
-        {schema, batches} = source
-
-        if is_list(batches) do
-          {:ok, schema, batches}
-        else
-          {:error, "expected {schema, [batches]}, got: #{inspect(source)}"}
-        end
-
-      is_list(source) ->
-        normalise_flight_list(source)
-
-      true ->
-        {:error, "unsupported source for Flight sink: #{inspect(source)}"}
-    end
-  end
-
-  defp normalise_flight_list([]), do: {:error, "cannot upload an empty batch list to Flight"}
-
-  defp normalise_flight_list([first | _] = batches) do
-    if RecordBatch.record_batch?(first) do
-      {:ok, RecordBatch.schema(first), batches}
-    else
-      {:error, "expected a list of ExArrow.RecordBatch, got: #{inspect(first)}"}
     end
   end
 

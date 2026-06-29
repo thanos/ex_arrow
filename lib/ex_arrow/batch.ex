@@ -90,18 +90,21 @@ defmodule ExArrow.Batch do
 
       {:ok, rest} = ExArrow.Batch.drop(batch, ["internal_flag", "debug"])
 
-      # Dropping an unknown column is an error (it is not in the complement).
+      # Dropping an unknown column is an error.
       {:error, _} = ExArrow.Batch.drop(batch, ["no_such_column"])
   """
   @spec drop(RecordBatch.t(), [String.t()]) ::
           {:ok, RecordBatch.t()} | {:error, String.t()}
   def drop(batch, columns) when is_list(columns) do
-    keep =
-      batch
-      |> RecordBatch.column_names()
-      |> Enum.reject(&(&1 in columns))
+    existing = RecordBatch.column_names(batch)
+    unknown = Enum.reject(columns, &(&1 in existing))
 
-    Compute.project(batch, keep)
+    if unknown != [] do
+      {:error, "unknown column(s) for drop: #{inspect(unknown)}"}
+    else
+      keep = Enum.reject(existing, &(&1 in columns))
+      Compute.project(batch, keep)
+    end
   end
 
   @doc """
@@ -215,7 +218,7 @@ defmodule ExArrow.Batch do
     Compute.filter(batch, predicate)
   end
 
-  # ── internals ─────────────────────────────────────────────────────────────────
+  # Internals
 
   defp rebuild_with_renames(batch, renames) do
     fields = Schema.fields(RecordBatch.schema(batch))

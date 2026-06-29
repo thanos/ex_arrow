@@ -91,7 +91,7 @@ defmodule ExArrow.GenStage do
           {:noreply, [ExArrow.RecordBatch.t()], State.t()}
           | {:stop, :normal, State.t()}
           | {:noreply, [], State.t()}
-  def dispatch(%State{done: true}, _demand), do: {:noreply, [], %State{done: true}}
+  def dispatch(%State{done: true} = state, _demand), do: {:noreply, [], state}
 
   def dispatch(%State{} = state, demand) do
     state = %{state | demand: state.demand + demand}
@@ -112,9 +112,7 @@ defmodule ExArrow.GenStage do
         send(self(), {__MODULE__, :stop})
         {:noreply, Enum.reverse(acc), %{state | done: true, stream: nil}}
 
-      {:error, reason} ->
-        # Surface read errors as a notification, then stop.
-        notify_or_ignore({:error, source, reason})
+      {:error, _reason} ->
         send(self(), {__MODULE__, :stop})
         {:noreply, Enum.reverse(acc), %{state | done: true, stream: nil}}
 
@@ -129,13 +127,6 @@ defmodule ExArrow.GenStage do
       measurements = ExArrow.Telemetry.batch_measurements(batch)
       ExArrow.Telemetry.execute([:ex_arrow, :stream, :batch], measurements, %{source: source})
     end
-  end
-
-  defp notify_or_ignore(_msg) do
-    # GenStage.notify/2 requires a producer reference; callers that need error
-    # propagation should pattern-match on producer DOWN messages.  This is a
-    # best-effort hook kept as a seam for future enhancement.
-    :ok
   end
 
   @doc false

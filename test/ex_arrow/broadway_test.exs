@@ -1,23 +1,11 @@
 defmodule ExArrow.BroadwayTest do
   use ExUnit.Case, async: false
 
+  import ExArrow.TestFixtures
   alias ExArrow.Broadway.BatchBuilder
   alias ExArrow.Broadway.FlightSink
   alias ExArrow.Broadway.ParquetSink
   alias ExArrow.RecordBatch
-
-  # Build a real batch handle.
-  defp s64_batch(values, name \\ "v") do
-    n = length(values)
-
-    bin =
-      values
-      |> Enum.map(&<<&1::little-signed-64>>)
-      |> IO.iodata_to_binary()
-
-    {:ok, batch} = RecordBatch.from_columns([name], [bin], ["s64"], n)
-    batch
-  end
 
   # A minimal fake Broadway message struct. Broadway.Message is a struct with a
   # :data field; we build one without starting a Broadway pipeline.

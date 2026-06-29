@@ -74,7 +74,10 @@ Stages compose with `|>/2` because every function accepts the previous
 stage's `{:ok, pipeline}` result:
 
     ExArrow.Stream.from_flight_sql(client, "SELECT * FROM events")
-    |> ExArrow.Pipeline.map_batches(&ExArrow.Batch.select(&1, ["id", "score"]))
+    |> ExArrow.Pipeline.map_batches(fn batch ->
+      {:ok, slim} = ExArrow.Batch.select(batch, ["id", "score"])
+      slim
+    end)
     |> ExArrow.Pipeline.each_batch(&log_batch/1)
     |> ExArrow.Pipeline.write_parquet("/data/slim.parquet")
 

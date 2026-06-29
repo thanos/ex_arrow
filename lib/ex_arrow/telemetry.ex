@@ -39,7 +39,6 @@ defmodule ExArrow.Telemetry do
   |---------------|-----------------|------------------------------------------|
   | `:rows`       | non_neg_integer | Rows in the batch                        |
   | `:columns`    | non_neg_integer | Columns in the batch                     |
-  | `:bytes`      | non_neg_integer | Approximate byte size of the payload     |
   | `:duration`   | non_neg_integer | Native monotonic time in nanoseconds     |
   | `:batch_count`| non_neg_integer | Number of batches in a batched operation |
 

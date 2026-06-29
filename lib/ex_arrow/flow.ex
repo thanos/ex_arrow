@@ -116,7 +116,7 @@ defmodule ExArrow.Flow do
         end)
         |> Enum.to_list()
     """
-    @spec from_batches(Flow.t(), (ExArrow.RecordBatch.t() -> term())) :: Flow.t()
+    @spec map_batches(Flow.t(), (ExArrow.RecordBatch.t() -> term())) :: Flow.t()
     def map_batches(flow, fun) when is_function(fun, 1) do
       Flow.map(flow, fn batch ->
         result = fun.(batch)

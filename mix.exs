@@ -113,6 +113,7 @@ defmodule ExArrow.MixProject do
         "guides/02_explorer_integration.md",
         "guides/03_nx_integration.md",
         "guides/04_arrow_ecosystem.md",
+        "guides/05_arrow_pipelines_overview.md",
         "guides/06_arrow_streams.md",
         "guides/07_arrow_and_flow.md",
         "guides/08_arrow_and_genstage.md",
@@ -151,7 +152,6 @@ defmodule ExArrow.MixProject do
           ExArrow.GenStage.ADBCProducer
         ],
         Broadway: [
-          ExArrow.Broadway,
           ExArrow.Broadway.BatchBuilder,
           ExArrow.Broadway.ParquetSink,
           ExArrow.Broadway.FlightSink
