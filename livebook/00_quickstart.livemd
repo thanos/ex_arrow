@@ -5,7 +5,12 @@ deps = [
   {:explorer, "~> 0.11"},
   {:kino, "~> 0.19.0"},
   {:adbc, "~> 0.12"},
-  {:nimble_pool, "~> 1.1"}
+  {:nimble_pool, "~> 1.1"},
+  {:nx, "~> 0.12"},
+  {:telemetry, "~> 1.0"},
+  {:flow, "~> 1.2"},
+  {:gen_stage, "~> 1.2"},
+  {:broadway, "~> 1.0"}
 ]
 
 # Opened from livebook/ in the repo → local source; otherwise Hex (precompiled NIF).
@@ -14,6 +19,14 @@ local? = File.exists?(Path.join(__DIR__, "../native/ex_arrow_native/Cargo.toml")
 {ex_arrow_dep, extra_deps, config} =
   if local? do
     System.put_env("EX_ARROW_BUILD", "1")
+
+    # Force recompile ex_arrow so optional deps (Nx, GenStage, etc.) are
+    # detected at compile time. Without this, a cached build from a prior
+    # Mix.install (without these deps) will have stub functions.
+    ex_arrow_beam = Path.join(__DIR__, "../_build/dev/lib/ex_arrow/ebin")
+    if File.dir?(ex_arrow_beam) do
+      File.rm_rf!(ex_arrow_beam)
+    end
 
     {
       {:ex_arrow, path: Path.expand("..", __DIR__)},

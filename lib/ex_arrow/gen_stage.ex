@@ -177,7 +177,9 @@ defmodule ExArrow.GenStage.ParquetProducer do
         ExArrow.GenStage.ParquetProducer.start_link(path: "/data/events.parquet")
   """
 
-  if Code.ensure_loaded?(GenStage) do
+  @gen_stage_available Code.ensure_loaded?(GenStage)
+
+  if @gen_stage_available do
     use GenStage
 
     alias ExArrow.GenStage.State
@@ -259,7 +261,9 @@ defmodule ExArrow.GenStage.FlightProducer do
   - `:stream` — a pre-opened `ExArrow.Stream.t()` (useful for testing).
   """
 
-  if Code.ensure_loaded?(GenStage) do
+  @gen_stage_available Code.ensure_loaded?(GenStage)
+
+  if @gen_stage_available do
     use GenStage
 
     alias ExArrow.GenStage.State
@@ -337,7 +341,9 @@ defmodule ExArrow.GenStage.ADBCProducer do
   - `:stream` — a pre-opened `ExArrow.Stream.t()` (useful for testing).
   """
 
-  if Code.ensure_loaded?(GenStage) do
+  @gen_stage_available Code.ensure_loaded?(GenStage)
+
+  if @gen_stage_available do
     use GenStage
 
     alias ExArrow.GenStage.State

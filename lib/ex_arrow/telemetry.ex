@@ -109,8 +109,7 @@ defmodule ExArrow.Telemetry do
           ExArrow.Flight.Client.do_get(client, ticket)
         end)
     """
-    @spec span(event_name(), metadata(), (-> {result, metadata()})) :: result
-          when result: term()
+    @spec span(event_name(), metadata(), (-> {term(), metadata()})) :: term()
     def span(event_name, start_metadata, fun) when is_function(fun, 0) do
       :telemetry.span(event_name, start_metadata, fun)
     end
@@ -120,10 +119,9 @@ defmodule ExArrow.Telemetry do
     def execute(_event_name, _measurements, _metadata), do: :ok
 
     @doc false
-    @spec span(event_name(), metadata(), (-> {result, metadata()})) :: result
-          when result: term()
+    @spec span(event_name(), metadata(), (-> {term(), metadata()})) :: term()
     def span(_event_name, _start_metadata, fun) when is_function(fun, 0) do
-      {result, _metadata} = fun()
+      {result, _metadata} = fun.()
       result
     end
   end
