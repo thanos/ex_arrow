@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-06-29
+
+### Fixed
+
+- **`ExArrow.Telemetry.span/3` compile error without `:telemetry`**: the
+  fallback branch (when `:telemetry` is not installed) used `fun()` instead of
+  `fun.()` — a compile error that prevented `ex_arrow` from compiling at all
+  without the optional `:telemetry` dependency.
+- **`ExArrow.GenStage.*Producer` compile error without `:gen_stage`**: `use
+  GenStage` (a macro) was inside `if Code.ensure_loaded?(GenStage) do`, but
+  bare `if` evaluates both branches at compile time, so the macro expanded
+  even when GenStage was absent. Fixed by using a module attribute
+  (`@gen_stage_available`) so the branch is skipped at compile time.
+- **`ExArrow.Telemetry.span/3` `@spec`**: removed `when result: term()` from
+  inside `if/else` blocks where it could be misparsed; replaced with
+  `term()` directly.
+
+### Changed
+
+- **Livebook setup cells**: all notebooks (`00`–`04`) now clear
+  `_build/dev/lib/ex_arrow/ebin/` before `Mix.install` when using a local
+  path source, forcing a fresh compile that detects optional deps. The
+  quickstart notebooks also include the full set of v0.7.0 optional deps
+  (`:nx`, `:telemetry`, `:flow`, `:gen_stage`, `:broadway`) so all
+  features are available out of the box.
+
 ## [0.7.0] - 2026-06-29
 
 ### Added — Arrow-native streaming and pipeline infrastructure
