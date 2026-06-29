@@ -5,6 +5,120 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-06-29
+
+### Added — Arrow-native streaming and pipeline infrastructure
+
+ExArrow v0.7.0 transforms the library from a transport and interoperability
+layer into the foundation for Arrow-native data pipelines on the BEAM.  The
+central architectural principle is: **operate on Arrow RecordBatch values** —
+not `list(map())`, not `Explorer.DataFrame`, not `Nx.Tensor`.  Explorer and Nx
+remain downstream consumers; ExArrow is the Arrow layer.
+
+#### Milestone 1 — First-class streaming (`ExArrow.Stream`)
+
+- `ExArrow.Stream.from_parquet/1`, `from_parquet_binary/1`
+- `ExArrow.Stream.from_ipc/1`, `from_ipc_file/1`
+- `ExArrow.Stream.from_flight/2`
+- `ExArrow.Stream.from_flight_sql/2`
+- `ExArrow.Stream.from_adbc/1` and `from_adbc/2`
+- `ExArrow.Stream.source/1` returns the origin metadata attached by the
+  constructor (forwarded to telemetry as `:source`).
+- All constructors return `{:ok, stream} | {:error, reason}` and compose with
+  `|>/2` into `ExArrow.Pipeline` and `ExArrow.Flow`.
+
+#### Milestone 2 — Batch operations (`ExArrow.Batch`)
+
+- `ExArrow.Batch.schema/1`, `select/2`, `drop/2`, `rename/2`, `take/2`,
+  `filter/2`.
+- `select/2`, `drop/2`, `take/2`, and `filter/2` work for all Arrow types
+  ExArrow supports (delegate to the native compute kernels).
+- `rename/2` rebuilds a batch from raw column buffers and supports the
+  fixed-width numeric and boolean types.
+- `take/2` accepts an integer (first N rows) or a list of zero-based indices.
+
+#### Milestone 3 — Flow integration (`ExArrow.Flow`)
+
+- `ExArrow.Flow.from_batches/1` wraps an `ExArrow.Stream` in a `Flow` of
+  `ExArrow.RecordBatch` values.
+- `ExArrow.Flow.map_batches/2` and `each_batch/2` emit
+  `[:ex_arrow, :pipeline, :batch]` telemetry per batch.
+- All standard `Flow` combinators (`map`, `flat_map`, `partition`, `reduce`)
+  work on the result.
+
+#### Milestone 4 — GenStage integration (`ExArrow.GenStage`)
+
+- `ExArrow.GenStage.ParquetProducer`, `FlightProducer`, `ADBCProducer`.
+- Demand-driven streaming with proper backpressure and clean shutdown.
+- Shared `ExArrow.GenStage.dispatch/2` and `terminate/1` helpers.
+- Works with producer, consumer, and producer-consumer wiring patterns.
+
+#### Milestone 5 — Broadway integration (`ExArrow.Broadway`)
+
+- `ExArrow.Broadway.BatchBuilder.from_messages/1` assembles
+  `ExArrow.RecordBatch` values from Broadway messages.
+- `ExArrow.Broadway.ParquetSink.write/3` and `FlightSink.write/4` sink
+  assembled batches to Parquet files and Flight servers.
+- Configurable batch sizing and flush intervals via the Broadway batcher
+  configuration.
+
+#### Milestone 6 — Telemetry (`ExArrow.Telemetry`)
+
+- Events: `[:ex_arrow, :flight, :query]`, `[:ex_arrow, :flight_sql, :query]`,
+  `[:ex_arrow, :parquet, :read]`, `[:ex_arrow, :parquet, :write]`,
+  `[:ex_arrow, :stream, :batch]`, `[:ex_arrow, :pipeline, :batch]`.
+- Measurements: `rows`, `columns`, `bytes`, `duration`, `batch_count`.
+- Metadata: `source`, `destination`, `schema`, `driver`.
+- `ExArrow.Telemetry.execute/3` and `span/3` degrade to no-ops when the
+  `:telemetry` dependency is absent.
+
+#### Milestone 7 — Pipeline sinks
+
+- `ExArrow.Sink.Parquet.write/2`
+- `ExArrow.Sink.Flight.write/3`
+- `ExArrow.Sink.DataFrame.write/1`
+- `ExArrow.Sink.Nx.write/1`
+
+#### Milestone 8 — Pipeline DSL (`ExArrow.Pipeline`)
+
+- `ExArrow.Pipeline.map_batches/2`, `each_batch/2`, `write_parquet/2`,
+  `write_flight/3`, `write_dataframe/1`.
+- Thin, lazy abstraction over `ExArrow.Stream` with `{:ok, pipeline} |
+  {:error, reason}` threading; errors short-circuit through every stage.
+
+#### Milestone 9 — Benchmarks
+
+- `bench/v070_stream_flow_pipeline_bench.exs` measures Parquet/IPC stream
+  drains, Flow execution, and Pipeline `map_batches` + `write_parquet` at
+  1K / 100K / 1M rows.
+- `bench/v070_record_batch_vs_maps_bench.exs` compares Arrow `RecordBatch`
+  against `list(map())` for build, transform (select), and drain (sum) at
+  the same row counts.
+
+#### Milestone 10 — Educational material
+
+- `guides/06_arrow_streams.md`
+- `guides/07_arrow_and_flow.md`
+- `guides/08_arrow_and_genstage.md`
+- `guides/09_arrow_and_broadway.md`
+- `guides/10_arrow_pipeline_patterns.md`
+
+### Changed
+
+- `mix.exs`: version bumped to `0.7.0`; added optional dependencies on
+  `:telemetry`, `:flow`, `:gen_stage`, and `:broadway`; `docs/0` extras and
+  `groups_for_modules` updated to include the new modules.
+- `ExArrow.Stream` now carries a `source` field and emits telemetry from
+  `next/1`; the struct is backward-compatible (the new field defaults to
+  `nil`).
+
+### Testing
+
+- 825 tests, 16 properties, 0 failures (45 excluded integration tests).
+- 89.9% coverage (target: >= 85%).
+- `mix format`, `mix credo --strict`, `mix dialyzer`, `mix sobelow`,
+  `mix docs --warnings-as-errors` all pass.
+
 ## [0.6.3] - 2026-06-16
 
 ### Fixed

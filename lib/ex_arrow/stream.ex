@@ -55,16 +55,181 @@ defmodule ExArrow.Stream do
   Stopping enumeration early (e.g. `Enum.take/2`) is safe — the resource will
   be released when the stream variable goes out of scope.
   """
+  alias ExArrow.ADBC.Connection, as: ADBCConnection
+  alias ExArrow.ADBC.Statement, as: ADBCStatement
   alias ExArrow.RecordBatch
   alias ExArrow.Schema
 
-  @opaque t :: %__MODULE__{resource: reference(), backend: :ipc | :adbc | :parquet | :flight_sql}
-  defstruct [:resource, backend: :ipc]
+  @opaque t :: %__MODULE__{
+            resource: reference(),
+            backend: :ipc | :adbc | :parquet | :flight_sql,
+            source: term()
+          }
+  defstruct [:resource, :source, backend: :ipc]
+
+  @doc """
+  Returns the origin metadata attached to this stream by the `from_*/` 
+  constructors.  The value is backend-specific (e.g. `{:parquet, path}` or
+  `{:flight_sql, sql}`) and is forwarded to telemetry events as `:source`.
+  """
+  @spec source(t()) :: term()
+  def source(%__MODULE__{source: source}), do: source
 
   @doc false
   @spec stream?(term()) :: boolean()
   def stream?(%__MODULE__{}), do: true
   def stream?(_), do: false
+
+  # ── Source constructors (Milestone 1) ───────────────────────────────────────
+
+  @doc """
+  Open an Arrow IPC stream from an in-memory `binary`.
+
+  Delegates to `ExArrow.IPC.Reader.from_binary/1` and tags the resulting
+  stream with `source: {:ipc, :binary}` for telemetry.  Returns
+  `{:ok, stream}` or `{:error, message}`.
+
+  ## Example
+
+      {:ok, stream} = ExArrow.Stream.from_ipc(ipc_bytes)
+  """
+  @spec from_ipc(binary()) :: {:ok, t()} | {:error, String.t()}
+  def from_ipc(binary) when is_binary(binary) do
+    with {:ok, stream} <- ExArrow.IPC.Reader.from_binary(binary) do
+      {:ok, %{stream | source: {:ipc, :binary}}}
+    end
+  end
+
+  @doc """
+  Open an Arrow IPC stream from a file at `path`.
+
+  Delegates to `ExArrow.IPC.Reader.from_file/1` and tags the stream with
+  `source: {:ipc, path}`.  Returns `{:ok, stream}` or `{:error, message}`.
+  """
+  @spec from_ipc_file(Path.t()) :: {:ok, t()} | {:error, String.t()}
+  def from_ipc_file(path) when is_binary(path) do
+    with {:ok, stream} <- ExArrow.IPC.Reader.from_file(path) do
+      {:ok, %{stream | source: {:ipc, path}}}
+    end
+  end
+
+  @doc """
+  Open a Parquet file at `path` for lazy row-group streaming.
+
+  Delegates to `ExArrow.Parquet.Reader.from_file/1`, tags the stream with
+  `source: {:parquet, path}`, and emits a `[:ex_arrow, :parquet, :read]`
+  telemetry event.  Returns `{:ok, stream}` or `{:error, message}`.
+
+  ## Example
+
+      {:ok, stream} = ExArrow.Stream.from_parquet("/data/events.parquet")
+  """
+  @spec from_parquet(Path.t()) :: {:ok, t()} | {:error, String.t()}
+  def from_parquet(path) when is_binary(path) do
+    ExArrow.Telemetry.execute([:ex_arrow, :parquet, :read], %{}, %{source: path})
+
+    with {:ok, stream} <- ExArrow.Parquet.Reader.from_file(path) do
+      {:ok, %{stream | source: {:parquet, path}}}
+    end
+  end
+
+  @doc """
+  Open a Parquet stream from an in-memory `binary`.
+
+  Delegates to `ExArrow.Parquet.Reader.from_binary/1` and emits a
+  `[:ex_arrow, :parquet, :read]` telemetry event with `source: :binary`.
+  """
+  @spec from_parquet_binary(binary()) :: {:ok, t()} | {:error, String.t()}
+  def from_parquet_binary(binary) when is_binary(binary) do
+    ExArrow.Telemetry.execute([:ex_arrow, :parquet, :read], %{}, %{source: :binary})
+
+    with {:ok, stream} <- ExArrow.Parquet.Reader.from_binary(binary) do
+      {:ok, %{stream | source: {:parquet, :binary}}}
+    end
+  end
+
+  @doc """
+  Retrieve data for `ticket` from a Flight server as a stream of record
+  batches.
+
+  Delegates to `ExArrow.Flight.Client.do_get/2` and emits a
+  `[:ex_arrow, :flight, :query]` telemetry event.  The stream is tagged with
+  `source: {:flight, ticket}`.
+
+  ## Example
+
+      {:ok, stream} = ExArrow.Stream.from_flight(client, "sales_2024")
+  """
+  @spec from_flight(ExArrow.Flight.Client.t(), term()) ::
+          {:ok, t()} | {:error, term()}
+  def from_flight(client, ticket) do
+    ExArrow.Telemetry.execute([:ex_arrow, :flight, :query], %{}, %{source: ticket})
+
+    with {:ok, stream} <- ExArrow.Flight.Client.do_get(client, ticket) do
+      {:ok, %{stream | source: {:flight, ticket}}}
+    end
+  end
+
+  @doc """
+  Execute a SQL query against a Flight SQL server and return a lazy stream of
+  record batches.
+
+  Delegates to `ExArrow.FlightSQL.Client.stream_query/2`, emits a
+  `[:ex_arrow, :flight_sql, :query]` telemetry event, and tags the stream with
+  `source: {:flight_sql, sql}`.
+
+  ## Example
+
+      {:ok, stream} = ExArrow.Stream.from_flight_sql(client, "SELECT * FROM events")
+  """
+  @spec from_flight_sql(ExArrow.FlightSQL.Client.t(), String.t()) ::
+          {:ok, t()} | {:error, term()}
+  # sobelow_skip ["SQL.Query"]
+  # False positive: SQL is forwarded to a remote Flight SQL server over gRPC.
+  def from_flight_sql(client, sql) when is_binary(sql) do
+    ExArrow.Telemetry.execute([:ex_arrow, :flight_sql, :query], %{}, %{source: sql})
+
+    with {:ok, stream} <- ExArrow.FlightSQL.Client.stream_query(client, sql) do
+      {:ok, %{stream | source: {:flight_sql, sql}}}
+    end
+  end
+
+  @doc """
+  Execute an ADBC statement and return its result as a stream of record
+  batches.
+
+  Accepts either a prepared `ExArrow.ADBC.Statement.t()` (built with
+  `ExArrow.ADBC.Statement.new/2` or `new/3`) or a `{connection, sql}` pair,
+  in which case a one-shot statement is created, executed, and discarded.
+
+  The stream is tagged with `source: {:adbc, sql}` (or `:statement` when a
+  pre-built statement is passed).
+
+  ## Examples
+
+      {:ok, stream} = ExArrow.Stream.from_adbc(stmt)
+
+      {:ok, stream} = ExArrow.Stream.from_adbc(conn, "SELECT * FROM events")
+  """
+  @spec from_adbc(ADBCStatement.t()) ::
+          {:ok, t()} | {:error, term()}
+  def from_adbc(statement) do
+    with {:ok, stream} <- ADBCStatement.execute(statement) do
+      {:ok, %{stream | source: {:adbc, :statement}}}
+    end
+  end
+
+  @spec from_adbc(ADBCConnection.t(), String.t()) ::
+          {:ok, t()} | {:error, term()}
+  # sobelow_skip ["SQL.Query"]
+  # False positive: SQL is forwarded to an ADBC driver and never executed
+  # locally in this process.
+  def from_adbc(connection, sql) when is_binary(sql) do
+    with {:ok, stmt} <- ADBCStatement.new(connection, sql),
+         {:ok, stream} <- ADBCStatement.execute(stmt) do
+      {:ok, %{stream | source: {:adbc, sql}}}
+    end
+  end
 
   @doc """
   Returns the schema of this stream (without consuming it).
@@ -115,38 +280,45 @@ defmodule ExArrow.Stream do
           | nil
           | {:error, String.t()}
           | {:error, {atom(), non_neg_integer(), String.t()}}
-  def next(%__MODULE__{resource: ref, backend: :adbc}) do
+  def next(%__MODULE__{resource: ref, backend: :adbc} = stream) do
     case native().adbc_stream_next(ref) do
       :done -> nil
-      {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
+      {:ok, batch_ref} -> emit_batch(stream, RecordBatch.from_ref(batch_ref))
       {:error, msg} -> {:error, msg}
     end
   end
 
-  def next(%__MODULE__{resource: ref, backend: :ipc}) do
+  def next(%__MODULE__{resource: ref, backend: :ipc} = stream) do
     case native().ipc_stream_next(ref) do
       :done -> nil
-      {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
+      {:ok, batch_ref} -> emit_batch(stream, RecordBatch.from_ref(batch_ref))
       {:error, msg} -> {:error, msg}
     end
   end
 
-  def next(%__MODULE__{resource: ref, backend: :parquet}) do
+  def next(%__MODULE__{resource: ref, backend: :parquet} = stream) do
     case native().parquet_stream_next(ref) do
       :done -> nil
-      {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
+      {:ok, batch_ref} -> emit_batch(stream, RecordBatch.from_ref(batch_ref))
       {:error, msg} -> {:error, msg}
     end
   end
 
-  def next(%__MODULE__{resource: ref, backend: :flight_sql}) do
+  def next(%__MODULE__{resource: ref, backend: :flight_sql} = stream) do
     case native().flight_sql_stream_next(ref) do
       :done -> nil
-      {:ok, batch_ref} -> RecordBatch.from_ref(batch_ref)
+      {:ok, batch_ref} -> emit_batch(stream, RecordBatch.from_ref(batch_ref))
       # Pass the structured triple through so callers retain the gRPC code and status.
       {:error, {_code, _grpc_status, _msg} = triple} -> {:error, triple}
       {:error, msg} -> {:error, msg}
     end
+  end
+
+  defp emit_batch(%__MODULE__{source: source}, batch) do
+    measurements = ExArrow.Telemetry.batch_measurements(batch)
+    metadata = %{source: source, schema: nil}
+    ExArrow.Telemetry.execute([:ex_arrow, :stream, :batch], measurements, metadata)
+    batch
   end
 
   @doc """

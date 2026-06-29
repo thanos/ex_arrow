@@ -17,7 +17,9 @@ scripts = [
   "bench/adbc_bench.exs",
   "bench/pipeline_bench.exs",
   "bench/explorer_arrow_bench.exs",
-  "bench/nx_arrow_bench.exs"
+  "bench/nx_arrow_bench.exs",
+  "bench/v070_stream_flow_pipeline_bench.exs",
+  "bench/v070_record_batch_vs_maps_bench.exs"
 ]
 
 for script <- scripts do

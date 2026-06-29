@@ -1,7 +1,7 @@
 defmodule ExArrow.MixProject do
   use Mix.Project
 
-  @version "0.6.3"
+  @version "0.7.0"
   @source_url "https://github.com/thanos/ex_arrow"
 
   def project do
@@ -85,6 +85,10 @@ defmodule ExArrow.MixProject do
       {:nx, "~> 0.12", optional: true},
       {:nimble_pool, "~> 1.1", optional: true},
       {:rustler, "~> 0.36 or ~> 0.38", optional: true},
+      {:telemetry, "~> 1.0", optional: true},
+      {:flow, "~> 1.2", optional: true},
+      {:gen_stage, "~> 1.2", optional: true},
+      {:broadway, "~> 1.0", optional: true},
       {:ex_doc, "~> 0.40", only: :dev},
       {:benchee, "~> 1.5", only: :dev},
       {:benchee_html, "~> 1.0", only: :dev},
@@ -109,6 +113,11 @@ defmodule ExArrow.MixProject do
         "guides/02_explorer_integration.md",
         "guides/03_nx_integration.md",
         "guides/04_arrow_ecosystem.md",
+        "guides/06_arrow_streams.md",
+        "guides/07_arrow_and_flow.md",
+        "guides/08_arrow_and_genstage.md",
+        "guides/09_arrow_and_broadway.md",
+        "guides/10_arrow_pipeline_patterns.md",
         "docs/overview.md",
         "docs/memory_model.md",
         "docs/ipc_guide.md",
@@ -126,6 +135,28 @@ defmodule ExArrow.MixProject do
         IPC: [ExArrow.IPC.Reader, ExArrow.IPC.Writer, ExArrow.IPC.File],
         Parquet: [ExArrow.Parquet.Reader, ExArrow.Parquet.Writer],
         "Compute kernels": [ExArrow.Compute],
+        "Batch operations": [ExArrow.Batch],
+        Pipeline: [
+          ExArrow.Pipeline,
+          ExArrow.Sink.Parquet,
+          ExArrow.Sink.Flight,
+          ExArrow.Sink.DataFrame,
+          ExArrow.Sink.Nx
+        ],
+        Flow: [ExArrow.Flow],
+        GenStage: [
+          ExArrow.GenStage,
+          ExArrow.GenStage.ParquetProducer,
+          ExArrow.GenStage.FlightProducer,
+          ExArrow.GenStage.ADBCProducer
+        ],
+        Broadway: [
+          ExArrow.Broadway,
+          ExArrow.Broadway.BatchBuilder,
+          ExArrow.Broadway.ParquetSink,
+          ExArrow.Broadway.FlightSink
+        ],
+        Telemetry: [ExArrow.Telemetry],
         Flight: [
           ExArrow.Flight.Client,
           ExArrow.Flight.Server,
