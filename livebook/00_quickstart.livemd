@@ -35,7 +35,7 @@ local? = File.exists?(Path.join(__DIR__, "../native/ex_arrow_native/Cargo.toml")
     }
   else
     {
-      {:ex_arrow, "~> 0.7.0"},
+      {:ex_arrow, "~> 0.7.2"},
       [],
       [adbc: [drivers: [:sqlite]]]
     }
@@ -162,7 +162,7 @@ ExArrow.Flight.Server.stop(server)
 
 With ADBC you open a database (e.g. SQLite), run SQL, and get an **Arrow stream** of result batches—same `ExArrow.Stream` API as IPC and Flight.
 
-This cell uses the **`:adbc_package`** backend (see [03 ADBC](03_adbc.livemd) and [04 ADBC integration](04_adbc_integration.livemd)): the [`adbc`](https://hex.pm/packages/adbc) package downloads SQLite; ExArrow returns `ExArrow.Stream` batches without a native `.dylib`. For native C drivers in production, see [Installing an ADBC driver](INSTALL_ADBC_DRIVER.md).
+This cell uses the **`:adbc_package`** backend (see [03 ADBC](03_adbc.livemd) and [04 ADBC integration](04_adbc_integration.livemd)): the [`adbc`](https://hex.pm/packages/adbc) package downloads SQLite; ExArrow returns `ExArrow.Stream` batches without a native `.dylib`. For native C drivers in production, see [Installing an ADBC driver](INSTALL_ADBC_DRIVER.md). API docs: [ADBC guide](https://ex-arrow.hexdocs.pm/adbc_guide.html), [`ExArrow.ADBC.Database`](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Database.html), [`ExArrow.ADBC.Statement`](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Statement.html).
 
 ```elixir
 :ok = Adbc.download_driver!(:sqlite)
@@ -337,4 +337,4 @@ _ = ExArrow.Stream.to_list(stream3)
 :telemetry.detach("ex-arrow-quickstart")
 ```
 
-Docs: [hexdocs.pm/ex_arrow](https://hexdocs.pm/ex_arrow).
+Docs: [ex-arrow.hexdocs.pm](https://ex-arrow.hexdocs.pm) · [ADBC guide](https://ex-arrow.hexdocs.pm/adbc_guide.html).

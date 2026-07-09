@@ -35,21 +35,15 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     Application.delete_env(:ex_arrow, :adbc_package)
     Application.delete_env(:ex_arrow, :adbc_package_pool_size)
 
-    if pid = Process.whereis(ExArrow.ADBC.AdbcPackageManager) do
-      GenServer.stop(pid, :shutdown, 5_000)
-      Process.sleep(50)
-    end
+    stop_adbc_package_manager()
+    Process.sleep(50)
 
     {:ok, _} = AdbcPackageManager.start_link()
 
     on_exit(fn ->
-      pid = Process.whereis(ExArrow.ADBC.AdbcPackageManager)
-
-      if is_pid(pid) and Process.alive?(pid) do
-        # :shutdown (not :normal) propagates exit to linked stub processes from
-        # AdbcDbStub / AdbcConnStub spawn_link; :normal would leave them sleeping.
-        GenServer.stop(pid, :shutdown, 5_000)
-      end
+      # Another test module or a linked stub may already have stopped the manager
+      # between whereis/1 and stop/3; treat that as success.
+      stop_adbc_package_manager()
 
       if saved_package != nil, do: Application.put_env(:ex_arrow, :adbc_package, saved_package)
 
@@ -58,6 +52,22 @@ defmodule ExArrow.ADBC.AdbcPackageTest do
     end)
 
     :ok
+  end
+
+  defp stop_adbc_package_manager do
+    case Process.whereis(ExArrow.ADBC.AdbcPackageManager) do
+      pid when is_pid(pid) ->
+        try do
+          # :shutdown (not :normal) propagates exit to linked stub processes from
+          # AdbcDbStub / AdbcConnStub spawn_link; :normal would leave them sleeping.
+          GenServer.stop(pid, :shutdown, 5_000)
+        catch
+          :exit, _ -> :ok
+        end
+
+      _ ->
+        :ok
+    end
   end
 
   # Fake db/conn/pool pids that sleep forever: spawn_link + on_exit kill so nothing

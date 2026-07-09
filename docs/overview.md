@@ -3,6 +3,13 @@
 The main overview, installation, quick start, and usage examples live in the
 [README on GitHub](https://github.com/thanos/ex_arrow/blob/main/README.md).
 
+## v0.7.2 stability update
+
+v0.7.2 fixes optional `:gen_stage` compilation in `Mix.install` and cached-build
+paths where `ex_arrow` could be compiled without `{:gen_stage, ...}` and fail at
+compile time. `ExArrow.GenStage.*Producer` modules are now gated at file scope,
+so `ex_arrow` compiles cleanly when `:gen_stage` is absent.
+
 ## What's changed in v0.7.0
 
 v0.7.0 adds Arrow-native streaming and pipeline infrastructure.  The unit of
@@ -55,4 +62,4 @@ New guides: [05 Arrow pipelines overview](05_arrow_pipelines_overview.md),
 | `ExArrow.GenStage.*Producer` | `{:gen_stage, "~> 1.2"}` | Demand-driven producers: `ParquetProducer`, `FlightProducer`, `ADBCProducer` |
 | `ExArrow.Broadway` | `{:broadway, "~> 1.0"}` | Ingestion pipelines: `BatchBuilder`, `ParquetSink`, `FlightSink` |
 
-API reference: `mix docs` or [Hex Docs](https://hexdocs.pm/ex_arrow).
+API reference: `mix docs` or [ex-arrow.hexdocs.pm](https://ex-arrow.hexdocs.pm).

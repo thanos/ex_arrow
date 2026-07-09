@@ -26,13 +26,13 @@ Together they demonstrate ExArrow functionality: IPC (stream + file), Flight (cl
 | Where you open the notebook | `ex_arrow` source |
 |----------------------------|-------------------|
 | From `livebook/` in a git clone | Local path + `EX_ARROW_BUILD=1` (compile NIF from Rust) |
-| From Livebook autosave or elsewhere | Hex `~> 0.7.0` (precompiled NIF, no Rust) |
+| From Livebook autosave or elsewhere | Hex `~> 0.7.2` (precompiled NIF, no Rust) |
 
 ### ADBC in Livebook
 
 Notebooks **00**, **03**, and **04** use the [`adbc`](https://hex.pm/packages/adbc) package to download the SQLite driver.  Tutorials **03** and **04** use ExArrow’s **`:adbc_package`** backend so you get `ExArrow.Stream` results **without** a native ADBC `.dylib`.
 
-For production deployments with a native C driver (PostgreSQL, DuckDB, etc.), see [Installing an ADBC driver](INSTALL_ADBC_DRIVER.md) and [docs/adbc_guide.md](../docs/adbc_guide.md).
+For production deployments with a native C driver (PostgreSQL, DuckDB, etc.), see [Installing an ADBC driver](INSTALL_ADBC_DRIVER.md) and the [ADBC guide on HexDocs](https://ex-arrow.hexdocs.pm/adbc_guide.html). Package overview: [ex-arrow.hexdocs.pm](https://ex-arrow.hexdocs.pm).
 
 ### Local development tips
 

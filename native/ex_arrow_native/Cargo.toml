@@ -1,6 +1,6 @@
 [package]
 name = "ex_arrow_native"
-version = "0.6.3"
+version = "0.7.2"
 edition = "2021"
 description = "Apache Arrow NIFs for ExArrow Elixir library"
 license = "Apache-2.0"

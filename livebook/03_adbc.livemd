@@ -31,7 +31,7 @@ local? = File.exists?(Path.join(__DIR__, "../native/ex_arrow_native/Cargo.toml")
     }
   else
     {
-      {:ex_arrow, "~> 0.7.0"},
+      {:ex_arrow, "~> 0.7.2"},
       [],
       [adbc: [drivers: [:sqlite]]]
     }
@@ -46,15 +46,21 @@ ADBC exposes databases through the Arrow Database Connectivity API. You open a *
 
 This notebook covers: opening a database, executing SQL, consuming the result stream, and optional metadata APIs.
 
+### Documentation
+
+- [ADBC guide](https://ex-arrow.hexdocs.pm/adbc_guide.html) — driver loading, `:adbc_package` backend, pooling, local testing
+- API reference: [ExArrow.ADBC.Database](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Database.html), [ExArrow.ADBC.Connection](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Connection.html), [ExArrow.ADBC.Statement](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Statement.html), [ExArrow.ADBC.DriverHelper](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.DriverHelper.html), [ExArrow.ADBC.ConnectionPool](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.ConnectionPool.html)
+- Package overview: [ex-arrow.hexdocs.pm](https://ex-arrow.hexdocs.pm)
+
 ---
 
 ## 1. Concepts
 
-| Handle     | Module                    | Purpose                                                          |
-| ---------- | ------------------------- | ---------------------------------------------------------------- |
-| Database   | `ExArrow.ADBC.Database`   | Driver (path or name) + init options (e.g. URI).                 |
-| Connection | `ExArrow.ADBC.Connection` | Session from a database.                                         |
-| Statement  | `ExArrow.ADBC.Statement`  | Set SQL, execute → returns `ExArrow.Stream` of record batches. |
+| Handle     | Module                                                                 | Purpose                                                          |
+| ---------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Database   | [`ExArrow.ADBC.Database`](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Database.html)   | Driver (path or name) + init options (e.g. URI).                 |
+| Connection | [`ExArrow.ADBC.Connection`](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Connection.html) | Session from a database.                                         |
+| Statement  | [`ExArrow.ADBC.Statement`](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Statement.html)  | Set SQL, execute → returns `ExArrow.Stream` of record batches. |
 
 Flow: **Database.open** → **Connection.open** → **Statement.new(conn, sql)** → **execute** → **Stream** (schema + next).
 
@@ -65,7 +71,7 @@ Flow: **Database.open** → **Connection.open** → **Statement.new(conn, sql)**
 ExArrow supports two ways to reach a database:
 
 * **`:adbc_package` backend (this notebook)** — uses the [`adbc`](https://hex.pm/packages/adbc) Hex package to download SQLite and query via supervised `Adbc.Database` / `Adbc.Connection`. Results are converted to `ExArrow.Stream`. **No native ADBC `.dylib` required** — works in Livebook.
-* **Native C driver** — ExArrow’s NIF loads `libadbc_driver_sqlite.dylib` (or `.so`) via the ADBC driver manager. Use `driver_path:` or `driver_name:` + `ADBC_DRIVER`. See [Installing an ADBC driver](INSTALL_ADBC_DRIVER.md).
+* **Native C driver** — ExArrow’s NIF loads `libadbc_driver_sqlite.dylib` (or `.so`) via the ADBC driver manager. Use `driver_path:` or `driver_name:` + `ADBC_DRIVER`. See [Installing an ADBC driver](INSTALL_ADBC_DRIVER.md) and the [ADBC guide](https://ex-arrow.hexdocs.pm/adbc_guide.html).
 
 `DriverHelper.ensure_driver_and_open/2` calls `Adbc.download_driver/1` then opens by `driver_name`; that only works when a **loadable C driver** is on disk. In Livebook, prefer `:adbc_package` instead.
 
@@ -264,3 +270,5 @@ end
 * **Connection pooling** with the adbc package: see [04_adbc_integration.livemd](04_adbc_integration.livemd).
 
 You’ve now seen **IPC**, **Flight**, and **ADBC**. ExArrow keeps Arrow data in native memory and gives you a single stream/batch API across all three—ideal for pipelines, ETL, and interchanging with Explorer or other Arrow consumers.
+
+Further reading: [ADBC guide](https://ex-arrow.hexdocs.pm/adbc_guide.html) · [ex-arrow.hexdocs.pm](https://ex-arrow.hexdocs.pm)

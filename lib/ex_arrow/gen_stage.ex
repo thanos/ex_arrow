@@ -158,28 +158,26 @@ defmodule ExArrow.GenStage do
   end
 end
 
-defmodule ExArrow.GenStage.ParquetProducer do
-  @moduledoc """
-  A `GenStage` producer that emits `ExArrow.RecordBatch` values from a Parquet
-  file or in-memory Parquet binary.
+if Code.ensure_loaded?(GenStage) do
+  defmodule ExArrow.GenStage.ParquetProducer do
+    @moduledoc """
+    A `GenStage` producer that emits `ExArrow.RecordBatch` values from a Parquet
+    file or in-memory Parquet binary.
 
-  ## Options
+    ## Options
 
-  - `:path` — path to a `.parquet` file (opened with
-    `ExArrow.Stream.from_parquet/1`).
-  - `:binary` — in-memory Parquet bytes (opened with
-    `ExArrow.Stream.from_parquet_binary/1`).
-  - `:stream` — a pre-opened `ExArrow.Stream.t()` (useful for testing).
+    - `:path` — path to a `.parquet` file (opened with
+      `ExArrow.Stream.from_parquet/1`).
+    - `:binary` — in-memory Parquet bytes (opened with
+      `ExArrow.Stream.from_parquet_binary/1`).
+    - `:stream` — a pre-opened `ExArrow.Stream.t()` (useful for testing).
 
-  ## Example
+    ## Example
 
-      {:ok, producer} =
-        ExArrow.GenStage.ParquetProducer.start_link(path: "/data/events.parquet")
-  """
+        {:ok, producer} =
+          ExArrow.GenStage.ParquetProducer.start_link(path: "/data/events.parquet")
+    """
 
-  @gen_stage_available Code.ensure_loaded?(GenStage)
-
-  if @gen_stage_available do
     use GenStage
 
     alias ExArrow.GenStage.State
@@ -240,30 +238,19 @@ defmodule ExArrow.GenStage.ParquetProducer do
     def terminate(_reason, state) do
       ExArrow.GenStage.terminate(state)
     end
-  else
-    @doc false
-    @spec start_link(keyword()) :: {:error, String.t()}
-    def start_link(_opts) do
-      {:error,
-       "GenStage is not available. Add {:gen_stage, \"~> 1.2\"} to your mix.exs dependencies."}
-    end
   end
-end
 
-defmodule ExArrow.GenStage.FlightProducer do
-  @moduledoc """
-  A `GenStage` producer that emits `ExArrow.RecordBatch` values from a Flight
-  `do_get` stream.
+  defmodule ExArrow.GenStage.FlightProducer do
+    @moduledoc """
+    A `GenStage` producer that emits `ExArrow.RecordBatch` values from a Flight
+    `do_get` stream.
 
-  ## Options
+    ## Options
 
-  - `:client` + `:ticket` — opened with `ExArrow.Stream.from_flight/2`.
-  - `:stream` — a pre-opened `ExArrow.Stream.t()` (useful for testing).
-  """
+    - `:client` + `:ticket` — opened with `ExArrow.Stream.from_flight/2`.
+    - `:stream` — a pre-opened `ExArrow.Stream.t()` (useful for testing).
+    """
 
-  @gen_stage_available Code.ensure_loaded?(GenStage)
-
-  if @gen_stage_available do
     use GenStage
 
     alias ExArrow.GenStage.State
@@ -318,32 +305,21 @@ defmodule ExArrow.GenStage.FlightProducer do
     def terminate(_reason, state) do
       ExArrow.GenStage.terminate(state)
     end
-  else
-    @doc false
-    @spec start_link(keyword()) :: {:error, String.t()}
-    def start_link(_opts) do
-      {:error,
-       "GenStage is not available. Add {:gen_stage, \"~> 1.2\"} to your mix.exs dependencies."}
-    end
   end
-end
 
-defmodule ExArrow.GenStage.ADBCProducer do
-  @moduledoc """
-  A `GenStage` producer that emits `ExArrow.RecordBatch` values from an ADBC
-  query result stream.
+  defmodule ExArrow.GenStage.ADBCProducer do
+    @moduledoc """
+    A `GenStage` producer that emits `ExArrow.RecordBatch` values from an ADBC
+    query result stream.
 
-  ## Options
+    ## Options
 
-  - `:statement` — a pre-built `ExArrow.ADBC.Statement.t()` (executed with
-    `ExArrow.Stream.from_adbc/1`).
-  - `:connection` + `:sql` — opened with `ExArrow.Stream.from_adbc/2`.
-  - `:stream` — a pre-opened `ExArrow.Stream.t()` (useful for testing).
-  """
+    - `:statement` — a pre-built `ExArrow.ADBC.Statement.t()` (executed with
+      `ExArrow.Stream.from_adbc/1`).
+    - `:connection` + `:sql` — opened with `ExArrow.Stream.from_adbc/2`.
+    - `:stream` — a pre-opened `ExArrow.Stream.t()` (useful for testing).
+    """
 
-  @gen_stage_available Code.ensure_loaded?(GenStage)
-
-  if @gen_stage_available do
     use GenStage
 
     alias ExArrow.GenStage.State
@@ -404,8 +380,31 @@ defmodule ExArrow.GenStage.ADBCProducer do
     def terminate(_reason, state) do
       ExArrow.GenStage.terminate(state)
     end
-  else
-    @doc false
+  end
+else
+  defmodule ExArrow.GenStage.ParquetProducer do
+    @moduledoc false
+
+    @spec start_link(keyword()) :: {:error, String.t()}
+    def start_link(_opts) do
+      {:error,
+       "GenStage is not available. Add {:gen_stage, \"~> 1.2\"} to your mix.exs dependencies."}
+    end
+  end
+
+  defmodule ExArrow.GenStage.FlightProducer do
+    @moduledoc false
+
+    @spec start_link(keyword()) :: {:error, String.t()}
+    def start_link(_opts) do
+      {:error,
+       "GenStage is not available. Add {:gen_stage, \"~> 1.2\"} to your mix.exs dependencies."}
+    end
+  end
+
+  defmodule ExArrow.GenStage.ADBCProducer do
+    @moduledoc false
+
     @spec start_link(keyword()) :: {:error, String.t()}
     def start_link(_opts) do
       {:error,
