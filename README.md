@@ -2,14 +2,14 @@
 
 [![CI](https://github.com/thanos/ex_arrow/actions/workflows/ci.yml/badge.svg)](https://github.com/thanos/ex_arrow/actions/workflows/ci.yml)
 [![Hex version](https://img.shields.io/hexpm/v/ex_arrow.svg)](https://hex.pm/packages/ex_arrow)
-[![Hex docs](https://img.shields.io/badge/docs-hexdocs.pm-blue)](https://hexdocs.pm/ex_arrow)
+[![Hex docs](https://img.shields.io/badge/docs-hexdocs.pm-blue)](https://ex-arrow.hexdocs.pm)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Coverage Status](https://coveralls.io/repos/github/thanos/ex_arrow/badge.svg?branch=main)](https://coveralls.io/github/thanos/ex_arrow?branch=main)
 
 
 Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, Arrow Flight SQL, ADBC database bindings, and Arrow-native pipelines. Column data lives in Rust buffers; Elixir holds lightweight opaque handles. Precompiled NIFs for Linux, macOS, and Windows — no Rust required to use.
 
-> **v0.7.0 — Arrow-native pipelines.** New: `ExArrow.Stream` constructors for every source, `ExArrow.Batch` transforms, `ExArrow.Pipeline` DSL, `ExArrow.Flow` / `ExArrow.GenStage` / `ExArrow.Broadway` integrations, `ExArrow.Sink.*` destinations, and `ExArrow.Telemetry` events. The unit of execution is the Arrow `RecordBatch`. See [What's changed in v0.7.0](#whats-changed-in-v070).
+> **v0.7.2 — stability release.** Fixes optional `:gen_stage` compile issues in some `Mix.install` / cached-build paths. For feature overview, see [What's changed in v0.7.0](#whats-changed-in-v070).
 
 ---
 
@@ -232,11 +232,11 @@ For **path dependencies** in Livebook (`Mix.install`), open notebooks from
 is detected) or use the Hex package:
 
 ```elixir
-Mix.install([{:ex_arrow, "~> 0.7.0"}, {:rustler, "~> 0.36", optional: true}])
+Mix.install([{:ex_arrow, "~> 0.7.2"}, {:rustler, "~> 0.36", optional: true}])
 ```
 
 Alternatively, use the published Hex package so the precompiled NIF is used
-and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.7.0"}])`.
+and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.7.2"}])`.
 
 ---
 
@@ -396,7 +396,7 @@ Interactive notebooks (open in [Livebook](https://livebook.dev)):
 - **[03 ADBC](livebook/03_adbc.livemd)** — Database, Connection, Statement, Stream (`:adbc_package` in Livebook).
 - **[04 ADBC integration](livebook/04_adbc_integration.livemd)** — Connection pooling with NimblePool.
 
-See [livebook/README.md](livebook/README.md) for run instructions.  Notebooks use Hex `~> 0.7.0` by default; opening from `livebook/` in a clone builds from source.
+See [livebook/README.md](livebook/README.md) for run instructions.  Notebooks use Hex `~> 0.7.2` by default; opening from `livebook/` in a clone builds from source.
 
 ---
 
@@ -1065,11 +1065,55 @@ The CI workflow posts a PR alert comment when any scenario regresses more than
 - [ADBC guide](docs/adbc_guide.md) — driver loading, metadata, binding
 - [Benchmarks guide](docs/benchmarks.md) — suites, CI publishing, interpreting results
 
-API reference: `mix docs` or [hexdocs.pm/ex_arrow](https://hexdocs.pm/ex_arrow).
+API reference: `mix docs` or [ex-arrow.hexdocs.pm](https://ex-arrow.hexdocs.pm).
 
 ---
 
 ## Development
+
+### How to build the project
+
+Use this flow for a clean local build:
+
+```bash
+mix clean
+mix deps.get
+mix compile
+```
+
+ExArrow uses precompiled NIFs by default. To force a local Rust build of the
+NIF (recommended when developing the native code), run:
+
+```bash
+mix clean
+EX_ARROW_BUILD=1 mix compile
+```
+
+### How to test the project
+
+Run the test suite:
+
+```bash
+mix test
+```
+
+If you see many failures with `:nif_not_loaded`, stale artifacts are usually the
+cause. Rebuild from clean:
+
+```bash
+mix clean
+EX_ARROW_BUILD=1 mix compile
+mix test
+```
+
+Optional ADBC integration tests require installed drivers/environment setup.
+If those are not available locally, skip ADBC-tagged tests:
+
+```bash
+mix test --exclude adbc --exclude adbc_package --exclude adbc_integration
+```
+
+Common contributor checks:
 
 ```bash
 mix deps.get

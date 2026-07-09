@@ -1,7 +1,7 @@
 defmodule ExArrow.MixProject do
   use Mix.Project
 
-  @version "0.7.1"
+  @version "0.7.2"
   @source_url "https://github.com/thanos/ex_arrow"
 
   def project do
@@ -42,7 +42,7 @@ defmodule ExArrow.MixProject do
       maintainers: ["Thanos Vassilakis"],
       links: %{
         "GitHub" => @source_url,
-        "Docs" => "https://hexdocs.pm/ex_arrow",
+        "Docs" => "https://ex-arrow.hexdocs.pm",
         "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
       },
       files: [

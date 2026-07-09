@@ -31,7 +31,7 @@ local? = File.exists?(Path.join(__DIR__, "../native/ex_arrow_native/Cargo.toml")
     }
   else
     {
-      {:ex_arrow, "~> 0.7.0"},
+      {:ex_arrow, "~> 0.7.2"},
       [],
       [adbc: [drivers: [:sqlite]]]
     }
@@ -43,6 +43,12 @@ Mix.install(deps ++ [ex_arrow_dep] ++ extra_deps, config: config)
 ## Section
 
 This notebook demonstrates the **adbc_package** backend: a single Livebook-friendly integration that uses the [`adbc`](https://hex.pm/packages/adbc) package (and optional **NimblePool**) so you can query a database and get `ExArrow.Stream` results without loading a native ADBC driver. It also demos **connection pooling** when `nimble_pool` is available.
+
+### Documentation
+
+- [ADBC guide](https://ex-arrow.hexdocs.pm/adbc_guide.html) — `:adbc_package` backend and connection pooling
+- API reference: [ExArrow.ADBC.Database](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Database.html), [ExArrow.ADBC.Connection](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Connection.html), [ExArrow.ADBC.Statement](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Statement.html), [ExArrow.ADBC.ConnectionPool](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.ConnectionPool.html)
+- Package overview: [ex-arrow.hexdocs.pm](https://ex-arrow.hexdocs.pm)
 
 ---
 
@@ -165,3 +171,5 @@ IO.inspect(results, label: "Concurrent query results")
 * **Setup**: Configure `:ex_arrow, :adbc_package` (e.g. `[driver: :sqlite, uri: ":memory:"]`) and optionally `:adbc_package_pool_size`. If the manager wasn’t started by the application (e.g. in Livebook), start it with `AdbcPackageManager.start_link/0`.
 * **Flow**: `Database.open(:adbc_package)` → `Connection.open(db)` → `Statement.new(conn, sql)` → `execute` → `ExArrow.Stream` (schema + next), same as in [Tutorial 3: ADBC](03_adbc.livemd).
 * **Pooling**: With `pool_size > 1` and `nimble_pool` in deps, the backend uses a connection pool so multiple concurrent executes can run in parallel.
+
+Further reading: [ADBC guide](https://ex-arrow.hexdocs.pm/adbc_guide.html) · [ExArrow.ADBC.ConnectionPool](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.ConnectionPool.html) · [ex-arrow.hexdocs.pm](https://ex-arrow.hexdocs.pm)

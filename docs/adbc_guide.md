@@ -130,6 +130,98 @@ batch = ExArrow.Stream.next(stream)
 # Consume until nil
 ```
 
+## Local testing
+
+You can test ADBC locally without a dedicated "dummy ADBC service".
+
+### Fast path: `:adbc_package` (SQLite in-memory)
+
+This is the easiest local check and does not require running PostgreSQL/DuckDB:
+
+```bash
+mix test --include adbc_package test/ex_arrow/adbc_package_test.exs
+```
+
+If you hit teardown flakes or `:nif_not_loaded` after dependency/build changes,
+reset and rebuild first:
+
+```bash
+mix clean
+EX_ARROW_BUILD=1 mix compile
+mix test --include adbc_package test/ex_arrow/adbc_package_test.exs
+```
+
+### PostgreSQL integration (`:adbc_integration`)
+
+Start a local PostgreSQL container:
+
+```bash
+docker run --name exarrow-pg -d \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_DB=postgres \
+  -p 5432:5432 postgres:16
+```
+
+Run integration tests:
+
+```bash
+PG_HOST=localhost \
+PG_PORT=5432 \
+PG_USER=postgres \
+PG_PASSWORD=postgres \
+PG_DATABASE=postgres \
+mix test --include adbc_integration test/ex_arrow/adbc_integration_test.exs
+```
+
+If PostgreSQL ADBC is not on your system path, set:
+`PG_ADBC_DRIVER=/path/to/libadbc_driver_postgresql.so` (or `.dylib`).
+
+On macOS, `driver_name: "adbc_driver_postgresql"` usually searches for a
+`.dylib`, but Python wheels may install a `.so` instead. In that case, set
+`PG_ADBC_DRIVER` explicitly to the installed file path.
+
+Find the installed PostgreSQL driver file from Python:
+
+```bash
+python - <<'PY'
+import pathlib
+import adbc_driver_postgresql
+p = pathlib.Path(adbc_driver_postgresql.__file__).parent
+for pattern in ("**/libadbc_driver_postgresql*.so", "**/libadbc_driver_postgresql*.dylib"):
+    matches = list(p.glob(pattern))
+    if matches:
+        print(matches[0])
+        break
+else:
+    raise SystemExit("No PostgreSQL ADBC shared library found in adbc_driver_postgresql package")
+PY
+```
+
+Then run:
+
+```bash
+PG_ADBC_DRIVER=/absolute/path/to/libadbc_driver_postgresql.so \
+PG_HOST=localhost \
+PG_PORT=5432 \
+PG_USER=postgres \
+PG_PASSWORD=postgres \
+PG_DATABASE=postgres \
+mix test --include adbc_integration test/ex_arrow/adbc_integration_test.exs
+```
+
+### DuckDB integration (`:adbc_integration`)
+
+Point tests at your DuckDB ADBC driver:
+
+```bash
+DUCKDB_DRIVER=/path/to/libduckdb.so \
+DUCKDB_DATABASE=:memory: \
+mix test --include adbc_integration test/ex_arrow/adbc_integration_test.exs
+```
+
+On macOS the library is typically a `.dylib`.
+
 ## When no driver is available
 
 ExUnit does not support skipping a test dynamically from `setup`. The ADBC integration test therefore **fails with a clear message** when the driver cannot be opened (instead of passing), so that missing driver setup is visible when running `mix test --include adbc`. Use `mix test --exclude adbc` to omit it when no driver is installed.
