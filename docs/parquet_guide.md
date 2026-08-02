@@ -40,6 +40,12 @@ parquet_bytes = File.read!("/data/events.parquet")
 batch = ExArrow.Stream.next(stream)
 ```
 
+### Compression support
+
+ExArrow reads uncompressed and Zstandard-compressed Parquet files. Compression
+is decoded in native memory as record batches are requested; it does not change
+the lazy row-group streaming behavior.
+
 ### Schema introspection
 
 `ExArrow.Stream.schema/1` never fails for Parquet streams (the schema is

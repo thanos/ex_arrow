@@ -3,6 +3,8 @@ defmodule ExArrow.Parquet.Reader do
   Parquet file reader: open a `.parquet` file or an in-memory binary and
   receive an `ExArrow.Stream` that yields record batches.
 
+  Uncompressed and Zstandard-compressed Parquet files are supported.
+
   The stream interface is identical to `ExArrow.IPC.Reader` and ADBC streams —
   use `ExArrow.Stream.schema/1`, `ExArrow.Stream.next/1`, and
   `ExArrow.Stream.to_list/1` to consume it.

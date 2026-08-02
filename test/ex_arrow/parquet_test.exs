@@ -63,6 +63,21 @@ defmodule ExArrow.ParquetTest do
       assert ExArrow.RecordBatch.num_rows(rt_batch) == ExArrow.RecordBatch.num_rows(batch)
     end
 
+    test "reads a Zstandard-compressed file" do
+      path = Path.expand("../fixtures/parquet_zstd.parquet", __DIR__)
+
+      assert {:ok, stream} = Parquet.Reader.from_file(path)
+      assert {:ok, schema} = Stream.schema(stream)
+      assert Schema.field_names(schema) == ["id", "name"]
+
+      rows =
+        stream
+        |> Stream.to_list()
+        |> Enum.sum_by(&ExArrow.RecordBatch.num_rows/1)
+
+      assert rows == 3
+    end
+
     test "from_file returns error for missing file" do
       assert {:error, _msg} = Parquet.Reader.from_file("/tmp/this_does_not_exist_xyz.parquet")
     end
