@@ -5,186 +5,124 @@ ExArrow supports reading and writing Apache Parquet files via the Arrow Rust
 get the same `ExArrow.Stream` interface on the read side and the same
 schema + batches pattern on the write side.
 
-> **v0.7.0**: `ExArrow.Stream.from_parquet/1` and
-> `from_parquet_binary/1` are the preferred entry points — they tag the
-> stream with `source` metadata and emit `[:ex_arrow, :parquet, :read]`
-> telemetry.  `ExArrow.Parquet.Reader.from_file/1` and `from_binary/1`
-> continue to work unchanged.
+> **v0.8.0**: read pushdown (`:columns`, `:row_groups`, `:filters`), write
+> options (`:compression`, `:row_group_size`, `:dictionary`), footer
+> `ExArrow.Parquet.Metadata`, and multi-file streams
+> (`from_parquet_files/2`, `from_parquet_dir/2`). Preferred entry point:
+> `ExArrow.Stream.from_parquet/2`.
 
 ---
 
-## Reading
-
-### From a file path
+## Reading with pushdown
 
 ```elixir
-{:ok, stream}  = ExArrow.Parquet.Reader.from_file("/data/events.parquet")
-{:ok, schema}  = ExArrow.Stream.schema(stream)
-IO.inspect ExArrow.Schema.field_names(schema)
-# ["timestamp", "user_id", "event_type", "score"]
+{:ok, stream} =
+  ExArrow.Stream.from_parquet("/data/events.parquet",
+    columns: ["user_id", "score"],
+    filters: {:and, [{:gt, "score", 0.9}, {:gte, "user_id", 1}]},
+    row_groups: [0, 2]
+  )
 
-batches = ExArrow.Stream.to_list(stream)
-total_rows = Enum.sum(Enum.map(batches, &ExArrow.RecordBatch.num_rows/1))
+stats = ExArrow.Parquet.Reader.read_stats(stream)
+# %{row_groups_total: 12, row_groups_selected: 2, row_groups_skipped: 10}
+
+{:ok, schema} = ExArrow.Stream.schema(stream)
+ExArrow.Schema.field_names(schema)
+# ["user_id", "score"]
 ```
+
+### Filter AST
+
+| Form | Meaning |
+|------|---------|
+| `{:eq \| :ne \| :gt \| :gte \| :lt \| :lte, col, value}` | Compare column to a scalar |
+| `{:and, [filter, ...]}` | All must match |
+| `{:or, [filter, ...]}` | Any may match |
+
+Values may be integers, floats, UTF-8 strings, or booleans. Row-group
+min/max statistics prune whole groups when possible; remaining rows are
+filtered during decode via parquet-rs `RowFilter`.
+
+### Multi-file / directory
+
+```elixir
+{:ok, stream} = ExArrow.Stream.from_parquet_dir("/data/events/")
+# or
+{:ok, stream} = ExArrow.Stream.from_parquet_files(["a.parquet", "b.parquet"],
+  columns: ["id"]
+)
+
+# Early stop does not open later files:
+Enum.take(stream, 1)
+```
+
+Schema field names of each subsequent file must match the first file.
 
 ### From an in-memory binary
 
-Useful when the Parquet data has been downloaded from S3, received over HTTP,
-or produced in-process:
-
 ```elixir
 parquet_bytes = File.read!("/data/events.parquet")
-# or: HTTPoison.get!(url).body
+{:ok, stream} = ExArrow.Stream.from_parquet_binary(parquet_bytes, columns: ["id"])
+```
 
-{:ok, stream} = ExArrow.Parquet.Reader.from_binary(parquet_bytes)
+---
+
+## Metadata (footer only)
+
+```elixir
+{:ok, meta} = ExArrow.Parquet.Metadata.from_file("/data/events.parquet")
+meta.num_rows
+meta.num_row_groups
+Enum.map(meta.row_groups, & &1.num_rows)
+```
+
+No row data is decoded — useful for interop debugging and planning scans.
+
+---
+
+## Writing with options
+
+```elixir
+:ok =
+  ExArrow.Parquet.Writer.to_file("/out/result.parquet", schema, batches,
+    compression: :zstd,
+    row_group_size: 64_000,
+    dictionary: true
+  )
+
+{:ok, bytes} =
+  ExArrow.Parquet.Writer.to_binary(schema, batches, compression: {:zstd, 3})
+```
+
+Supported `:compression` values: `:none`, `:snappy`, `:zstd`, `{:zstd, level}`,
+`:lz4`, `:gzip`.
+
+---
+
+## Post-read compute (still available)
+
+When pushdown is not enough, use in-memory kernels after reading:
+
+```elixir
 batch = ExArrow.Stream.next(stream)
-```
-
-### Schema introspection
-
-`ExArrow.Stream.schema/1` never fails for Parquet streams (the schema is
-always available after a successful open):
-
-```elixir
-{:ok, stream} = ExArrow.Parquet.Reader.from_file("/data/trades.parquet")
-{:ok, schema} = ExArrow.Stream.schema(stream)
-fields = ExArrow.Schema.fields(schema)
-# [%ExArrow.Field{name: "ts", type: :timestamp}, ...]
+{:ok, mask} = ExArrow.Compute.project(batch, ["is_active"])
+{:ok, active} = ExArrow.Compute.filter(batch, mask)
 ```
 
 ---
 
-## Writing
+## Object storage
 
-You need an `ExArrow.Schema` handle and a list of `ExArrow.RecordBatch` handles.
-These come from any ExArrow source: IPC readers, ADBC execute, Flight do_get,
-or compute kernels.
-
-### To a file
+ExArrow does not embed an S3 client. Download bytes with your cloud library,
+then:
 
 ```elixir
-:ok = ExArrow.Parquet.Writer.to_file("/out/result.parquet", schema, batches)
-```
-
-### To an in-memory binary
-
-```elixir
-{:ok, parquet_bytes} = ExArrow.Parquet.Writer.to_binary(schema, batches)
-byte_size(parquet_bytes)  # ready to upload
-```
-
-### Schema from a batch
-
-When you have batches but not a separate schema handle:
-
-```elixir
-schema = ExArrow.RecordBatch.schema(hd(batches))
-:ok = ExArrow.Parquet.Writer.to_file("/out/result.parquet", schema, batches)
-```
-
-### Schema from a stream before consuming it
-
-```elixir
-{:ok, stream} = ExArrow.IPC.Reader.from_file("/data/source.arrow")
-{:ok, schema} = ExArrow.Stream.schema(stream)
-batches       = ExArrow.Stream.to_list(stream)
-:ok = ExArrow.Parquet.Writer.to_file("/out/copy.parquet", schema, batches)
+{:ok, stream} = ExArrow.Stream.from_parquet_binary(bytes, columns: ["id"])
 ```
 
 ---
 
-## End-to-end examples
+## See also
 
-### ADBC query → Parquet file
+- Livebook: `livebook/05_parquet.livemd`
 
-```elixir
-{:ok, db}   = ExArrow.ADBC.Database.open(driver_name: "adbc_driver_postgresql",
-                uri: "postgresql://user:pass@localhost/mydb")
-{:ok, conn} = ExArrow.ADBC.Connection.open(db)
-{:ok, stmt} = ExArrow.ADBC.Statement.new(conn, "SELECT * FROM sales WHERE year = 2024")
-{:ok, stream} = ExArrow.ADBC.Statement.execute(stmt)
-{:ok, schema} = ExArrow.Stream.schema(stream)
-batches       = ExArrow.Stream.to_list(stream)
-
-:ok = ExArrow.Parquet.Writer.to_file("/data/sales_2024.parquet", schema, batches)
-```
-
-### Parquet → Explorer DataFrame
-
-```elixir
-{:ok, stream} = ExArrow.Parquet.Reader.from_file("/data/report.parquet")
-{:ok, df}     = ExArrow.Explorer.from_stream(stream)
-Explorer.DataFrame.filter(df, score > 0.9)
-```
-
-### Parquet → Nx tensors for ML
-
-```elixir
-{:ok, stream}  = ExArrow.Parquet.Reader.from_file("/data/features.parquet")
-batch          = ExArrow.Stream.next(stream)
-{:ok, tensors} = ExArrow.Nx.to_tensors(batch)
-
-# tensors is %{"feature1" => #Nx.Tensor<...>, "feature2" => #Nx.Tensor<...>}
-inputs = Nx.stack(Map.values(tensors), axis: 1)
-```
-
-### Parquet → filter → write back
-
-```elixir
-{:ok, stream}   = ExArrow.Parquet.Reader.from_file("/data/all_users.parquet")
-batch           = ExArrow.Stream.next(stream)
-
-{:ok, mask}     = ExArrow.Compute.project(batch, ["is_active"])
-{:ok, active}   = ExArrow.Compute.filter(batch, mask)
-
-schema = ExArrow.RecordBatch.schema(active)
-:ok = ExArrow.Parquet.Writer.to_file("/out/active_users.parquet", schema, [active])
-```
-
----
-
-## How Parquet is read
-
-Parquet has a footer that is scanned once on `from_file/1` / `from_binary/1`
-to extract the schema and locate row groups.  Row groups are then decoded
-**lazily** — each call to `ExArrow.Stream.next/1` reads and decodes the next
-row group on demand without touching the rest of the file.
-
-```
-from_file/1  →  footer scan only  (schema cached, reader open)
-ExArrow.Stream.next/1  →  decode row-group 0
-ExArrow.Stream.next/1  →  decode row-group 1
-…
-ExArrow.Stream.next/1  →  nil  (end of file)
-```
-
-Peak memory stays proportional to the largest single row group rather than the
-full file.  If you only need the first *N* batches you can stop calling
-`ExArrow.Stream.next/1` and the remaining row groups are never decoded.
-
-For file-backed streams (`from_file/1`) the underlying OS file handle is kept
-open until the stream resource is garbage-collected; for binary-backed streams
-(`from_binary/1`) the bytes are held in native memory and released at the same
-time.
-
-**Implementation note:** each `ExArrow.Stream.next/1` call runs the native
-`parquet_stream_next` step on a **dirty CPU** NIF scheduler so row-group decode
-(and any file read inside that step) does not block normal BEAM scheduler
-threads.
-
----
-
-## Comparison with IPC
-
-| | Arrow IPC (stream) | Parquet |
-|---|---|---|
-| Random access | No | Parquet footer only |
-| Compression | No (raw) | Yes (Snappy, ZSTD, …) |
-| Interop | Arrow ecosystem | Universal (Python, Spark, …) |
-| Read API | `ExArrow.IPC.Reader` | `ExArrow.Parquet.Reader` |
-| Write API | `ExArrow.IPC.Writer` | `ExArrow.Parquet.Writer` |
-| Stream type | `:ipc` | `:parquet` |
-| Stream interface | identical | identical |
-
-Use IPC for high-throughput in-process pipelines and Flight transport.  Use
-Parquet for on-disk storage, long-term archival, and interop with Python/R/Spark.

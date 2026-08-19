@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-11
+
+### Added
+
+- **Parquet read pushdown**: `ExArrow.Stream.from_parquet/2` and
+  `Parquet.Reader.from_file/2` / `from_binary/2` accept `:columns`,
+  `:row_groups`, and `:filters` (predicate AST with statistics pruning).
+  `Parquet.Reader.read_stats/1` reports selected vs skipped row groups.
+- **Parquet write options**: `:compression` (`:snappy`, `:zstd`,
+  `{:zstd, level}`, `:lz4`, `:gzip`, `:none`), `:row_group_size`, and
+  `:dictionary` on `Writer.to_file/4` and `to_binary/3`.
+- **`ExArrow.Parquet.Metadata`**: footer-only metadata via `from_file/1` and
+  `from_binary/1` (row groups, column stats, key-value metadata).
+- **Multi-file Parquet streams**: `Stream.from_parquet_files/2` and
+  `from_parquet_dir/2` — lazy per-file open with schema checking.
+- **`ExArrow.IPC.File.write/3`**: public IPC file-format writer (wraps existing NIF).
+- **`ExArrow.RecordBatch.concat/1`**: public batch concatenation (wraps existing NIF).
+- **CI Mix.install optional-dep matrix** and cookbook-parity Parquet Livebook.
+
+### Changed
+
+- Enabled Parquet compression codecs (`snap`, `zstd`, `lz4`, gzip) in the
+  native crate so write options work end-to-end.
+
 ## [0.7.2] - 2026-07-08
 
 ### Fixed

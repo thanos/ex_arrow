@@ -182,3 +182,20 @@ jobs:
         run: mix coveralls.github --include adbc_package:true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Mix.install optional-dep smoke (compile only, no NIF) ───────────────────
+  mix-install:
+    name: Mix.install optional-dep smoke
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      EX_ARROW_SKIP_NIF: "1"
+    steps:
+      - uses: actions/checkout@v6.0.3
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1.24.0
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+      - name: Smoke Mix.install combinations
+        run: bash script/mix_install_smoke.sh

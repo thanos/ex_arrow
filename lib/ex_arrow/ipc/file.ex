@@ -67,4 +67,24 @@ defmodule ExArrow.IPC.File do
   end
 
   def get_batch(_file, index), do: {:error, "invalid batch index: #{inspect(index)}"}
+
+  @doc """
+  Write `schema` and `batches` to an Arrow IPC **file**-format path
+  (magic + footer, random-access compatible).
+
+  This is distinct from `ExArrow.IPC.Writer.to_file/3`, which writes the
+  IPC **stream** format.
+  """
+  @spec write(Path.t(), Schema.t(), [RecordBatch.t()]) :: :ok | {:error, String.t()}
+  def write(path, schema, batches)
+      when is_binary(path) and is_list(batches) do
+    case Native.ipc_file_writer_to_file(
+           path,
+           Schema.resource_ref(schema),
+           Enum.map(batches, &RecordBatch.resource_ref/1)
+         ) do
+      :ok -> :ok
+      {:error, msg} -> {:error, msg}
+    end
+  end
 end
