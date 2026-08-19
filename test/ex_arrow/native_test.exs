@@ -100,8 +100,8 @@ defmodule ExArrow.NativeTest do
     end
 
     @tag :no_nif
-    test "parquet_reader_from_binary/1 raises nif_not_loaded" do
-      assert_raise ErlangError, fn -> ExArrow.Native.parquet_reader_from_binary(<<>>) end
+    test "parquet_reader_from_binary/2 raises nif_not_loaded" do
+      assert_raise ErlangError, fn -> ExArrow.Native.parquet_reader_from_binary(<<>>, []) end
     end
 
     @tag :no_nif

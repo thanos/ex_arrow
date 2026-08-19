@@ -13,7 +13,7 @@ defmodule ExArrow.GenStageTest do
     {:ok, reader} = ExArrow.Native.ipc_reader_from_binary(fixture)
     schema_ref = ExArrow.Native.ipc_stream_schema(reader)
     {:ok, batch_ref} = ExArrow.Native.ipc_stream_next(reader)
-    {:ok, pq} = ExArrow.Native.parquet_writer_to_binary(schema_ref, [batch_ref])
+    {:ok, pq} = ExArrow.Native.parquet_writer_to_binary(schema_ref, [batch_ref], [])
     pq
   end
 

@@ -1,15 +1,19 @@
-# ExArrow Quick Start
+<!-- livebook:{"autosave_interval_s":null} -->
+
+# ExArrow Quick Start - fork
 
 ```elixir
+
+
 deps = [
   {:explorer, "~> 0.11"},
   {:kino, "~> 0.19.0"},
   {:adbc, "~> 0.12"},
   {:nimble_pool, "~> 1.1"},
-  {:nx, "~> 0.12"},
+  {:gen_stage, "~> 1.3"},
+  {:nx, "~> 0.12.1"},
   {:telemetry, "~> 1.0"},
   {:flow, "~> 1.2"},
-  {:gen_stage, "~> 1.2"},
   {:broadway, "~> 1.0"}
 ]
 
@@ -23,7 +27,7 @@ local? = File.exists?(Path.join(__DIR__, "../native/ex_arrow_native/Cargo.toml")
     # Force recompile ex_arrow so optional deps (Nx, GenStage, etc.) are
     # detected at compile time. Without this, a cached build from a prior
     # Mix.install (without these deps) will have stub functions.
-    ex_arrow_beam = Path.join(__DIR__, "../_build/dev/lib/ex_arrow/ebin")
+    ex_arrow_beam = Path.join(__DIR__,"/../_build/dev/lib/ex_arrow/ebin")
     if File.dir?(ex_arrow_beam) do
       File.rm_rf!(ex_arrow_beam)
     end
@@ -35,7 +39,7 @@ local? = File.exists?(Path.join(__DIR__, "../native/ex_arrow_native/Cargo.toml")
     }
   else
     {
-      {:ex_arrow, "~> 0.8.0"},
+      {:ex_arrow, "~> 0.7.2"},
       [],
       [adbc: [drivers: [:sqlite]]]
     }

@@ -56,3 +56,5 @@ checksum-Elixir.ExArrow.Native.exs
 
 .DS_Store
 /baoulo/
+
+.tool-versions

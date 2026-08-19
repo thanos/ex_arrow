@@ -222,4 +222,21 @@ defmodule ExArrow.RecordBatch do
       {:error, _} = err -> err
     end
   end
+
+  @doc """
+  Concatenate a list of record batches that share the same schema into one batch.
+
+  Returns `{:ok, batch}` or `{:error, message}` (e.g. empty list or schema mismatch).
+  """
+  @spec concat([t()]) :: {:ok, t()} | {:error, String.t()}
+  def concat([]), do: {:error, "concat requires at least one record batch"}
+
+  def concat(batches) when is_list(batches) do
+    refs = Enum.map(batches, &resource_ref/1)
+
+    case Native.record_batch_concat(refs) do
+      {:ok, ref} -> {:ok, from_ref(ref)}
+      {:error, _} = err -> err
+    end
+  end
 end

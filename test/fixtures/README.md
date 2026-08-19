@@ -1,6 +1,13 @@
-# Test fixtures
+# Arrow IPC fixtures
 
-- **IPC file format (golden):** File-format bytes are produced by `ExArrow.Native.ipc_test_fixture_file_binary/0` (schema: `id` int64, `name` utf8; one batch of 2 rows). Tests use this for `ExArrow.IPC.File.from_binary/1` and for compatibility checks.
-- **IPC from_file:** Tests that need a path write a temp file with `ExArrow.Native.ipc_file_writer_to_file/3` and remove it in an `after` block.
-
-No pre-generated `.arrow` files are committed; the single file-format fixture is generated in Rust for reproducibility.
+- **IPC stream / file format (golden):** produced by
+  `ExArrow.Native.ipc_test_fixture_binary/0` and
+  `ipc_test_fixture_file_binary/0` (schema: `id` int64, `name` utf8; one
+  batch of 2 rows).
+- **Cross-language corpus (v0.8+):** optional suite under
+  `test/fixtures/arrow_testing/` populated by
+  `script/fetch_arrow_testing.sh` from
+  [apache/arrow-testing](https://github.com/apache/arrow-testing).
+  Run with `mix test --include arrow_testing` once fixtures are present.
+  This mirrors the pure-Elixir [`arrow`](https://hex.pm/packages/arrow)
+  package's conformance approach.
