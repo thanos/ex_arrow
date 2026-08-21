@@ -48,19 +48,19 @@ This notebook covers: opening a database, executing SQL, consuming the result st
 
 ### Documentation
 
-- [ADBC guide](https://ex-arrow.hexdocs.pm/adbc_guide.html) — driver loading, `:adbc_package` backend, pooling, local testing
-- API reference: [ExArrow.ADBC.Database](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Database.html), [ExArrow.ADBC.Connection](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Connection.html), [ExArrow.ADBC.Statement](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Statement.html), [ExArrow.ADBC.DriverHelper](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.DriverHelper.html), [ExArrow.ADBC.ConnectionPool](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.ConnectionPool.html)
-- Package overview: [ex-arrow.hexdocs.pm](https://ex-arrow.hexdocs.pm)
+* [ADBC guide](https://ex-arrow.hexdocs.pm/adbc_guide.html) — driver loading, `:adbc_package` backend, pooling, local testing
+* API reference: [ExArrow.ADBC.Database](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Database.html), [ExArrow.ADBC.Connection](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Connection.html), [ExArrow.ADBC.Statement](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Statement.html), [ExArrow.ADBC.DriverHelper](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.DriverHelper.html), [ExArrow.ADBC.ConnectionPool](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.ConnectionPool.html)
+* Package overview: [ex-arrow.hexdocs.pm](https://ex-arrow.hexdocs.pm)
 
 ---
 
 ## 1. Concepts
 
-| Handle     | Module                                                                 | Purpose                                                          |
-| ---------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Database   | [`ExArrow.ADBC.Database`](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Database.html)   | Driver (path or name) + init options (e.g. URI).                 |
+| Handle     | Module                                                                                | Purpose                                                          |
+| ---------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Database   | [`ExArrow.ADBC.Database`](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Database.html)     | Driver (path or name) + init options (e.g. URI).                 |
 | Connection | [`ExArrow.ADBC.Connection`](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Connection.html) | Session from a database.                                         |
-| Statement  | [`ExArrow.ADBC.Statement`](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Statement.html)  | Set SQL, execute → returns `ExArrow.Stream` of record batches. |
+| Statement  | [`ExArrow.ADBC.Statement`](https://ex-arrow.hexdocs.pm/ExArrow.ADBC.Statement.html)   | Set SQL, execute → returns `ExArrow.Stream` of record batches. |
 
 Flow: **Database.open** → **Connection.open** → **Statement.new(conn, sql)** → **execute** → **Stream** (schema + next).
 

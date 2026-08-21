@@ -1,29 +1,66 @@
 # ExArrow — Parquet power-read / write (v0.8)
 
 ```elixir
-Mix.install([
-  {:ex_arrow, "~> 0.8.0"},
-  {:kino, "~> 0.14"}
-])
+deps = [
+  {:pythonx, "~> 0.4.2"},
+  {:kino_pythonx, "~> 0.1.0"},
+  {:kino, "~> 0.19.0"}
+]
+
+# Opened from livebook/ in the repo → local source; otherwise Hex (precompiled NIF).
+local? = File.exists?(Path.join(__DIR__, "../native/ex_arrow_native/Cargo.toml"))
+
+{ex_arrow_dep, extra_deps, config} =
+  if local? do
+    System.put_env("EX_ARROW_BUILD", "1")
+
+    # Force recompile ex_arrow so a cached Mix.install build is not reused.
+    ex_arrow_beam = Path.join(__DIR__, "../_build/dev/lib/ex_arrow/ebin")
+
+    if File.dir?(ex_arrow_beam) do
+      File.rm_rf!(ex_arrow_beam)
+    end
+
+    {
+      {:ex_arrow, path: Path.expand("..", __DIR__)},
+      [{:rustler, "~> 0.36", optional: true}],
+      [rustler_precompiled: [force_build: [ex_arrow: true]]]
+    }
+  else
+    {
+      {:ex_arrow, "~> 0.8.0"},
+      [],
+      []
+    }
+  end
+
+Mix.install(deps ++ [ex_arrow_dep] ++ extra_deps, config: config)
 ```
 
-Docs: [Parquet guide](https://ex-arrow.hexdocs.pm/parquet_guide.html) ·
-[API](https://ex-arrow.hexdocs.pm)
-
-## PyArrow vs ExArrow — read a subset
-
-**PyArrow**
-
-```python
-import pyarrow.parquet as pq
-table = pq.read_table("events.parquet", columns=["id", "score"],
-                      filters=[("score", ">", 0.9)])
+```pyproject.toml
+[project]
+name = "project"
+version = "0.0.0"
+requires-python = "==3.13.*"
+dependencies = ["pyarrow"]
 ```
 
-**ExArrow**
+## Overview
+
+This notebook mirrors common PyArrow Parquet patterns with ExArrow v0.8:
+
+* column projection + predicate pushdown
+* compressed writes and footer metadata
+* multi-file / directory streams
+* IPC file-format write for symmetry
+
+Run the cells **top to bottom** — later cells reuse `path`, `schema`, and `batch`.
+
+---
+
+## Setup: write a small demo Parquet file
 
 ```elixir
-# Build a small demo file
 {:ok, batch} =
   ExArrow.RecordBatch.from_columns(
     ["id", "score"],
@@ -39,21 +76,55 @@ schema = ExArrow.RecordBatch.schema(batch)
 path = Path.join(System.tmp_dir!(), "ex_arrow_parquet_demo.parquet")
 :ok = ExArrow.Parquet.Writer.to_file(path, schema, [batch], compression: :zstd)
 
+{path, ExArrow.RecordBatch.num_rows(batch), ExArrow.Schema.field_names(schema)}
+```
+
+---
+
+## Read a subset (pushdown)
+
+**PyArrow equivalent:**
+
+```python
+import pyarrow.parquet as pq
+
+# Elixir binaries arrive in Pythonx as `bytes` — decode before treating as a path.
+parquet_path = path.decode("utf-8") if isinstance(path, (bytes, bytearray)) else path
+
+table = pq.read_table(
+    parquet_path,
+    columns=["id", "score"],
+    filters=[("score", ">", 0.9)],
+)
+table.num_rows
+```
+
+**ExArrow:**
+
+```elixir
 {:ok, stream} =
   ExArrow.Stream.from_parquet(path,
     columns: ["id", "score"],
     filters: {:gt, "score", 0.9}
   )
 
-ExArrow.Parquet.Reader.read_stats(stream)
-|> IO.inspect(label: "pushdown stats")
+stats = ExArrow.Parquet.Reader.read_stats(stream)
+rows =
+  stream
+  |> ExArrow.Stream.to_list()
+  |> Enum.map(&ExArrow.RecordBatch.num_rows/1)
+  |> Enum.sum()
 
-ExArrow.Stream.to_list(stream)
-|> Enum.map(&ExArrow.RecordBatch.num_rows/1)
-|> IO.inspect(label: "filtered batch rows")
+%{stats: stats, filtered_rows: rows}
 ```
 
-## Compressed write
+Both cells return `2` — the rows where `score > 0.9` (`0.95` and `1.2`). Livebook
+shares the Elixir `path` binding into the Python cell automatically; Pythonx encodes
+Elixir binaries as Python `bytes`, so decode to `str` before passing to PyArrow.
+
+---
+
+## Compressed write + footer metadata
 
 ```elixir
 :ok =
@@ -63,14 +134,23 @@ ExArrow.Stream.to_list(stream)
   )
 
 {:ok, meta} = ExArrow.Parquet.Metadata.from_file(path)
-IO.inspect(meta.num_row_groups, label: "row groups")
-IO.inspect(hd(meta.row_groups).columns, label: "column stats")
+
+%{
+  num_rows: meta.num_rows,
+  num_row_groups: meta.num_row_groups,
+  columns: hd(meta.row_groups).columns
+}
 ```
+
+Column maps include `path`, `compression`, `encodings`, `min`, and `max`.
+
+---
 
 ## Partitioned directory (multi-file)
 
 ```elixir
 dir = Path.join(System.tmp_dir!(), "ex_arrow_parquet_parts")
+File.rm_rf!(dir)
 File.mkdir_p!(dir)
 
 for {name, id} <- [{"part-0.parquet", 10}, {"part-1.parquet", 20}] do
@@ -91,14 +171,31 @@ for {name, id} <- [{"part-0.parquet", 10}, {"part-1.parquet", 20}] do
 end
 
 {:ok, multi} = ExArrow.Stream.from_parquet_dir(dir, filters: {:gte, "id", 15})
-IO.inspect(Enum.map(ExArrow.Stream.to_list(multi), &ExArrow.RecordBatch.num_rows/1))
+row_counts = Enum.map(ExArrow.Stream.to_list(multi), &ExArrow.RecordBatch.num_rows/1)
+
+# Early abandon releases the multi-file Agent.
+:ok = ExArrow.Stream.close(multi)
+
+%{opened_dir: dir, filtered_batch_rows: row_counts}
 ```
+
+Expect one batch with `1` row (`id == 20`).
+
+---
 
 ## IPC file writer symmetry
 
 ```elixir
-ipc_path = Path.join(System.tmp_dir!(), "demo.arrow")
+ipc_path = Path.join(System.tmp_dir!(), "ex_arrow_parquet_demo.arrow")
 :ok = ExArrow.IPC.File.write(ipc_path, schema, [batch])
 {:ok, file} = ExArrow.IPC.File.from_file(ipc_path)
-ExArrow.IPC.File.batch_count(file)
+
+%{
+  path: ipc_path,
+  batch_count: ExArrow.IPC.File.batch_count(file),
+  fields:
+    case ExArrow.IPC.File.schema(file) do
+      {:ok, sch} -> ExArrow.Schema.field_names(sch)
+    end
+}
 ```
