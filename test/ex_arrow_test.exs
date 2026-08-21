@@ -167,7 +167,9 @@ defmodule ExArrowTest do
 
   describe "stubs (Flight, ADBC)" do
     test "Flight.Client.connect to non-existent server returns error" do
-      assert {:error, _} = ExArrow.Flight.Client.connect("localhost", 39_283, [])
+      # Call ClientImpl directly: concurrent async suites set
+      # `:flight_client_impl` to ClientMock via shared Application env.
+      assert {:error, _} = ExArrow.Flight.ClientImpl.connect("localhost", 39_283, [])
     end
 
     test "Flight.Server.start_link(0) returns server or error" do
@@ -178,7 +180,8 @@ defmodule ExArrowTest do
     end
 
     test "ADBC.Database.open returns error when driver path invalid" do
-      assert {:error, msg} = ExArrow.ADBC.Database.open("/path/to/driver")
+      # Same Application-env race as Flight: force the real impl.
+      assert {:error, msg} = ExArrow.ADBC.DatabaseImpl.open("/path/to/driver")
       assert msg =~ "driver file not found"
     end
   end
