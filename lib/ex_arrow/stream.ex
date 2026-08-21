@@ -514,14 +514,10 @@ defmodule ExArrow.Stream do
         {{:error, msg}, state}
 
       {:ok, %{resource: ref} = opened} ->
-        case schema(opened) do
-          {:ok, sch} ->
-            names = Schema.field_names(sch)
-            multi_accept_schema(state, path, ref, names)
-
-          {:error, _} = err ->
-            {err, state}
-        end
+        # Parquet schema/1 is typed as always {:ok, schema} after a successful open.
+        {:ok, sch} = schema(opened)
+        names = Schema.field_names(sch)
+        multi_accept_schema(state, path, ref, names)
     end
   end
 

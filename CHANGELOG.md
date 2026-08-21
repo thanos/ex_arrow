@@ -26,7 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ExArrow.RecordBatch.concat/1`**: public batch concatenation (wraps existing NIF).
 - **CI Mix.install optional-dep matrix** and a Parquet Livebook with
   PyArrow-equivalent examples. Optional apache/arrow-testing fixtures are
-  local-only (`script/fetch_arrow_testing.sh` + `mix test --include arrow_testing`).
+  local-only by default (`script/fetch_arrow_testing.sh` +
+  `mix test --include arrow_testing`); an optional `workflow_dispatch`
+  CI job can run the same suite without gating PRs.
 
 ### Changed
 

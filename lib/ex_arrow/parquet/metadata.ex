@@ -15,6 +15,7 @@ defmodule ExArrow.Parquet.Metadata do
   @type column_stats :: %{
           path: String.t(),
           compression: String.t(),
+          encodings: [String.t()],
           num_values: integer(),
           min: String.t() | nil,
           max: String.t() | nil
@@ -80,6 +81,7 @@ defmodule ExArrow.Parquet.Metadata do
     %{
       path: Map.fetch!(col, :path),
       compression: Map.fetch!(col, :compression),
+      encodings: Map.get(col, :encodings, []),
       num_values: Map.fetch!(col, :num_values),
       min: Map.get(col, :min),
       max: Map.get(col, :max)

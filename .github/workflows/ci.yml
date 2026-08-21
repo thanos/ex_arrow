@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 # Skip NIF for all jobs by default — no download, no compile, just stubs.
 # The test-rust job overrides this with EX_ARROW_BUILD=1 and EX_ARROW_SKIP_NIF=false.
@@ -199,3 +200,30 @@ jobs:
           otp-version: "29"
       - name: Smoke Mix.install combinations
         run: bash script/mix_install_smoke.sh
+
+  # ── Optional apache/arrow-testing corpus (manual / non-blocking) ────────────
+  # Local-first suite; also runnable here via workflow_dispatch. Does not gate PRs.
+  arrow-testing:
+    name: arrow-testing (optional)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      EX_ARROW_SKIP_NIF: "false"
+      EX_ARROW_BUILD: "1"
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    steps:
+      - uses: actions/checkout@v6.0.3
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1.24.0
+        with:
+          elixir-version: "1.20"
+          otp-version: "29"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+      - name: Fetch apache/arrow-testing fixtures
+        run: bash script/fetch_arrow_testing.sh
+      - name: Run arrow_testing suite
+        run: mix test --include arrow_testing

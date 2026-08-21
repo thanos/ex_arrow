@@ -183,6 +183,25 @@ defmodule ExArrow.ParquetTest do
       assert meta.num_row_groups == ExArrow.RecordBatch.num_rows(batch)
       cols = hd(meta.row_groups).columns
       assert Enum.all?(cols, &(&1.compression =~ ~r/SNAPPY/i))
+
+      # dictionary: false must not advertise dictionary encodings on chunks.
+      assert Enum.all?(cols, fn col ->
+               encodings = Enum.map(col.encodings, &String.upcase/1)
+               not Enum.any?(encodings, &(&1 =~ "DICTIONARY"))
+             end)
+
+      assert {:ok, with_dict} =
+               Parquet.Writer.to_binary(schema, [batch],
+                 compression: :snappy,
+                 dictionary: true
+               )
+
+      assert {:ok, meta_dict} = Parquet.Metadata.from_binary(with_dict)
+      dict_cols = hd(meta_dict.row_groups).columns
+
+      assert Enum.any?(dict_cols, fn col ->
+               Enum.any?(col.encodings, &(String.upcase(&1) =~ "DICTIONARY"))
+             end)
     end
 
     test "rejects invalid compression" do
@@ -194,18 +213,12 @@ defmodule ExArrow.ParquetTest do
       assert msg =~ "compression"
     end
 
-    test "empty batch list write path is defined" do
+    test "empty batch list writes a valid empty Parquet file" do
       {schema, _batch} = source_batch()
-
-      case Parquet.Writer.to_binary(schema, []) do
-        {:ok, bin} ->
-          assert is_binary(bin)
-          assert {:ok, meta} = Parquet.Metadata.from_binary(bin)
-          assert meta.num_rows == 0
-
-        {:error, msg} ->
-          assert is_binary(msg)
-      end
+      assert {:ok, bin} = Parquet.Writer.to_binary(schema, [])
+      assert is_binary(bin)
+      assert {:ok, meta} = Parquet.Metadata.from_binary(bin)
+      assert meta.num_rows == 0
     end
   end
 
@@ -301,6 +314,19 @@ defmodule ExArrow.ParquetTest do
                Parquet.Reader.from_binary(bin, filters: {:eq, "id", 5_000_000_000})
 
       assert msg =~ ~r/out of range|Int32/i
+    end
+
+    test "filter with non-representable float against Float32 column errors" do
+      n = 2
+      vals = for i <- 1..n, into: <<>>, do: <<i * 1.0::little-float-32>>
+      assert {:ok, batch} = ExArrow.RecordBatch.from_columns(["x"], [vals], ["f32"], n)
+      schema = ExArrow.RecordBatch.schema(batch)
+      assert {:ok, bin} = Parquet.Writer.to_binary(schema, [batch])
+
+      assert {:error, msg} =
+               Parquet.Reader.from_binary(bin, filters: {:eq, "x", 1.0e40})
+
+      assert msg =~ ~r/Float32|representable/i
     end
 
     test "row_groups selects subset" do

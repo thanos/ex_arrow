@@ -57,6 +57,7 @@ rustler::atoms! {
     nil,
     ok,
     done,
+    encodings,
     path,
     num_values,
     min,
@@ -612,12 +613,11 @@ fn stats_may_match(stats: &Statistics, expr: &FilterExpr, v: &FilterValue) -> bo
             let (Some(min), Some(max)) = (s.min_opt(), s.max_opt()) else {
                 return true;
             };
-            match expr {
-                FilterExpr::Eq(_, _) => *val >= *min && *val <= *max,
-                FilterExpr::Ne(_, _) => true,
-                // Boolean ordering is uncommon; keep groups rather than guess.
-                _ => true,
-            }
+            // Arrow/Parquet treat false < true.
+            let min_i = i64::from(*min);
+            let max_i = i64::from(*max);
+            let val_i = i64::from(*val);
+            int_range_may_match(expr, min_i, max_i, val_i)
         }
         (Statistics::ByteArray(s), FilterValue::Utf8(val)) => {
             let (Some(min), Some(max)) = (s.min_opt(), s.max_opt()) else {
@@ -950,9 +950,15 @@ fn encode_metadata<'a>(env: Env<'a>, metadata: &parquet::file::metadata::Parquet
                 ),
                 _ => (None, None),
             };
+            let encoding_names: Vec<String> = col
+                .encodings()
+                .iter()
+                .map(|e| format!("{e:?}"))
+                .collect();
             let col_map = rustler::types::map::map_new(env);
             let col_map = put_atom_key(env, col_map, path(), col_path.encode(env));
             let col_map = put_atom_key(env, col_map, compression(), col_compression.encode(env));
+            let col_map = put_atom_key(env, col_map, encodings(), encoding_names.encode(env));
             let col_map = put_atom_key(env, col_map, num_values(), col.num_values().encode(env));
             let col_map = match min_s {
                 Some(s) => put_atom_key(env, col_map, min(), s.encode(env)),

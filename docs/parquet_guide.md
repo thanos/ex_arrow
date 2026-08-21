@@ -76,6 +76,7 @@ parquet_bytes = File.read!("/data/events.parquet")
 meta.num_rows
 meta.num_row_groups
 Enum.map(meta.row_groups, & &1.num_rows)
+# Per-column chunk stats include path, compression, encodings, min/max
 ```
 
 No row data is decoded — useful for interop debugging and planning scans.
