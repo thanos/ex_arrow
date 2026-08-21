@@ -27,7 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Enabled Parquet compression codecs (`snap`, `zstd`, `lz4`, gzip) in the
-  native crate so write options work end-to-end.
+  native crate so write options work end-to-end. Includes a DuckDB-generated
+  ZSTD fixture and regression test for third-party compressed reads
+  (thanks [@mindreframer](https://github.com/mindreframer) —
+  [#243](https://github.com/thanos/ex_arrow/pull/243)).
 
 ## [0.7.2] - 2026-07-08
 
