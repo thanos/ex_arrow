@@ -117,6 +117,20 @@ Compares Arrow `RecordBatch` against `list(map())` for build, transform
 (column select), and drain (sum a column) at 1K / 100K / 1M rows.  Quantifies
 the cost of going through row maps versus staying in native Arrow memory.
 
+### v0.8.0 Parquet pushdown (`bench/parquet_pushdown_bench.exs`)
+
+A standalone rough-timing helper (uses `:timer.tc/1`, not Benchee) that
+compares reading a 100K-row Parquet file with a pushdown filter against a
+full read plus post-read projection (no scalar-predicate kernel exists yet
+for an equivalent post-filter).  Run it directly:
+
+```bash
+MIX_ENV=dev mix run bench/parquet_pushdown_bench.exs
+```
+
+It prints elapsed milliseconds and the row-group selection stats after open.
+Not part of `bench/run_all.exs` (no HTML/JSON output).
+
 ## Published results
 
 Benchmark results from every push to `main` are stored in the `gh-pages`

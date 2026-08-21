@@ -1,7 +1,7 @@
 defmodule ExArrow.MixProject do
   use Mix.Project
 
-  @version "0.7.2"
+  @version "0.8.0"
   @source_url "https://github.com/thanos/ex_arrow"
 
   def project do
@@ -134,7 +134,7 @@ defmodule ExArrow.MixProject do
       groups_for_modules: [
         "Data interchange": [ExArrow.DataFrame, ExArrow.Schema.Mapper],
         IPC: [ExArrow.IPC.Reader, ExArrow.IPC.Writer, ExArrow.IPC.File],
-        Parquet: [ExArrow.Parquet.Reader, ExArrow.Parquet.Writer],
+        Parquet: [ExArrow.Parquet.Reader, ExArrow.Parquet.Writer, ExArrow.Parquet.Metadata],
         "Compute kernels": [ExArrow.Compute],
         "Batch operations": [ExArrow.Batch],
         Pipeline: [

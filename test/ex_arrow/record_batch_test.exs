@@ -63,6 +63,21 @@ defmodule ExArrow.RecordBatchTest do
     end
   end
 
+  describe "concat/1" do
+    test "public wrapper concatenates batches" do
+      {:ok, ipc_bin} = ExArrow.Native.ipc_test_fixture_binary()
+      {:ok, stream} = IPC.Reader.from_binary(ipc_bin)
+      batch = Stream.next(stream)
+
+      assert {:ok, merged} = RecordBatch.concat([batch, batch])
+      assert RecordBatch.num_rows(merged) == RecordBatch.num_rows(batch) * 2
+    end
+
+    test "empty list returns error" do
+      assert {:error, _} = RecordBatch.concat([])
+    end
+  end
+
   describe "from_columns/4 — happy path" do
     test "single s64 column, one row" do
       assert {:ok, %RecordBatch{} = batch} =

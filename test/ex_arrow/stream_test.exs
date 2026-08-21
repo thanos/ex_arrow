@@ -274,13 +274,13 @@ defmodule ExArrow.StreamTest do
     {:ok, reader} = ExArrow.Native.ipc_reader_from_binary(ipc_bin)
     schema_ref = ExArrow.Native.ipc_stream_schema(reader)
     {:ok, batch_ref} = ExArrow.Native.ipc_stream_next(reader)
-    {:ok, parquet_bin} = ExArrow.Native.parquet_writer_to_binary(schema_ref, [batch_ref])
+    {:ok, parquet_bin} = ExArrow.Native.parquet_writer_to_binary(schema_ref, [batch_ref], [])
     parquet_bin
   end
 
   # Returns a live parquet stream resource (already opened via the NIF).
   defp build_parquet_stream do
-    {:ok, stream_ref} = ExArrow.Native.parquet_reader_from_binary(parquet_fixture())
+    {:ok, stream_ref} = ExArrow.Native.parquet_reader_from_binary(parquet_fixture(), [])
     stream_ref
   end
 end
@@ -301,7 +301,7 @@ defmodule ExArrow.StreamConstructorsTest do
     {:ok, reader} = ExArrow.Native.ipc_reader_from_binary(ipc_binary())
     schema_ref = ExArrow.Native.ipc_stream_schema(reader)
     {:ok, batch_ref} = ExArrow.Native.ipc_stream_next(reader)
-    {:ok, parquet_bin} = ExArrow.Native.parquet_writer_to_binary(schema_ref, [batch_ref])
+    {:ok, parquet_bin} = ExArrow.Native.parquet_writer_to_binary(schema_ref, [batch_ref], [])
     parquet_bin
   end
 

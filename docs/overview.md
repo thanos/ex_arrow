@@ -3,6 +3,34 @@
 The main overview, installation, quick start, and usage examples live in the
 [README on GitHub](https://github.com/thanos/ex_arrow/blob/main/README.md).
 
+## What's changed in v0.8.0
+
+v0.8.0 makes Parquet a first-class citizen for larger-than-memory workloads.
+Read pushdown, write options, footer metadata, and multi-file directory
+streams let you scan only the data you need.
+
+New / changed:
+
+- **Read pushdown** — `ExArrow.Stream.from_parquet/2` and
+  `Parquet.Reader.from_file/2` / `from_binary/2` accept `:columns`
+  (projection), `:row_groups` (selection), and `:filters` (a predicate AST
+  with row-group statistics pruning). `Parquet.Reader.read_stats/1` reports
+  selected vs skipped row groups.
+- **Write options** — `:compression` (`:snappy`, `:zstd`, `{:zstd, level}`,
+  `:lz4`, `:gzip`, `:none`, alias `:uncompressed`), `:row_group_size`, and `:dictionary` on
+  `Writer.to_file/4` and `to_binary/3`.
+- **`ExArrow.Parquet.Metadata`** — footer-only metadata (`from_file/1`,
+  `from_binary/1`): row groups, per-column statistics, key-value metadata.
+- **Multi-file streams** — `ExArrow.Stream.from_parquet_files/2` and
+  `from_parquet_dir/2` lazily open one file at a time with schema checking;
+  early `Enum.take/2` does not open later files.
+- **`ExArrow.IPC.File.write/3`** and **`ExArrow.RecordBatch.concat/1`** —
+  public wrappers over existing NIFs.
+- Optional `arrow_testing` IPC conformance suite and a Mix.install
+  optional-dep smoke CI job.
+
+See the [Parquet guide](parquet_guide.md) and `livebook/05_parquet.livemd`.
+
 ## v0.7.2 stability update
 
 v0.7.2 fixes optional `:gen_stage` compilation in `Mix.install` and cached-build

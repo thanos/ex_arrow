@@ -149,14 +149,20 @@ defmodule ExArrow.Native do
   def compute_sort(_batch_ref, _column_name, _ascending), do: :erlang.nif_error(:nif_not_loaded)
 
   # Parquet
-  def parquet_reader_from_file(_path), do: :erlang.nif_error(:nif_not_loaded)
-  def parquet_reader_from_binary(_binary), do: :erlang.nif_error(:nif_not_loaded)
+  def parquet_reader_from_file(_path, _opts), do: :erlang.nif_error(:nif_not_loaded)
+  def parquet_reader_from_binary(_binary, _opts), do: :erlang.nif_error(:nif_not_loaded)
   def parquet_stream_schema(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
   def parquet_stream_next(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
-  def parquet_writer_to_file(_path, _schema_ref, _batches), do: :erlang.nif_error(:nif_not_loaded)
+  def parquet_stream_read_stats(_stream_ref), do: :erlang.nif_error(:nif_not_loaded)
 
-  def parquet_writer_to_binary(_schema_ref, _batches),
+  def parquet_writer_to_file(_path, _schema_ref, _batches, _opts),
     do: :erlang.nif_error(:nif_not_loaded)
+
+  def parquet_writer_to_binary(_schema_ref, _batches, _opts),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  def parquet_metadata_from_file(_path), do: :erlang.nif_error(:nif_not_loaded)
+  def parquet_metadata_from_binary(_binary), do: :erlang.nif_error(:nif_not_loaded)
 
   # CDI (Arrow C Data Interface)
   def cdi_export(_batch_ref), do: :erlang.nif_error(:nif_not_loaded)

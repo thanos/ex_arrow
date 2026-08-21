@@ -57,12 +57,14 @@ defmodule ExArrow.Stream do
   """
   alias ExArrow.ADBC.Connection, as: ADBCConnection
   alias ExArrow.ADBC.Statement, as: ADBCStatement
+  alias ExArrow.Parquet.Opts, as: ParquetOpts
+  alias ExArrow.Parquet.Reader, as: ParquetReader
   alias ExArrow.RecordBatch
   alias ExArrow.Schema
 
   @opaque t :: %__MODULE__{
-            resource: reference(),
-            backend: :ipc | :adbc | :parquet | :flight_sql,
+            resource: reference() | pid() | nil,
+            backend: :ipc | :adbc | :parquet | :parquet_multi | :flight_sql,
             source: term()
           }
   defstruct [:resource, :source, backend: :ipc]
@@ -116,19 +118,30 @@ defmodule ExArrow.Stream do
   @doc """
   Open a Parquet file at `path` for lazy row-group streaming.
 
-  Delegates to `ExArrow.Parquet.Reader.from_file/1`, tags the stream with
-  `source: {:parquet, path}`, and emits a `[:ex_arrow, :parquet, :read]`
-  telemetry event on successful open.  Returns `{:ok, stream}` or
-  `{:error, message}`.
+  Delegates to `ExArrow.Parquet.Reader.from_file/2`. Pushdown `opts`
+  (`:columns`, `:row_groups`, `:filters`) are forwarded. Emits
+  `[:ex_arrow, :parquet, :read]` with row-group selection stats when available.
 
   ## Example
 
-      {:ok, stream} = ExArrow.Stream.from_parquet("/data/events.parquet")
+      {:ok, stream} =
+        ExArrow.Stream.from_parquet("/data/events.parquet",
+          columns: ["id"],
+          filters: {:gt, "id", 10}
+        )
   """
-  @spec from_parquet(Path.t()) :: {:ok, t()} | {:error, String.t()}
-  def from_parquet(path) when is_binary(path) do
-    with {:ok, stream} <- ExArrow.Parquet.Reader.from_file(path) do
-      ExArrow.Telemetry.execute([:ex_arrow, :parquet, :read], %{}, %{source: path})
+  @spec from_parquet(Path.t(), keyword()) :: {:ok, t()} | {:error, String.t()}
+  def from_parquet(path, opts \\ []) when is_binary(path) and is_list(opts) do
+    with {:ok, stream} <- ParquetReader.from_file(path, opts) do
+      stats = safe_read_stats(stream)
+
+      ExArrow.Telemetry.execute([:ex_arrow, :parquet, :read], %{}, %{
+        source: path,
+        opts: opts,
+        row_groups_skipped: stats[:row_groups_skipped],
+        row_groups_selected: stats[:row_groups_selected]
+      })
+
       {:ok, %{stream | source: {:parquet, path}}}
     end
   end
@@ -136,16 +149,123 @@ defmodule ExArrow.Stream do
   @doc """
   Open a Parquet stream from an in-memory `binary`.
 
-  Delegates to `ExArrow.Parquet.Reader.from_binary/1` and emits a
-  `[:ex_arrow, :parquet, :read]` telemetry event on successful open with
-  `source: :binary`.
+  See `from_parquet/2` for pushdown `opts`.
   """
-  @spec from_parquet_binary(binary()) :: {:ok, t()} | {:error, String.t()}
-  def from_parquet_binary(binary) when is_binary(binary) do
-    with {:ok, stream} <- ExArrow.Parquet.Reader.from_binary(binary) do
-      ExArrow.Telemetry.execute([:ex_arrow, :parquet, :read], %{}, %{source: :binary})
+  @spec from_parquet_binary(binary(), keyword()) :: {:ok, t()} | {:error, String.t()}
+  def from_parquet_binary(binary, opts \\ []) when is_binary(binary) and is_list(opts) do
+    with {:ok, stream} <- ParquetReader.from_binary(binary, opts) do
+      stats = safe_read_stats(stream)
+
+      ExArrow.Telemetry.execute([:ex_arrow, :parquet, :read], %{}, %{
+        source: :binary,
+        opts: opts,
+        row_groups_skipped: stats[:row_groups_skipped],
+        row_groups_selected: stats[:row_groups_selected]
+      })
+
       {:ok, %{stream | source: {:parquet, :binary}}}
     end
+  end
+
+  @doc """
+  Lazily stream multiple Parquet files in lexicographic path order.
+
+  Files are opened one at a time — early `Enum.take/2` does not open later
+  files. Schema field names of each subsequent file must match the first
+  file or an error is returned from `next/1`.
+
+  Pushdown `opts` are applied to every file.
+
+  Partially consumed multi-file streams hold an `Agent` and an open file
+  handle; call `close/1` when abandoning the stream early (e.g. after
+  `Enum.take/2`) from a long-lived process.
+  """
+  @spec from_parquet_files([Path.t()], keyword()) :: {:ok, t()} | {:error, String.t()}
+  def from_parquet_files(paths, opts \\ [])
+      when is_list(paths) and is_list(opts) do
+    cond do
+      paths == [] ->
+        {:error, "from_parquet_files/2 requires at least one path"}
+
+      not Enum.all?(paths, &is_binary/1) ->
+        {:error, "from_parquet_files/2 paths must be strings"}
+
+      true ->
+        case ParquetOpts.validate_read(opts) do
+          {:ok, opts} ->
+            {:ok, agent} =
+              Agent.start_link(fn ->
+                %{
+                  paths: paths,
+                  index: 0,
+                  opts: opts,
+                  schema_names: nil,
+                  current_ref: nil,
+                  current_path: nil,
+                  opened_paths: []
+                }
+              end)
+
+            {:ok,
+             %__MODULE__{
+               resource: agent,
+               backend: :parquet_multi,
+               source: {:parquet_multi, paths}
+             }}
+
+          {:error, _} = err ->
+            err
+        end
+    end
+  end
+
+  @doc """
+  Release resources held by a stream.
+
+  For `:parquet_multi` streams this stops the backing `Agent` (and drops the
+  open Parquet handle). Other backends are GC-safe and this is a no-op.
+  """
+  @spec close(t()) :: :ok
+  def close(%__MODULE__{resource: agent, backend: :parquet_multi}) do
+    if Process.alive?(agent), do: Agent.stop(agent)
+    :ok
+  end
+
+  def close(%__MODULE__{}), do: :ok
+
+  @doc false
+  @spec multi_opened_paths(t()) :: [Path.t()]
+  def multi_opened_paths(%__MODULE__{resource: agent, backend: :parquet_multi}) do
+    Agent.get(agent, &Enum.reverse(&1.opened_paths))
+  end
+
+  def multi_opened_paths(_), do: []
+
+  @doc """
+  Stream all `*.parquet` files under `dir` (non-recursive), sorted lexicographically.
+
+  Options are the same as `from_parquet/2`.
+  """
+  @spec from_parquet_dir(Path.t(), keyword()) :: {:ok, t()} | {:error, String.t()}
+  def from_parquet_dir(dir, opts \\ []) when is_binary(dir) and is_list(opts) do
+    pattern = Path.join(dir, "*.parquet")
+
+    paths =
+      pattern
+      |> Path.wildcard()
+      |> Enum.sort()
+
+    if paths == [] do
+      {:error, "no parquet files matching #{pattern}"}
+    else
+      from_parquet_files(paths, opts)
+    end
+  end
+
+  defp safe_read_stats(%__MODULE__{backend: :parquet} = stream) do
+    ParquetReader.read_stats(stream)
+  rescue
+    _ -> %{}
   end
 
   @doc """
@@ -253,6 +373,20 @@ defmodule ExArrow.Stream do
     {:ok, Schema.from_ref(schema_ref)}
   end
 
+  def schema(%__MODULE__{resource: agent, backend: :parquet_multi}) do
+    case multi_ensure_open(agent) do
+      {:ok, parquet_ref} ->
+        schema_ref = native().parquet_stream_schema(parquet_ref)
+        {:ok, Schema.from_ref(schema_ref)}
+
+      :exhausted ->
+        {:error, "parquet multi-file stream exhausted"}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
   def schema(%__MODULE__{resource: ref, backend: :flight_sql}) do
     case native().flight_sql_stream_schema(ref) do
       {:error, msg} -> {:error, msg}
@@ -302,6 +436,32 @@ defmodule ExArrow.Stream do
     end
   end
 
+  def next(%__MODULE__{resource: agent, backend: :parquet_multi} = stream) do
+    case multi_ensure_open(agent) do
+      :exhausted ->
+        nil
+
+      {:error, _} = err ->
+        err
+
+      {:ok, parquet_ref} ->
+        case native().parquet_stream_next(parquet_ref) do
+          {:ok, batch_ref} ->
+            emit_batch(stream, RecordBatch.from_ref(batch_ref))
+
+          {:error, msg} ->
+            {:error, msg}
+
+          :done ->
+            case multi_advance(agent) do
+              :done -> nil
+              :ok -> next(stream)
+              {:error, _} = err -> err
+            end
+        end
+    end
+  end
+
   def next(%__MODULE__{resource: ref, backend: :flight_sql} = stream) do
     case native().flight_sql_stream_next(ref) do
       :done -> nil
@@ -312,11 +472,93 @@ defmodule ExArrow.Stream do
     end
   end
 
+  defp emit_batch(%__MODULE__{backend: :parquet_multi, resource: agent}, batch) do
+    source =
+      case Agent.get(agent, & &1.current_path) do
+        nil -> {:parquet_multi, :unknown}
+        path -> {:parquet, path}
+      end
+
+    measurements = ExArrow.Telemetry.batch_measurements(batch)
+    metadata = %{source: source, schema: nil}
+    ExArrow.Telemetry.execute([:ex_arrow, :stream, :batch], measurements, metadata)
+    batch
+  end
+
   defp emit_batch(%__MODULE__{source: source}, batch) do
     measurements = ExArrow.Telemetry.batch_measurements(batch)
     metadata = %{source: source, schema: nil}
     ExArrow.Telemetry.execute([:ex_arrow, :stream, :batch], measurements, metadata)
     batch
+  end
+
+  defp multi_ensure_open(agent) do
+    Agent.get_and_update(agent, fn state ->
+      cond do
+        state.current_ref != nil ->
+          {{:ok, state.current_ref}, state}
+
+        state.index >= length(state.paths) ->
+          {:exhausted, state}
+
+        true ->
+          path = Enum.at(state.paths, state.index)
+          multi_open_path(state, path)
+      end
+    end)
+  end
+
+  defp multi_open_path(state, path) do
+    case ParquetReader.from_file(path, state.opts) do
+      {:error, msg} ->
+        {{:error, msg}, state}
+
+      {:ok, %{resource: ref} = opened} ->
+        # Parquet schema/1 is typed as always {:ok, schema} after a successful open.
+        {:ok, sch} = schema(opened)
+        names = Schema.field_names(sch)
+        multi_accept_schema(state, path, ref, names)
+    end
+  end
+
+  defp multi_accept_schema(state, path, ref, names) do
+    cond do
+      is_nil(state.schema_names) ->
+        {{:ok, ref},
+         %{
+           state
+           | current_ref: ref,
+             current_path: path,
+             schema_names: names,
+             opened_paths: [path]
+         }}
+
+      state.schema_names == names ->
+        {{:ok, ref},
+         %{
+           state
+           | current_ref: ref,
+             current_path: path,
+             opened_paths: [path | state.opened_paths]
+         }}
+
+      true ->
+        {{:error,
+          "schema mismatch in #{path}: expected columns #{inspect(state.schema_names)}, got #{inspect(names)}"},
+         state}
+    end
+  end
+
+  defp multi_advance(agent) do
+    Agent.get_and_update(agent, fn state ->
+      next_index = state.index + 1
+
+      if next_index >= length(state.paths) do
+        {:done, %{state | current_ref: nil, current_path: nil, index: next_index}}
+      else
+        {:ok, %{state | current_ref: nil, current_path: nil, index: next_index}}
+      end
+    end)
   end
 
   @doc """

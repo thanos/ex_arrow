@@ -9,13 +9,17 @@
 #                    run with: EX_ARROW_SKIP_NIF=1 mix test --include no_nif
 #                    (--include overrides the default exclusion; --only would
 #                    still exclude the tag because it is in the exclude list)
+#   arrow_testing  – apache/arrow-testing IPC fixtures
+#                    populate with: bash script/fetch_arrow_testing.sh
+#                    run with: mix test --include arrow_testing
 ExUnit.start(
   exclude: [
     adbc: true,
     adbc_package: true,
     adbc_integration: true,
     no_nif: true,
-    flight_sql_integration: true
+    flight_sql_integration: true,
+    arrow_testing: true
   ]
 )
 

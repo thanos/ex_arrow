@@ -9,7 +9,15 @@
 
 Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, Arrow Flight SQL, ADBC database bindings, and Arrow-native pipelines. Column data lives in Rust buffers; Elixir holds lightweight opaque handles. Precompiled NIFs for Linux, macOS, and Windows — no Rust required to use.
 
-> **v0.7.2 — stability release.** Fixes optional `:gen_stage` compile issues in some `Mix.install` / cached-build paths. For feature overview, see [What's changed in v0.7.0](#whats-changed-in-v070).
+> **v0.8.0 — Larger-than-memory Parquet.** Column/predicate/row-group pushdown,
+> write compression options, footer metadata, and multi-file directory streams.
+> See [Parquet: read and write](#parquet-read-and-write) and the
+> [Parquet guide](https://ex-arrow.hexdocs.pm/parquet_guide.html).
+>
+> **Related package:** the pure-Elixir [`arrow`](https://hex.pm/packages/arrow)
+> library is a format codec (IPC encode/decode on the BEAM heap, no NIFs).
+> ExArrow is the native zero-copy platform (Parquet, Flight, Flight SQL, ADBC,
+> pipelines). Both speak IPC binaries and can interoperate.
 
 ---
 
@@ -204,7 +212,7 @@ Add the dependency:
 
 ```elixir
 def deps do
-  [{:ex_arrow, "~> 0.7"}]
+  [{:ex_arrow, "~> 0.8"}]
 end
 ```
 
@@ -232,11 +240,11 @@ For **path dependencies** in Livebook (`Mix.install`), open notebooks from
 is detected) or use the Hex package:
 
 ```elixir
-Mix.install([{:ex_arrow, "~> 0.7.2"}, {:rustler, "~> 0.36", optional: true}])
+Mix.install([{:ex_arrow, "~> 0.8.0"}, {:rustler, "~> 0.36", optional: true}])
 ```
 
 Alternatively, use the published Hex package so the precompiled NIF is used
-and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.7.2"}])`.
+and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.8.0"}])`.
 
 ---
 
@@ -395,8 +403,9 @@ Interactive notebooks (open in [Livebook](https://livebook.dev)):
 - **[02 Flight](livebook/02_flight.livemd)** — Echo server, client, metadata APIs, Flight SQL prepared statements.
 - **[03 ADBC](livebook/03_adbc.livemd)** — Database, Connection, Statement, Stream (`:adbc_package` in Livebook).
 - **[04 ADBC integration](livebook/04_adbc_integration.livemd)** — Connection pooling with NimblePool.
+- **[05 Parquet](livebook/05_parquet.livemd)** — Pushdown reads, compressed writes, multi-file directories, PyArrow side-by-side.
 
-See [livebook/README.md](livebook/README.md) for run instructions.  Notebooks use Hex `~> 0.7.2` by default; opening from `livebook/` in a clone builds from source.
+See [livebook/README.md](livebook/README.md) for run instructions.  Notebooks use Hex `~> 0.8.0` by default; opening from `livebook/` in a clone builds from source.
 
 ---
 
@@ -682,35 +691,44 @@ package is available: `ExArrow.ADBC.DriverHelper.ensure_driver_and_open/2`.
 
 ## Parquet: read and write
 
-**Read from file:**
+**Read with pushdown (v0.8+):**
 
 ```elixir
-{:ok, stream}  = ExArrow.Parquet.Reader.from_file("/data/events.parquet")
-{:ok, schema}  = ExArrow.Stream.schema(stream)
-batches = ExArrow.Stream.to_list(stream)
+{:ok, stream} =
+  ExArrow.Stream.from_parquet("/data/events.parquet",
+    columns: ["user_id", "score"],
+    filters: {:gt, "score", 0.9}
+  )
+
+ExArrow.Parquet.Reader.read_stats(stream)
+# %{row_groups_total: ..., row_groups_selected: ..., row_groups_skipped: ...}
 ```
 
-**Read from binary (e.g. downloaded from S3):**
+**Multi-file / directory:**
 
 ```elixir
-{:ok, stream} = ExArrow.Parquet.Reader.from_binary(parquet_bytes)
-batch = ExArrow.Stream.next(stream)
+{:ok, stream} = ExArrow.Stream.from_parquet_dir("/data/events/")
 ```
 
-**Write to file:**
+**Write with compression:**
 
 ```elixir
-:ok = ExArrow.Parquet.Writer.to_file("/out/result.parquet", schema, batches)
+:ok =
+  ExArrow.Parquet.Writer.to_file("/out/result.parquet", schema, batches,
+    compression: :zstd,
+    row_group_size: 64_000
+  )
 ```
 
-**Write to binary (e.g. upload to object storage):**
+**Footer metadata (no row decode):**
 
 ```elixir
-{:ok, parquet_bytes} = ExArrow.Parquet.Writer.to_binary(schema, batches)
+{:ok, meta} = ExArrow.Parquet.Metadata.from_file("/data/events.parquet")
+meta.num_row_groups
 ```
 
-Parquet streams share the same `ExArrow.Stream` interface as IPC and ADBC
-streams — `schema/1`, `next/1`, and `to_list/1` all work identically.
+Full guide: [docs/parquet_guide.md](docs/parquet_guide.md). Livebook:
+`livebook/05_parquet.livemd`.
 
 ---
 

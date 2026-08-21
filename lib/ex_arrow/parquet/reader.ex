@@ -14,91 +14,82 @@ defmodule ExArrow.Parquet.Reader do
   are then decoded **on demand**: each call to `ExArrow.Stream.next/1` reads
   and decodes the next row group without touching the rest of the file.
 
-  This means:
+  ### Pushdown options (v0.8+)
 
-  - Peak memory scales with the largest single row group, not the full file.
-  - You can stop consuming after N batches and the remaining row groups are
-    never decoded.
-  - For file-backed streams (`from_file/1`) the underlying file handle stays
-    open until the stream resource is garbage-collected.
-  - For binary-backed streams (`from_binary/1`) the bytes are held in native
-    memory and released when the resource is collected.
+  Pass a keyword list as the second argument:
+
+  * `:columns` — list of column name strings (projection pushdown)
+  * `:row_groups` — list of 0-based row-group indices to read
+  * `:filters` — predicate AST evaluated during decode, with row-group
+    statistics pruning when min/max stats allow it:
+
+        {:gt, "score", 0.5}
+        {:and, [{:gte, "id", 10}, {:lt, "id", 100}]}
+        {:or, [{:eq, "name", "alice"}, {:eq, "name", "bob"}]}
+
+  Supported comparison ops: `:eq`, `:ne`, `:gt`, `:gte`, `:lt`, `:lte`.
+  Values may be integers, floats, UTF-8 strings, or booleans.
+
+  After open, `ExArrow.Parquet.Reader.read_stats/1` reports how many row
+  groups were selected vs skipped.
 
   ## Examples
 
-      # Consume lazily — only the requested row groups are decoded
-      {:ok, stream}  = ExArrow.Parquet.Reader.from_file("/data/events.parquet")
-      {:ok, schema}  = ExArrow.Stream.schema(stream)
-      IO.inspect ExArrow.Schema.field_names(schema)
-      first_batch = ExArrow.Stream.next(stream)   # decodes row-group 0
-      next_batch  = ExArrow.Stream.next(stream)   # decodes row-group 1
-      nil         = ExArrow.Stream.next(stream)   # nil when exhausted
+      {:ok, stream} =
+        ExArrow.Parquet.Reader.from_file("/data/events.parquet",
+          columns: ["user_id", "score"],
+          filters: {:gt, "score", 0.9}
+        )
 
-      # Collect all row groups at once
-      {:ok, stream} = ExArrow.Parquet.Reader.from_file("/data/events.parquet")
-      batches = ExArrow.Stream.to_list(stream)
-
-      # Read from an in-memory binary (e.g. fetched from object storage)
-      parquet_bytes = File.read!("/data/events.parquet")
-      {:ok, stream} = ExArrow.Parquet.Reader.from_binary(parquet_bytes)
-      batch = ExArrow.Stream.next(stream)
-
-      # Pipe into Explorer
-      {:ok, stream} = ExArrow.Parquet.Reader.from_file("/data/report.parquet")
-      {:ok, df}     = ExArrow.Explorer.from_stream(stream)
+      stats = ExArrow.Parquet.Reader.read_stats(stream)
+      # %{row_groups_total: 12, row_groups_selected: 3, row_groups_skipped: 9}
   """
 
   alias ExArrow.Native
+  alias ExArrow.Parquet.Opts
   alias ExArrow.Stream
 
   @doc """
   Open a Parquet file at `path` for lazy row-group streaming.
 
-  Scans the Parquet footer to make the schema available, then returns a stream
-  whose row groups are decoded on demand by `ExArrow.Stream.next/1`.  The file
-  handle remains open until the stream resource is garbage-collected.
-
-  Returns `{:ok, stream}` where `stream` is an `ExArrow.Stream` with
-  `:parquet` backend, or `{:error, message}` if the file does not exist or
-  is not valid Parquet.
-
-  ## Example
-
-      {:ok, stream} = ExArrow.Parquet.Reader.from_file("/data/events.parquet")
-      {:ok, schema} = ExArrow.Stream.schema(stream)
-      field_names   = ExArrow.Schema.field_names(schema)
-      first_batch   = ExArrow.Stream.next(stream)  # decodes row-group 0
-      batches       = ExArrow.Stream.to_list(stream)  # collects remaining
+  See the module documentation for pushdown `opts`.
   """
-  @spec from_file(Path.t()) :: {:ok, Stream.t()} | {:error, String.t()}
-  def from_file(path) when is_binary(path) do
-    case Native.parquet_reader_from_file(path) do
-      {:ok, ref} -> {:ok, %Stream{resource: ref, backend: :parquet}}
-      {:error, msg} -> {:error, msg}
+  @spec from_file(Path.t(), keyword()) :: {:ok, Stream.t()} | {:error, String.t()}
+  def from_file(path, opts \\ []) when is_binary(path) and is_list(opts) do
+    with {:ok, opts} <- Opts.validate_read(opts) do
+      case Native.parquet_reader_from_file(path, opts) do
+        {:ok, ref} -> {:ok, %Stream{resource: ref, backend: :parquet}}
+        {:error, msg} -> {:error, msg}
+      end
     end
   end
 
   @doc """
   Open a Parquet file from an in-memory `binary`.
 
-  Useful when the Parquet data has already been downloaded (e.g. from S3,
-  an HTTP endpoint, or another process).
-
-  Returns `{:ok, stream}` or `{:error, message}`.
-
-  ## Example
-
-      parquet_bytes = File.read!("/data/events.parquet")
-      {:ok, stream} = ExArrow.Parquet.Reader.from_binary(parquet_bytes)
-      {:ok, schema} = ExArrow.Stream.schema(stream)
-      batch         = ExArrow.Stream.next(stream)
-      rows          = ExArrow.RecordBatch.num_rows(batch)
+  See the module documentation for pushdown `opts`.
   """
-  @spec from_binary(binary()) :: {:ok, Stream.t()} | {:error, String.t()}
-  def from_binary(binary) when is_binary(binary) do
-    case Native.parquet_reader_from_binary(binary) do
-      {:ok, ref} -> {:ok, %Stream{resource: ref, backend: :parquet}}
-      {:error, msg} -> {:error, msg}
+  @spec from_binary(binary(), keyword()) :: {:ok, Stream.t()} | {:error, String.t()}
+  def from_binary(binary, opts \\ []) when is_binary(binary) and is_list(opts) do
+    with {:ok, opts} <- Opts.validate_read(opts) do
+      case Native.parquet_reader_from_binary(binary, opts) do
+        {:ok, ref} -> {:ok, %Stream{resource: ref, backend: :parquet}}
+        {:error, msg} -> {:error, msg}
+      end
     end
+  end
+
+  @doc """
+  Return row-group selection stats for a Parquet-backed stream.
+
+  Keys: `:row_groups_total`, `:row_groups_selected`, `:row_groups_skipped`.
+  """
+  @spec read_stats(Stream.t()) :: %{
+          row_groups_total: non_neg_integer(),
+          row_groups_selected: non_neg_integer(),
+          row_groups_skipped: non_neg_integer()
+        }
+  def read_stats(%Stream{resource: ref, backend: :parquet}) do
+    Native.parquet_stream_read_stats(ref)
   end
 end

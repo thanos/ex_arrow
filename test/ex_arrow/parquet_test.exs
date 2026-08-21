@@ -63,6 +63,23 @@ defmodule ExArrow.ParquetTest do
       assert ExArrow.RecordBatch.num_rows(rt_batch) == ExArrow.RecordBatch.num_rows(batch)
     end
 
+    # External DuckDB-generated ZSTD fixture (from @mindreframer / PR #243).
+    test "reads a Zstandard-compressed file produced outside ExArrow" do
+      path = Path.expand("../fixtures/parquet_zstd.parquet", __DIR__)
+
+      assert {:ok, stream} = Parquet.Reader.from_file(path)
+      assert {:ok, schema} = Stream.schema(stream)
+      assert Schema.field_names(schema) == ["id", "name"]
+
+      rows =
+        stream
+        |> Stream.to_list()
+        |> Enum.map(&ExArrow.RecordBatch.num_rows/1)
+        |> Enum.sum()
+
+      assert rows == 3
+    end
+
     test "from_file returns error for missing file" do
       assert {:error, _msg} = Parquet.Reader.from_file("/tmp/this_does_not_exist_xyz.parquet")
     end
@@ -131,6 +148,311 @@ defmodule ExArrow.ParquetTest do
       assert rt_batch != nil
       assert ExArrow.RecordBatch.num_rows(rt_batch) == ExArrow.RecordBatch.num_rows(batch)
       assert Stream.next(stream) == nil
+    end
+  end
+
+  describe "write options" do
+    test "zstd compression round-trips and records ZSTD codec in metadata" do
+      {schema, batch} = source_batch()
+
+      assert {:ok, bin} =
+               Parquet.Writer.to_binary(schema, [batch], compression: :zstd)
+
+      assert {:ok, meta} = Parquet.Metadata.from_binary(bin)
+      cols = hd(meta.row_groups).columns
+      assert cols != []
+      assert Enum.all?(cols, &(&1.compression =~ ~r/ZSTD/i))
+
+      assert {:ok, stream} = Parquet.Reader.from_binary(bin)
+
+      assert ExArrow.RecordBatch.num_rows(Stream.next(stream)) ==
+               ExArrow.RecordBatch.num_rows(batch)
+    end
+
+    test "snappy compression and dictionary option" do
+      {schema, batch} = source_batch()
+
+      assert {:ok, bin} =
+               Parquet.Writer.to_binary(schema, [batch],
+                 compression: :snappy,
+                 dictionary: false,
+                 row_group_size: 1
+               )
+
+      assert {:ok, meta} = Parquet.Metadata.from_binary(bin)
+      assert meta.num_row_groups == ExArrow.RecordBatch.num_rows(batch)
+      cols = hd(meta.row_groups).columns
+      assert Enum.all?(cols, &(&1.compression =~ ~r/SNAPPY/i))
+
+      # dictionary: false must not advertise dictionary encodings on chunks.
+      assert Enum.all?(cols, fn col ->
+               encodings = Enum.map(col.encodings, &String.upcase/1)
+               not Enum.any?(encodings, &(&1 =~ "DICTIONARY"))
+             end)
+
+      assert {:ok, with_dict} =
+               Parquet.Writer.to_binary(schema, [batch],
+                 compression: :snappy,
+                 dictionary: true
+               )
+
+      assert {:ok, meta_dict} = Parquet.Metadata.from_binary(with_dict)
+      dict_cols = hd(meta_dict.row_groups).columns
+
+      assert Enum.any?(dict_cols, fn col ->
+               Enum.any?(col.encodings, &(String.upcase(&1) =~ "DICTIONARY"))
+             end)
+    end
+
+    test "rejects invalid compression" do
+      {schema, batch} = source_batch()
+
+      assert {:error, msg} =
+               Parquet.Writer.to_binary(schema, [batch], compression: :brotli)
+
+      assert msg =~ "compression"
+    end
+
+    test "empty batch list writes a valid empty Parquet file" do
+      {schema, _batch} = source_batch()
+      assert {:ok, bin} = Parquet.Writer.to_binary(schema, [])
+      assert is_binary(bin)
+      assert {:ok, meta} = Parquet.Metadata.from_binary(bin)
+      assert meta.num_rows == 0
+    end
+  end
+
+  describe "read pushdown" do
+    test "columns projection reduces schema" do
+      {schema, batch} = source_batch()
+      names = Schema.field_names(schema)
+      assert length(names) >= 1
+      col = hd(names)
+
+      assert {:ok, bin} = Parquet.Writer.to_binary(schema, [batch])
+      assert {:ok, stream} = Parquet.Reader.from_binary(bin, columns: [col])
+      assert {:ok, projected} = Stream.schema(stream)
+      assert Schema.field_names(projected) == [col]
+    end
+
+    test "filters predicate reduces rows to exact expected count" do
+      n = 4
+      ids = for i <- 1..n, into: <<>>, do: <<i::little-signed-64>>
+      assert {:ok, batch} = ExArrow.RecordBatch.from_columns(["id"], [ids], ["s64"], n)
+      schema = ExArrow.RecordBatch.schema(batch)
+
+      assert {:ok, bin} = Parquet.Writer.to_binary(schema, [batch])
+
+      assert {:ok, stream} =
+               Parquet.Reader.from_binary(bin, filters: {:gt, "id", 2})
+
+      filtered = Stream.to_list(stream)
+      total = Enum.sum(Enum.map(filtered, &ExArrow.RecordBatch.num_rows/1))
+      assert total == 2
+    end
+
+    test "filters prune row groups via statistics when ranges are disjoint" do
+      n = 4
+      ids = for i <- [1, 2, 100, 101], into: <<>>, do: <<i::little-signed-64>>
+      assert {:ok, batch} = ExArrow.RecordBatch.from_columns(["id"], [ids], ["s64"], n)
+      schema = ExArrow.RecordBatch.schema(batch)
+
+      assert {:ok, bin} =
+               Parquet.Writer.to_binary(schema, [batch], row_group_size: 2)
+
+      assert {:ok, meta} = Parquet.Metadata.from_binary(bin)
+      assert meta.num_row_groups == 2
+
+      assert {:ok, stream} =
+               Parquet.Reader.from_binary(bin, filters: {:gt, "id", 50})
+
+      stats = Parquet.Reader.read_stats(stream)
+      assert stats.row_groups_total == 2
+      assert stats.row_groups_skipped >= 1
+      assert stats.row_groups_selected == 2 - stats.row_groups_skipped
+
+      total =
+        stream
+        |> Stream.to_list()
+        |> Enum.map(&ExArrow.RecordBatch.num_rows/1)
+        |> Enum.sum()
+
+      assert total == 2
+    end
+
+    test "filters prune correctly when a struct column precedes the filtered column" do
+      # PyArrow fixture: Arrow fields [meta(struct{a,b}), score]; Parquet leaves
+      # [meta.a, meta.b, score]. Using Arrow field index for score would read
+      # meta.b stats and wrongly skip the high-score row group.
+      path = Path.expand("../fixtures/parquet_nested_struct_score.parquet", __DIR__)
+
+      assert {:ok, stream} =
+               Parquet.Reader.from_file(path, filters: {:gt, "score", 50})
+
+      stats = Parquet.Reader.read_stats(stream)
+      assert stats.row_groups_total == 2
+      assert stats.row_groups_skipped == 1
+      assert stats.row_groups_selected == 1
+
+      total =
+        stream
+        |> Stream.to_list()
+        |> Enum.map(&ExArrow.RecordBatch.num_rows/1)
+        |> Enum.sum()
+
+      assert total == 2
+    end
+
+    test "filter with out-of-range int value against Int32 column errors" do
+      n = 2
+      ids = for i <- 1..n, into: <<>>, do: <<i::little-signed-32>>
+      assert {:ok, batch} = ExArrow.RecordBatch.from_columns(["id"], [ids], ["s32"], n)
+      schema = ExArrow.RecordBatch.schema(batch)
+      assert {:ok, bin} = Parquet.Writer.to_binary(schema, [batch])
+
+      assert {:error, msg} =
+               Parquet.Reader.from_binary(bin, filters: {:eq, "id", 5_000_000_000})
+
+      assert msg =~ ~r/out of range|Int32/i
+    end
+
+    test "filter with non-representable float against Float32 column errors" do
+      n = 2
+      vals = for i <- 1..n, into: <<>>, do: <<i * 1.0::little-float-32>>
+      assert {:ok, batch} = ExArrow.RecordBatch.from_columns(["x"], [vals], ["f32"], n)
+      schema = ExArrow.RecordBatch.schema(batch)
+      assert {:ok, bin} = Parquet.Writer.to_binary(schema, [batch])
+
+      assert {:error, msg} =
+               Parquet.Reader.from_binary(bin, filters: {:eq, "x", 1.0e40})
+
+      assert msg =~ ~r/Float32|representable/i
+    end
+
+    test "row_groups selects subset" do
+      {schema, batch} = source_batch()
+      rows = ExArrow.RecordBatch.num_rows(batch)
+
+      assert {:ok, bin} =
+               Parquet.Writer.to_binary(schema, [batch], row_group_size: 1)
+
+      assert {:ok, meta} = Parquet.Metadata.from_binary(bin)
+      assert meta.num_row_groups == rows
+
+      assert {:ok, stream} = Parquet.Reader.from_binary(bin, row_groups: [0])
+      stats = Parquet.Reader.read_stats(stream)
+      assert stats.row_groups_selected == 1
+      assert stats.row_groups_total == meta.num_row_groups
+    end
+
+    test "invalid opts rejected in Elixir before NIF" do
+      assert {:error, _} = Parquet.Reader.from_binary(<<>>, columns: [1])
+      assert {:error, _} = Parquet.Reader.from_binary(<<>>, filters: {:nope, "x", 1})
+    end
+  end
+
+  describe "Metadata" do
+    test "from_binary returns row group info and column stats" do
+      n = 3
+      ids = for i <- [10, 20, 30], into: <<>>, do: <<i::little-signed-64>>
+      assert {:ok, batch} = ExArrow.RecordBatch.from_columns(["id"], [ids], ["s64"], n)
+      schema = ExArrow.RecordBatch.schema(batch)
+
+      assert {:ok, bin} = Parquet.Writer.to_binary(schema, [batch], compression: :snappy)
+      assert {:ok, meta} = Parquet.Metadata.from_binary(bin)
+      assert meta.num_rows == n
+      assert meta.num_row_groups >= 1
+      assert is_list(meta.row_groups)
+
+      col = hd(hd(meta.row_groups).columns)
+      assert col.path == "id"
+      assert col.compression =~ ~r/SNAPPY/i
+      assert col.min == "10"
+      assert col.max == "30"
+    end
+
+    @tag :tmp_dir
+    test "from_file", %{tmp_dir: dir} do
+      path = Path.join(dir, "meta.parquet")
+      {schema, batch} = source_batch()
+      assert :ok = Parquet.Writer.to_file(path, schema, [batch])
+      assert {:ok, meta} = Parquet.Metadata.from_file(path)
+      assert meta.num_row_groups >= 1
+    end
+
+    test "from_file returns an error for a missing path" do
+      assert {:error, _} = Parquet.Metadata.from_file("/tmp/does_not_exist_xyz.parquet")
+    end
+
+    test "from_binary returns an error for a non-Parquet binary" do
+      assert {:error, _} = Parquet.Metadata.from_binary("not parquet")
+    end
+  end
+
+  describe "multi-file streams" do
+    @tag :tmp_dir
+    test "from_parquet_files concatenates lazily", %{tmp_dir: dir} do
+      {schema, batch} = source_batch()
+      p1 = Path.join(dir, "a.parquet")
+      p2 = Path.join(dir, "b.parquet")
+      assert :ok = Parquet.Writer.to_file(p1, schema, [batch])
+      assert :ok = Parquet.Writer.to_file(p2, schema, [batch])
+
+      assert {:ok, stream} = Stream.from_parquet_files([p1, p2])
+      batches = Stream.to_list(stream)
+      assert length(batches) == 2
+      assert Stream.next(stream) == nil
+      assert Stream.next(stream) == nil
+    end
+
+    @tag :tmp_dir
+    test "Enum.take does not open later files", %{tmp_dir: dir} do
+      {schema, batch} = source_batch()
+      p1 = Path.join(dir, "a.parquet")
+      p2 = Path.join(dir, "b.parquet")
+      assert :ok = Parquet.Writer.to_file(p1, schema, [batch])
+      assert :ok = Parquet.Writer.to_file(p2, schema, [batch])
+
+      assert {:ok, stream} = Stream.from_parquet_files([p1, p2])
+      _ = Enum.take(stream, 1)
+      assert Stream.multi_opened_paths(stream) == [p1]
+      assert :ok = Stream.close(stream)
+      refute Process.alive?(stream.resource)
+    end
+
+    @tag :tmp_dir
+    test "schema mismatch across files surfaces from next/1", %{tmp_dir: dir} do
+      {schema_a, batch_a} = source_batch()
+      p1 = Path.join(dir, "a.parquet")
+      assert :ok = Parquet.Writer.to_file(p1, schema_a, [batch_a])
+
+      n = 1
+      ids = <<1::little-signed-64>>
+      assert {:ok, batch_b} = ExArrow.RecordBatch.from_columns(["other"], [ids], ["s64"], n)
+      schema_b = ExArrow.RecordBatch.schema(batch_b)
+      p2 = Path.join(dir, "b.parquet")
+      assert :ok = Parquet.Writer.to_file(p2, schema_b, [batch_b])
+
+      assert {:ok, stream} = Stream.from_parquet_files([p1, p2])
+      assert %ExArrow.RecordBatch{} = Stream.next(stream)
+      assert {:error, msg} = Stream.next(stream)
+      assert msg =~ "schema mismatch"
+    end
+
+    test "from_parquet_files/2 rejects non-string paths without raising" do
+      assert {:error, msg} = Stream.from_parquet_files([:not_a_path])
+      assert msg =~ "must be strings"
+
+      assert {:error, msg} = Stream.from_parquet_files([%{}])
+      assert msg =~ "must be strings"
+    end
+
+    @tag :tmp_dir
+    test "from_parquet_dir", %{tmp_dir: dir} do
+      {schema, batch} = source_batch()
+      assert :ok = Parquet.Writer.to_file(Path.join(dir, "x.parquet"), schema, [batch])
+      assert {:ok, stream} = Stream.from_parquet_dir(dir)
+      assert length(Stream.to_list(stream)) == 1
     end
   end
 end
