@@ -31,6 +31,7 @@ Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, Arrow Flight SQL,
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
+- [What's changed in v0.8.0](#whats-changed-in-v080)
 - [What's changed in v0.7.0](#whats-changed-in-v070)
 - [Livebook tutorials](#livebook-tutorials)
 - [IPC: stream and file](#ipc-stream-and-file)
@@ -53,6 +54,7 @@ Native Apache Arrow for the BEAM: IPC streaming, Arrow Flight, Arrow Flight SQL,
   - [Shipped (v0.4.0)](#shipped-v040)
   - [Shipped (v0.5.0)](#shipped-v050)
   - [Shipped (v0.7.0)](#shipped-v070)
+  - [Shipped (v0.8.0)](#shipped-v080)
 - [FAQ](#faq)
 - [License](#license)
 
@@ -106,11 +108,12 @@ Dirty NIF schedulers are used for blocking I/O.
 - **A uniform stream abstraction** — `ExArrow.Stream` works identically for
   IPC, Flight, and ADBC results. Code that processes batches does not know or
   care where the data came from.
-- **Arrow-native pipelines (v0.7.0)** — `ExArrow.Pipeline` provides a lazy,
+- **Arrow-native pipelines** — `ExArrow.Pipeline` provides a lazy,
   composable DSL for transforming and sinking streams of `RecordBatch` values.
   `ExArrow.Flow`, `ExArrow.GenStage`, and `ExArrow.Broadway` integrations
   cover parallel, demand-driven, and ingestion workloads.  Telemetry events
-  fire at every stage.
+  fire at every stage. **Larger-than-memory Parquet** (pushdown, write options,
+  multi-file streams) lands in v0.8.0.
 
 ---
 
@@ -250,8 +253,7 @@ and no Rust is needed: `Mix.install([{:ex_arrow, "~> 0.8.0"}])`.
 
 ## Quick start
 
-**Read an Arrow stream with the v0.7.0 constructors** (one entry point for
-every source):
+**Read Parquet with pushdown** (v0.8.0 — one entry point for every source):
 
 ```elixir
 {:ok, stream} = ExArrow.Stream.from_parquet("/data/events.parquet")
@@ -327,9 +329,43 @@ batch = ExArrow.Stream.next(stream)
 
 ---
 
+## What's changed in v0.8.0
+
+v0.8.0 focuses on **larger-than-memory Parquet**: read only the columns, row
+groups, and rows you need, with peak memory scaling to the selected data rather
+than the whole file. Pipeline modules from v0.7.0 remain the streaming layer on
+top.
+
+### Parquet power-read / write
+
+| API | Purpose |
+|-----|---------|
+| `ExArrow.Stream.from_parquet/2` | Preferred entry: `:columns`, `:row_groups`, `:filters` pushdown |
+| `ExArrow.Parquet.Reader` | Same opts on `from_file/2` / `from_binary/2`; `read_stats/1` for pruning |
+| `ExArrow.Parquet.Writer` | `:compression` (`:snappy`, `:zstd`, `{:zstd, level}`, `:lz4`, `:gzip`, `:none`), `:row_group_size`, `:dictionary` |
+| `ExArrow.Parquet.Metadata` | Footer-only metadata (row groups, column stats, encodings, kv) |
+| `Stream.from_parquet_files/2`, `from_parquet_dir/2` | Lazy multi-file / directory streams; `Stream.close/1` for early abandon |
+| `ExArrow.IPC.File.write/3`, `RecordBatch.concat/1` | Public wrappers for existing NIFs |
+
+Filter AST examples: `{:gt, "score", 0.9}`,
+`{:and, [{:gte, "id", 1}, {:lt, "id", 1000}]}`. Row-group min/max statistics
+prune when safe; remaining rows use parquet-rs `RowFilter`.
+
+### Docs, Livebook, CI
+
+- Parquet Livebook (`livebook/05_parquet.livemd`) and rewritten
+  [Parquet guide](https://ex-arrow.hexdocs.pm/parquet_guide.html)
+- Pushdown timing helper: `bench/parquet_pushdown_bench.exs`
+- Mix.install optional-dep smoke job; Livebook Hex-pin check; optional
+  apache/arrow-testing suite (local / `workflow_dispatch`)
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list.
+
+---
+
 ## What's changed in v0.7.0
 
-v0.7.0 turns ExArrow from a transport and interchange library into the
+v0.7.0 turned ExArrow from a transport and interchange library into the
 foundation for **Arrow-native data pipelines on the BEAM**.  The central
 architectural principle: **operate on Arrow `RecordBatch` values** — not
 `list(map())`, not `Explorer.DataFrame`, not `Nx.Tensor`.  Explorer and Nx
@@ -386,11 +422,6 @@ without `:telemetry`, the Flow/GenStage/Broadway modules return
   Flow execution, Pipeline `map_batches` + `write_parquet` at 1K/100K/1M rows.
 - `bench/v070_record_batch_vs_maps_bench.exs` — Arrow `RecordBatch` vs
   `list(map())` for build, transform, and drain.
-
-### Stats
-
-825 tests, 16 properties, 89.9% coverage.  `mix format`, `mix credo --strict`,
-`mix dialyzer`, `mix sobelow`, `mix docs --warnings-as-errors` all pass.
 
 ---
 
@@ -761,7 +792,7 @@ All operations run entirely in native memory. Results are new
 
 ## Batch operations
 
-`ExArrow.Batch` (v0.7.0) provides lightweight `RecordBatch` transforms that
+`ExArrow.Batch` provides lightweight `RecordBatch` transforms that
 stay in native Arrow memory.  It is not a dataframe — use Explorer for
 analytics.  All functions return `{:ok, batch} | {:error, message}`.
 
@@ -788,7 +819,7 @@ analytics.  All functions return `{:ok, batch} | {:error, message}`.
 
 ## Streaming pipelines
 
-`ExArrow.Pipeline` (v0.7.0) is a thin, lazy abstraction for transforming and
+`ExArrow.Pipeline` is a thin, lazy abstraction for transforming and
 sinking Arrow streams.  Pipelines compose with `|>/2` and short-circuit on
 error.
 
@@ -1048,8 +1079,9 @@ HTML reports are written to `bench/output/` (gitignored).
 | `pipeline_bench.exs`       | End-to-end: IPC file on disk to Flight doput without materialising in BEAM     |
 | `explorer_arrow_bench.exs` | Explorer <-> Arrow interchange at 1K/100K/1M rows                             |
 | `nx_arrow_bench.exs`       | Nx <-> Arrow interchange at 1K/100K/1M rows (rank-1 and rank-2)              |
-| `v070_stream_flow_pipeline_bench.exs` | Parquet/IPC stream drains, Flow execution, Pipeline map_batches + write_parquet at 1K/100K/1M rows (v0.7.0) |
-| `v070_record_batch_vs_maps_bench.exs` | Arrow `RecordBatch` vs `list(map())` for build, transform, and drain at 1K/100K/1M rows (v0.7.0) |
+| `v070_stream_flow_pipeline_bench.exs` | Parquet/IPC stream drains, Flow execution, Pipeline map_batches + write_parquet at 1K/100K/1M rows |
+| `v070_record_batch_vs_maps_bench.exs` | Arrow `RecordBatch` vs `list(map())` for build, transform, and drain at 1K/100K/1M rows |
+| `parquet_pushdown_bench.exs` | Pushdown filter vs full read + project (v0.8.0 rough timing helper) |
 
 
 ### Published results
@@ -1068,8 +1100,8 @@ The CI workflow posts a PR alert comment when any scenario regresses more than
 - [Explorer Integration](guides/02_explorer_integration.md) — from_dataframe, to_dataframe, type mapping, limitations
 - [Nx Integration](guides/03_nx_integration.md) — from_nx, to_nx, boolean tensors, rank-2
 - [Arrow Ecosystem](guides/04_arrow_ecosystem.md) — how ExArrow complements Explorer, Nx, ADBC, Flight, Parquet, ExZarr
-- [Arrow Pipelines Overview](guides/05_arrow_pipelines_overview.md) — orientation to the v0.7.0 pipeline modules
-- [Arrow Streams](guides/06_arrow_streams.md) — the v0.7.0 streaming abstraction, constructors, consumption patterns
+- [Arrow Pipelines Overview](guides/05_arrow_pipelines_overview.md) — orientation to the pipeline modules
+- [Arrow Streams](guides/06_arrow_streams.md) — the streaming abstraction, constructors, consumption patterns
 - [Arrow and Flow](guides/07_arrow_and_flow.md) — parallel batch processing with `ExArrow.Flow`
 - [Arrow and GenStage](guides/08_arrow_and_genstage.md) — demand-driven producers with backpressure
 - [Arrow and Broadway](guides/09_arrow_and_broadway.md) — ingestion pipelines with `BatchBuilder` and sinks
@@ -1257,6 +1289,19 @@ welcome for any of them.
   1K/100K/1M rows.
 - **Educational guides** — `guides/06..10` covering streams, Flow, GenStage,
   Broadway, and pipeline patterns.
+
+### Shipped (v0.8.0)
+
+- **Parquet read pushdown** — `:columns`, `:row_groups`, `:filters` on
+  `Stream.from_parquet/2` and `Parquet.Reader`; statistics pruning +
+  `read_stats/1`.
+- **Parquet write options** — `:compression`, `:row_group_size`, `:dictionary`.
+- **`ExArrow.Parquet.Metadata`** — footer-only metadata (including encodings).
+- **Multi-file streams** — `from_parquet_files/2`, `from_parquet_dir/2`,
+  `Stream.close/1`.
+- **Public IPC/RecordBatch helpers** — `IPC.File.write/3`, `RecordBatch.concat/1`.
+- **Docs / CI** — Parquet Livebook, Mix.install smoke, Livebook pin checks;
+  optional arrow-testing corpus (local / workflow_dispatch).
 
 ### Longer-term
 
