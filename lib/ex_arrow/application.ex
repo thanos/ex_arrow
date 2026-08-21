@@ -16,12 +16,19 @@ defmodule ExArrow.Application do
   end
 
   defp adbc_package_configured? do
-    adbc_module = Module.concat(Adbc, Database)
+    case Application.get_env(:ex_arrow, :adbc_package) do
+      opts when is_list(opts) and opts != [] ->
+        adbc_database_loaded?()
 
-    Code.ensure_loaded?(adbc_module) &&
-      case Application.get_env(:ex_arrow, :adbc_package) do
-        opts when is_list(opts) and opts != [] -> true
-        _ -> false
-      end
+      _ ->
+        false
+    end
+  end
+
+  defp adbc_database_loaded? do
+    Code.ensure_loaded?(Module.safe_concat(["Elixir", "Adbc", "Database"]))
+  rescue
+    # Optional `:adbc` dep — atom may not exist yet; avoid Module.concat/2.
+    ArgumentError -> false
   end
 end
