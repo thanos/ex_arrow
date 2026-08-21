@@ -16,7 +16,7 @@ defmodule ExArrow.Application do
   end
 
   defp adbc_package_configured? do
-    adbc_module = Module.safe_concat(["Elixir", "Adbc", "Database"])
+    adbc_module = Module.concat(Adbc, Database)
 
     Code.ensure_loaded?(adbc_module) &&
       case Application.get_env(:ex_arrow, :adbc_package) do
