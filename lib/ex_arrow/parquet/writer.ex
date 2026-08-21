@@ -9,7 +9,8 @@ defmodule ExArrow.Parquet.Writer do
 
   ### Write options (v0.8+)
 
-  * `:compression` — `:none` | `:snappy` | `:zstd` | `{:zstd, level}` | `:lz4` | `:gzip`
+  * `:compression` — `:none` (alias `:uncompressed`) | `:snappy` | `:zstd` |
+    `{:zstd, level}` (level 1..22) | `:lz4` | `:gzip`
   * `:row_group_size` — positive integer (max rows per row group)
   * `:dictionary` — boolean
 

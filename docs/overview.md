@@ -17,7 +17,7 @@ New / changed:
   with row-group statistics pruning). `Parquet.Reader.read_stats/1` reports
   selected vs skipped row groups.
 - **Write options** — `:compression` (`:snappy`, `:zstd`, `{:zstd, level}`,
-  `:lz4`, `:gzip`, `:none`), `:row_group_size`, and `:dictionary` on
+  `:lz4`, `:gzip`, `:none`, alias `:uncompressed`), `:row_group_size`, and `:dictionary` on
   `Writer.to_file/4` and `to_binary/3`.
 - **`ExArrow.Parquet.Metadata`** — footer-only metadata (`from_file/1`,
   `from_binary/1`): row groups, per-column statistics, key-value metadata.

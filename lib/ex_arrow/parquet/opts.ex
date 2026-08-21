@@ -3,8 +3,11 @@ defmodule ExArrow.Parquet.Opts do
 
   @read_keys [:columns, :row_groups, :filters]
   @write_keys [:compression, :row_group_size, :dictionary]
+  # `:uncompressed` is accepted as a synonym for `:none`.
   @compressions [:none, :uncompressed, :snappy, :zstd, :lz4, :gzip]
   @filter_ops [:eq, :ne, :gt, :gte, :lt, :lte]
+  # Matches parquet-rs `ZstdLevel` (MINIMUM_LEVEL..=MAXIMUM_LEVEL).
+  @zstd_levels 1..22
 
   @doc """
   Validate and normalise Parquet read options.
@@ -98,8 +101,17 @@ defmodule ExArrow.Parquet.Opts do
     end
   end
 
-  defp check_filter({op, col, _value}) when op in @filter_ops do
-    if is_binary(col), do: :ok, else: {:error, "filter column must be a string"}
+  defp check_filter({op, col, value}) when op in @filter_ops do
+    cond do
+      not is_binary(col) ->
+        {:error, "filter column must be a string"}
+
+      not filter_value?(value) ->
+        {:error, ":filters value must be integer, float, string, or boolean"}
+
+      true ->
+        :ok
+    end
   end
 
   defp check_filter({op, list}) when op in [:and, :or] and is_list(list) do
@@ -119,13 +131,25 @@ defmodule ExArrow.Parquet.Opts do
     do:
       {:error, "filter must be {:eq|:ne|:gt|:gte|:lt|:lte, col, value} or {:and|:or, [filters]}"}
 
+  defp filter_value?(v)
+       when is_integer(v) or is_float(v) or is_binary(v) or is_boolean(v),
+       do: true
+
+  defp filter_value?(_), do: false
+
   defp validate_compression(nil), do: {:ok, nil}
   defp validate_compression(c) when c in @compressions, do: {:ok, c}
 
-  defp validate_compression({:zstd, level}) when is_integer(level), do: {:ok, {:zstd, level}}
+  defp validate_compression({:zstd, level}) when is_integer(level) and level in @zstd_levels,
+    do: {:ok, {:zstd, level}}
+
+  defp validate_compression({:zstd, _}),
+    do: {:error, ":compression {:zstd, level} requires level in 1..22"}
 
   defp validate_compression(_),
-    do: {:error, ":compression must be :none | :snappy | :zstd | {:zstd, level} | :lz4 | :gzip"}
+    do:
+      {:error,
+       ":compression must be :none | :uncompressed | :snappy | :zstd | {:zstd, level} | :lz4 | :gzip"}
 
   defp validate_row_group_size(nil), do: {:ok, nil}
 

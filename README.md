@@ -403,6 +403,7 @@ Interactive notebooks (open in [Livebook](https://livebook.dev)):
 - **[02 Flight](livebook/02_flight.livemd)** — Echo server, client, metadata APIs, Flight SQL prepared statements.
 - **[03 ADBC](livebook/03_adbc.livemd)** — Database, Connection, Statement, Stream (`:adbc_package` in Livebook).
 - **[04 ADBC integration](livebook/04_adbc_integration.livemd)** — Connection pooling with NimblePool.
+- **[05 Parquet](livebook/05_parquet.livemd)** — Pushdown reads, compressed writes, multi-file directories, PyArrow side-by-side.
 
 See [livebook/README.md](livebook/README.md) for run instructions.  Notebooks use Hex `~> 0.8.0` by default; opening from `livebook/` in a clone builds from source.
 

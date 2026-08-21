@@ -175,12 +175,14 @@ defmodule ExArrow.Stream do
   file or an error is returned from `next/1`.
 
   Pushdown `opts` are applied to every file.
+
+  Partially consumed multi-file streams hold an `Agent` and an open file
+  handle; call `close/1` when abandoning the stream early (e.g. after
+  `Enum.take/2`) from a long-lived process.
   """
   @spec from_parquet_files([Path.t()], keyword()) :: {:ok, t()} | {:error, String.t()}
   def from_parquet_files(paths, opts \\ [])
       when is_list(paths) and is_list(opts) do
-    paths = Enum.map(paths, &to_string/1)
-
     cond do
       paths == [] ->
         {:error, "from_parquet_files/2 requires at least one path"}
@@ -199,6 +201,7 @@ defmodule ExArrow.Stream do
                   opts: opts,
                   schema_names: nil,
                   current_ref: nil,
+                  current_path: nil,
                   opened_paths: []
                 }
               end)
@@ -215,6 +218,20 @@ defmodule ExArrow.Stream do
         end
     end
   end
+
+  @doc """
+  Release resources held by a stream.
+
+  For `:parquet_multi` streams this stops the backing `Agent` (and drops the
+  open Parquet handle). Other backends are GC-safe and this is a no-op.
+  """
+  @spec close(t()) :: :ok
+  def close(%__MODULE__{resource: agent, backend: :parquet_multi}) do
+    if Process.alive?(agent), do: Agent.stop(agent)
+    :ok
+  end
+
+  def close(%__MODULE__{}), do: :ok
 
   @doc false
   @spec multi_opened_paths(t()) :: [Path.t()]
@@ -362,6 +379,9 @@ defmodule ExArrow.Stream do
         schema_ref = native().parquet_stream_schema(parquet_ref)
         {:ok, Schema.from_ref(schema_ref)}
 
+      :exhausted ->
+        {:error, "parquet multi-file stream exhausted"}
+
       {:error, _} = err ->
         err
     end
@@ -418,6 +438,9 @@ defmodule ExArrow.Stream do
 
   def next(%__MODULE__{resource: agent, backend: :parquet_multi} = stream) do
     case multi_ensure_open(agent) do
+      :exhausted ->
+        nil
+
       {:error, _} = err ->
         err
 
@@ -449,6 +472,19 @@ defmodule ExArrow.Stream do
     end
   end
 
+  defp emit_batch(%__MODULE__{backend: :parquet_multi, resource: agent}, batch) do
+    source =
+      case Agent.get(agent, & &1.current_path) do
+        nil -> {:parquet_multi, :unknown}
+        path -> {:parquet, path}
+      end
+
+    measurements = ExArrow.Telemetry.batch_measurements(batch)
+    metadata = %{source: source, schema: nil}
+    ExArrow.Telemetry.execute([:ex_arrow, :stream, :batch], measurements, metadata)
+    batch
+  end
+
   defp emit_batch(%__MODULE__{source: source}, batch) do
     measurements = ExArrow.Telemetry.batch_measurements(batch)
     metadata = %{source: source, schema: nil}
@@ -463,7 +499,7 @@ defmodule ExArrow.Stream do
           {{:ok, state.current_ref}, state}
 
         state.index >= length(state.paths) ->
-          {{:error, "parquet multi-file stream exhausted"}, state}
+          {:exhausted, state}
 
         true ->
           path = Enum.at(state.paths, state.index)
@@ -478,20 +514,37 @@ defmodule ExArrow.Stream do
         {{:error, msg}, state}
 
       {:ok, %{resource: ref} = opened} ->
-        # Parquet schema/1 always returns {:ok, schema} after a successful open.
-        {:ok, sch} = schema(opened)
-        names = Schema.field_names(sch)
-        multi_accept_schema(state, path, ref, names)
+        case schema(opened) do
+          {:ok, sch} ->
+            names = Schema.field_names(sch)
+            multi_accept_schema(state, path, ref, names)
+
+          {:error, _} = err ->
+            {err, state}
+        end
     end
   end
 
   defp multi_accept_schema(state, path, ref, names) do
     cond do
       is_nil(state.schema_names) ->
-        {{:ok, ref}, %{state | current_ref: ref, schema_names: names, opened_paths: [path]}}
+        {{:ok, ref},
+         %{
+           state
+           | current_ref: ref,
+             current_path: path,
+             schema_names: names,
+             opened_paths: [path]
+         }}
 
       state.schema_names == names ->
-        {{:ok, ref}, %{state | current_ref: ref, opened_paths: [path | state.opened_paths]}}
+        {{:ok, ref},
+         %{
+           state
+           | current_ref: ref,
+             current_path: path,
+             opened_paths: [path | state.opened_paths]
+         }}
 
       true ->
         {{:error,
@@ -505,9 +558,9 @@ defmodule ExArrow.Stream do
       next_index = state.index + 1
 
       if next_index >= length(state.paths) do
-        {:done, %{state | current_ref: nil, index: next_index}}
+        {:done, %{state | current_ref: nil, current_path: nil, index: next_index}}
       else
-        {:ok, %{state | current_ref: nil, index: next_index}}
+        {:ok, %{state | current_ref: nil, current_path: nil, index: next_index}}
       end
     end)
   end

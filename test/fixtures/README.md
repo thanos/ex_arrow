@@ -14,10 +14,17 @@
   duckdb -c "COPY (SELECT * FROM (VALUES (1::BIGINT, 'alpha'), (2::BIGINT, 'beta'), (3::BIGINT, 'gamma')) AS t(id, name)) TO 'test/fixtures/parquet_zstd.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);"
   ```
 
+- **Nested struct Parquet (stats pruning):**
+  `parquet_nested_struct_score.parquet` has Arrow fields
+  `meta` (struct of two int64s) then `score` (int64), written as two row
+  groups with disjoint score ranges. Parquet leaf indices differ from Arrow
+  field indices; used to regression-test statistics pruning. Regenerate with
+  PyArrow (two `write_table` calls so each becomes a row group).
+
 - **Cross-language corpus (v0.8+):** optional suite under
   `test/fixtures/arrow_testing/` populated by
   `script/fetch_arrow_testing.sh` from
   [apache/arrow-testing](https://github.com/apache/arrow-testing).
-  Run with `mix test --include arrow_testing` once fixtures are present.
-  This mirrors the pure-Elixir [`arrow`](https://hex.pm/packages/arrow)
-  package's conformance approach.
+  Run with `mix test --include arrow_testing` once fixtures are present
+  (local/opt-in; not wired into CI). This mirrors the pure-Elixir
+  [`arrow`](https://hex.pm/packages/arrow) package's conformance approach.

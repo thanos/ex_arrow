@@ -55,6 +55,21 @@ rustler::atoms! {
     atom_and = "and",
     atom_or = "or",
     nil,
+    ok,
+    done,
+    path,
+    num_values,
+    min,
+    max,
+    index,
+    num_rows,
+    num_row_groups,
+    total_byte_size,
+    created_by,
+    key_value_metadata,
+    row_groups_total,
+    row_groups_selected,
+    row_groups_skipped,
 }
 
 // ── Resource ────────────────────────────────────────────────────────────────
@@ -280,7 +295,9 @@ fn decode_compression(term: Term<'_>) -> Result<Compression, String> {
                 let level: i64 = tuple[1]
                     .decode()
                     .map_err(|_| "zstd level must be an integer")?;
-                let z = ZstdLevel::try_new(level as i32)
+                let level_i32 = i32::try_from(level)
+                    .map_err(|_| format!("zstd level {level} out of range"))?;
+                let z = ZstdLevel::try_new(level_i32)
                     .map_err(|e| format!("invalid zstd level: {}", e))?;
                 return Ok(Compression::ZSTD(z));
             }
@@ -329,13 +346,24 @@ fn make_scalar(value: &FilterValue, data_type: &DataType) -> Result<ArrayRef, St
             Ok(Arc::new(Int64Array::from(vec![*v])) as ArrayRef)
         }
         (FilterValue::Int(v), DataType::Int32) => {
-            Ok(Arc::new(arrow_array::Int32Array::from(vec![*v as i32])) as ArrayRef)
+            let i = i32::try_from(*v).map_err(|_| {
+                format!("filter value {v} out of range for Int32 column")
+            })?;
+            Ok(Arc::new(arrow_array::Int32Array::from(vec![i])) as ArrayRef)
         }
         (FilterValue::Float(v), DataType::Float64) => {
             Ok(Arc::new(Float64Array::from(vec![*v])) as ArrayRef)
         }
         (FilterValue::Float(v), DataType::Float32) => {
-            Ok(Arc::new(arrow_array::Float32Array::from(vec![*v as f32])) as ArrayRef)
+            let f = *v as f32;
+            // Reject values that are not exactly representable as f32 so Eq/Ne
+            // (and other comparisons) cannot silently use a truncated scalar.
+            if (f as f64) != *v {
+                return Err(format!(
+                    "filter value {v} is not exactly representable as Float32"
+                ));
+            }
+            Ok(Arc::new(arrow_array::Float32Array::from(vec![f])) as ArrayRef)
         }
         (FilterValue::Utf8(s), DataType::Utf8) => {
             Ok(Arc::new(StringArray::from(vec![s.as_str()])) as ArrayRef)
@@ -455,32 +483,69 @@ fn collect_filter_columns(expr: &FilterExpr, out: &mut Vec<String>) {
     }
 }
 
-/// Return true if the row group *might* contain rows matching `expr` based on
-/// column chunk min/max statistics. Unknown / missing stats → keep the group.
-fn row_group_may_match(
-    metadata: &parquet::file::metadata::ParquetMetaData,
-    rg_idx: usize,
-    schema: &arrow_schema::Schema,
-    expr: &FilterExpr,
-) -> bool {
+fn validate_filter_types(schema: &arrow_schema::Schema, expr: &FilterExpr) -> Result<(), String> {
     match expr {
-        FilterExpr::And(xs) => xs
-            .iter()
-            .all(|x| row_group_may_match(metadata, rg_idx, schema, x)),
-        FilterExpr::Or(xs) => xs
-            .iter()
-            .any(|x| row_group_may_match(metadata, rg_idx, schema, x)),
+        FilterExpr::And(xs) | FilterExpr::Or(xs) => {
+            for x in xs {
+                validate_filter_types(schema, x)?;
+            }
+            Ok(())
+        }
         FilterExpr::Eq(col, v)
         | FilterExpr::Ne(col, v)
         | FilterExpr::Gt(col, v)
         | FilterExpr::Gte(col, v)
         | FilterExpr::Lt(col, v)
         | FilterExpr::Lte(col, v) => {
-            let Ok(field_idx) = schema.index_of(col) else {
+            let field = schema
+                .field_with_name(col)
+                .map_err(|_| format!("filter column '{col}' not found in schema"))?;
+            let _ = make_scalar(v, field.data_type())?;
+            Ok(())
+        }
+    }
+}
+
+/// Resolve a filter column name to a Parquet physical leaf-column index.
+///
+/// Matches the leaf name or full dotted path (same namespace
+/// `ProjectionMask::columns` uses). Arrow top-level field indices must not be
+/// used here — nested Struct/List columns expand to multiple leaves.
+fn parquet_leaf_index(
+    schema_descr: &parquet::schema::types::SchemaDescriptor,
+    name: &str,
+) -> Option<usize> {
+    schema_descr.columns().iter().position(|c| {
+        c.name() == name || c.path().string() == name
+    })
+}
+
+/// Return true if the row group *might* contain rows matching `expr` based on
+/// column chunk min/max statistics. Unknown / missing stats → keep the group.
+fn row_group_may_match(
+    metadata: &parquet::file::metadata::ParquetMetaData,
+    rg_idx: usize,
+    schema_descr: &parquet::schema::types::SchemaDescriptor,
+    expr: &FilterExpr,
+) -> bool {
+    match expr {
+        FilterExpr::And(xs) => xs
+            .iter()
+            .all(|x| row_group_may_match(metadata, rg_idx, schema_descr, x)),
+        FilterExpr::Or(xs) => xs
+            .iter()
+            .any(|x| row_group_may_match(metadata, rg_idx, schema_descr, x)),
+        FilterExpr::Eq(col, v)
+        | FilterExpr::Ne(col, v)
+        | FilterExpr::Gt(col, v)
+        | FilterExpr::Gte(col, v)
+        | FilterExpr::Lt(col, v)
+        | FilterExpr::Lte(col, v) => {
+            let Some(leaf_idx) = parquet_leaf_index(schema_descr, col) else {
                 return true;
             };
             let rg = metadata.row_group(rg_idx);
-            let Some(chunk) = rg.columns().get(field_idx) else {
+            let Some(chunk) = rg.columns().get(leaf_idx) else {
                 return true;
             };
             let Some(stats) = chunk.statistics() else {
@@ -491,34 +556,66 @@ fn row_group_may_match(
     }
 }
 
+fn int_range_may_match(expr: &FilterExpr, min: i64, max: i64, val: i64) -> bool {
+    match expr {
+        FilterExpr::Eq(_, _) => val >= min && val <= max,
+        FilterExpr::Ne(_, _) => true, // cannot prune safely from a single min/max
+        FilterExpr::Gt(_, _) => max > val,
+        FilterExpr::Gte(_, _) => max >= val,
+        FilterExpr::Lt(_, _) => min < val,
+        FilterExpr::Lte(_, _) => min <= val,
+        _ => true,
+    }
+}
+
+fn float_range_may_match(expr: &FilterExpr, min: f64, max: f64, val: f64) -> bool {
+    match expr {
+        FilterExpr::Eq(_, _) => val >= min && val <= max,
+        FilterExpr::Ne(_, _) => true,
+        FilterExpr::Gt(_, _) => max > val,
+        FilterExpr::Gte(_, _) => max >= val,
+        FilterExpr::Lt(_, _) => min < val,
+        FilterExpr::Lte(_, _) => min <= val,
+        _ => true,
+    }
+}
+
 fn stats_may_match(stats: &Statistics, expr: &FilterExpr, v: &FilterValue) -> bool {
-    // Only prune when we have concrete min/max for int/float/utf8.
+    // Only prune when we have concrete min/max for supported physical types.
+    // `:ne` is intentionally never pruned (see int_range_may_match).
     match (stats, v) {
         (Statistics::Int64(s), FilterValue::Int(val)) => {
             let (Some(min), Some(max)) = (s.min_opt(), s.max_opt()) else {
                 return true;
             };
-            match expr {
-                FilterExpr::Eq(_, _) => *val >= *min && *val <= *max,
-                FilterExpr::Ne(_, _) => true, // cannot prune safely
-                FilterExpr::Gt(_, _) => *max > *val,
-                FilterExpr::Gte(_, _) => *max >= *val,
-                FilterExpr::Lt(_, _) => *min < *val,
-                FilterExpr::Lte(_, _) => *min <= *val,
-                _ => true,
-            }
+            int_range_may_match(expr, *min, *max, *val)
+        }
+        (Statistics::Int32(s), FilterValue::Int(val)) => {
+            let (Some(min), Some(max)) = (s.min_opt(), s.max_opt()) else {
+                return true;
+            };
+            int_range_may_match(expr, i64::from(*min), i64::from(*max), *val)
         }
         (Statistics::Double(s), FilterValue::Float(val)) => {
+            let (Some(min), Some(max)) = (s.min_opt(), s.max_opt()) else {
+                return true;
+            };
+            float_range_may_match(expr, *min, *max, *val)
+        }
+        (Statistics::Float(s), FilterValue::Float(val)) => {
+            let (Some(min), Some(max)) = (s.min_opt(), s.max_opt()) else {
+                return true;
+            };
+            float_range_may_match(expr, f64::from(*min), f64::from(*max), *val)
+        }
+        (Statistics::Boolean(s), FilterValue::Bool(val)) => {
             let (Some(min), Some(max)) = (s.min_opt(), s.max_opt()) else {
                 return true;
             };
             match expr {
                 FilterExpr::Eq(_, _) => *val >= *min && *val <= *max,
                 FilterExpr::Ne(_, _) => true,
-                FilterExpr::Gt(_, _) => *max > *val,
-                FilterExpr::Gte(_, _) => *max >= *val,
-                FilterExpr::Lt(_, _) => *min < *val,
-                FilterExpr::Lte(_, _) => *min <= *val,
+                // Boolean ordering is uncommon; keep groups rather than guess.
                 _ => true,
             }
         }
@@ -529,7 +626,9 @@ fn stats_may_match(stats: &Statistics, expr: &FilterExpr, v: &FilterValue) -> bo
             let min_s = String::from_utf8_lossy(min.data()).into_owned();
             let max_s = String::from_utf8_lossy(max.data()).into_owned();
             match expr {
-                FilterExpr::Eq(_, _) => val.as_str() >= min_s.as_str() && val.as_str() <= max_s.as_str(),
+                FilterExpr::Eq(_, _) => {
+                    val.as_str() >= min_s.as_str() && val.as_str() <= max_s.as_str()
+                }
                 FilterExpr::Ne(_, _) => true,
                 FilterExpr::Gt(_, _) => max_s.as_str() > val.as_str(),
                 FilterExpr::Gte(_, _) => max_s.as_str() >= val.as_str(),
@@ -542,7 +641,7 @@ fn stats_may_match(stats: &Statistics, expr: &FilterExpr, v: &FilterValue) -> bo
     }
 }
 
-fn apply_read_opts<'a, T>(
+fn apply_read_opts<T>(
     builder: ParquetRecordBatchReaderBuilder<T>,
     opts: ReadOpts,
 ) -> Result<(ParquetRecordBatchReaderBuilder<T>, usize, usize, usize), String>
@@ -552,6 +651,10 @@ where
     let metadata = builder.metadata().clone();
     let arrow_schema = builder.schema().clone();
     let total = metadata.num_row_groups();
+
+    if let Some(ref filter) = opts.filter {
+        validate_filter_types(arrow_schema.as_ref(), filter)?;
+    }
 
     // Resolve row groups: explicit list ∩ statistics pruning.
     let mut selected: Vec<usize> = match &opts.row_groups {
@@ -570,7 +673,8 @@ where
     };
 
     if let Some(ref filter) = opts.filter {
-        selected.retain(|&i| row_group_may_match(&metadata, i, arrow_schema.as_ref(), filter));
+        let schema_descr = metadata.file_metadata().schema_descr();
+        selected.retain(|&i| row_group_may_match(&metadata, i, schema_descr, filter));
     }
 
     let selected_count = selected.len();
@@ -695,27 +799,18 @@ pub fn parquet_stream_read_stats<'a>(
     stream: ResourceArc<ExArrowParquetStream>,
 ) -> Term<'a> {
     let map = rustler::types::map::map_new(env)
-        .map_put(
-            rustler::types::atom::Atom::from_str(env, "row_groups_total")
-                .unwrap()
-                .encode(env),
-            (stream.row_groups_total as u64).encode(env),
-        )
+        .map_put(row_groups_total().encode(env), (stream.row_groups_total as u64).encode(env))
         .ok()
         .and_then(|m| {
             m.map_put(
-                rustler::types::atom::Atom::from_str(env, "row_groups_selected")
-                    .unwrap()
-                    .encode(env),
+                row_groups_selected().encode(env),
                 (stream.row_groups_selected as u64).encode(env),
             )
             .ok()
         })
         .and_then(|m| {
             m.map_put(
-                rustler::types::atom::Atom::from_str(env, "row_groups_skipped")
-                    .unwrap()
-                    .encode(env),
+                row_groups_skipped().encode(env),
                 (stream.row_groups_skipped as u64).encode(env),
             )
             .ok()
@@ -736,9 +831,7 @@ pub fn parquet_stream_next<'a>(
         Err(_) => return err_encode(env, "parquet stream lock poisoned"),
     };
     match guard.next() {
-        None => rustler::types::atom::Atom::from_str(env, "done")
-            .unwrap()
-            .encode(env),
+        None => done().encode(env),
         Some(Err(e)) => err_encode(env, &e.to_string()),
         Some(Ok(batch)) => ok_encode(env, ResourceArc::new(ExArrowRecordBatch { batch })),
     }
@@ -773,9 +866,7 @@ pub fn parquet_writer_to_file<'a>(
         }
     }
     match writer.close() {
-        Ok(_) => rustler::types::atom::Atom::from_str(env, "ok")
-            .unwrap()
-            .encode(env),
+        Ok(_) => ok().encode(env),
         Err(e) => err_encode(env, &e.to_string()),
     }
 }
@@ -820,16 +911,16 @@ pub fn parquet_writer_to_binary<'a>(
 
 fn encode_metadata<'a>(env: Env<'a>, metadata: &parquet::file::metadata::ParquetMetaData) -> Term<'a> {
     let file_meta = metadata.file_metadata();
-    let num_rows = file_meta.num_rows();
-    let num_row_groups = metadata.num_row_groups() as i64;
+    let file_num_rows = file_meta.num_rows();
+    let file_num_row_groups = metadata.num_row_groups() as i64;
 
-    let mut row_groups: Vec<Term<'a>> = Vec::with_capacity(metadata.num_row_groups());
+    let mut rg_terms: Vec<Term<'a>> = Vec::with_capacity(metadata.num_row_groups());
     for i in 0..metadata.num_row_groups() {
         let rg = metadata.row_group(i);
-        let mut columns: Vec<Term<'a>> = Vec::new();
+        let mut col_terms: Vec<Term<'a>> = Vec::new();
         for col in rg.columns() {
-            let path = col.column_path().string();
-            let compression = format!("{}", col.compression());
+            let col_path = col.column_path().string();
+            let col_compression = format!("{}", col.compression());
             let (min_s, max_s) = match col.statistics() {
                 Some(Statistics::Int64(s)) => (
                     s.min_opt().map(|v| v.to_string()),
@@ -860,49 +951,25 @@ fn encode_metadata<'a>(env: Env<'a>, metadata: &parquet::file::metadata::Parquet
                 _ => (None, None),
             };
             let col_map = rustler::types::map::map_new(env);
-            let col_map = put_atom_key(env, col_map, "path", path.encode(env));
-            let col_map = put_atom_key(env, col_map, "compression", compression.encode(env));
-            let col_map = put_atom_key(
-                env,
-                col_map,
-                "num_values",
-                (col.num_values() as i64).encode(env),
-            );
+            let col_map = put_atom_key(env, col_map, path(), col_path.encode(env));
+            let col_map = put_atom_key(env, col_map, compression(), col_compression.encode(env));
+            let col_map = put_atom_key(env, col_map, num_values(), col.num_values().encode(env));
             let col_map = match min_s {
-                Some(s) => put_atom_key(env, col_map, "min", s.encode(env)),
-                None => put_atom_key(
-                    env,
-                    col_map,
-                    "min",
-                    rustler::types::atom::Atom::from_str(env, "nil")
-                        .unwrap()
-                        .encode(env),
-                ),
+                Some(s) => put_atom_key(env, col_map, min(), s.encode(env)),
+                None => put_atom_key(env, col_map, min(), nil().encode(env)),
             };
             let col_map = match max_s {
-                Some(s) => put_atom_key(env, col_map, "max", s.encode(env)),
-                None => put_atom_key(
-                    env,
-                    col_map,
-                    "max",
-                    rustler::types::atom::Atom::from_str(env, "nil")
-                        .unwrap()
-                        .encode(env),
-                ),
+                Some(s) => put_atom_key(env, col_map, max(), s.encode(env)),
+                None => put_atom_key(env, col_map, max(), nil().encode(env)),
             };
-            columns.push(col_map);
+            col_terms.push(col_map);
         }
         let rg_map = rustler::types::map::map_new(env);
-        let rg_map = put_atom_key(env, rg_map, "index", (i as i64).encode(env));
-        let rg_map = put_atom_key(env, rg_map, "num_rows", rg.num_rows().encode(env));
-        let rg_map = put_atom_key(
-            env,
-            rg_map,
-            "total_byte_size",
-            (rg.total_byte_size() as i64).encode(env),
-        );
-        let rg_map = put_atom_key(env, rg_map, "columns", columns.encode(env));
-        row_groups.push(rg_map);
+        let rg_map = put_atom_key(env, rg_map, index(), (i as i64).encode(env));
+        let rg_map = put_atom_key(env, rg_map, num_rows(), rg.num_rows().encode(env));
+        let rg_map = put_atom_key(env, rg_map, total_byte_size(), rg.total_byte_size().encode(env));
+        let rg_map = put_atom_key(env, rg_map, columns(), col_terms.encode(env));
+        rg_terms.push(rg_map);
     }
 
     let mut kv: Vec<Term<'a>> = Vec::new();
@@ -915,28 +982,30 @@ fn encode_metadata<'a>(env: Env<'a>, metadata: &parquet::file::metadata::Parquet
     }
 
     let mut out = rustler::types::map::map_new(env);
-    out = put_atom_key(env, out, "num_rows", num_rows.encode(env));
-    out = put_atom_key(env, out, "num_row_groups", num_row_groups.encode(env));
+    out = put_atom_key(env, out, num_rows(), file_num_rows.encode(env));
+    out = put_atom_key(env, out, num_row_groups(), file_num_row_groups.encode(env));
     out = put_atom_key(
         env,
         out,
-        "created_by",
+        created_by(),
         file_meta
             .created_by()
             .unwrap_or("")
             .to_string()
             .encode(env),
     );
-    out = put_atom_key(env, out, "row_groups", row_groups.encode(env));
-    out = put_atom_key(env, out, "key_value_metadata", kv.encode(env));
+    out = put_atom_key(env, out, row_groups(), rg_terms.encode(env));
+    out = put_atom_key(env, out, key_value_metadata(), kv.encode(env));
     ok_encode(env, out)
 }
 
-fn put_atom_key<'a>(env: Env<'a>, map: Term<'a>, key: &str, value: Term<'a>) -> Term<'a> {
-    let k = rustler::types::atom::Atom::from_str(env, key)
-        .unwrap()
-        .encode(env);
-    map.map_put(k, value).unwrap_or(map)
+fn put_atom_key<'a>(
+    env: Env<'a>,
+    map: Term<'a>,
+    key: rustler::Atom,
+    value: Term<'a>,
+) -> Term<'a> {
+    map.map_put(key.encode(env), value).unwrap_or(map)
 }
 
 #[rustler::nif]

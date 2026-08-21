@@ -56,12 +56,8 @@ jobs:
         env:
           MIX_ENV: dev
 
-      - name: Check Livebooks parse
-        run: |
-          for f in livebook/*.livemd; do
-            echo "Checking $f"
-            grep -q '```elixir' "$f" || true
-          done
+      - name: Check Livebook Hex pins and fences
+        run: bash script/check_livebooks.sh
 
   # ── Dialyzer ─────────────────────────────────────────────────────────────────
   dialyzer:
@@ -176,6 +172,10 @@ jobs:
       - name: Run tests
         if: ${{ !matrix.coverage }}
         run: mix test
+
+      - name: Smoke livebook/00_quickstart.exs
+        if: ${{ !matrix.coverage }}
+        run: elixir livebook/00_quickstart.exs
 
       - name: Run coverage
         if: ${{ matrix.coverage }}

@@ -24,13 +24,12 @@ measure.("pushdown filter", fn ->
   Enum.sum(Enum.map(Stream.to_list(s), &RecordBatch.num_rows/1))
 end)
 
-measure.("full read + post filter", fn ->
+measure.("full read + project (no filter — no public scalar-predicate kernel yet)", fn ->
   {:ok, s} = Stream.from_parquet(path)
   s
   |> Stream.to_list()
   |> Enum.map(fn b ->
     {:ok, projected} = ExArrow.Compute.project(b, ["score"])
-    # approximate: count rows after a full decode
     RecordBatch.num_rows(projected)
   end)
   |> Enum.sum()

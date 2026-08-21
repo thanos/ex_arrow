@@ -40,7 +40,9 @@ ExArrow.Schema.field_names(schema)
 | `{:or, [filter, ...]}` | Any may match |
 
 Values may be integers, floats, UTF-8 strings, or booleans. Row-group
-min/max statistics prune whole groups when possible; remaining rows are
+min/max statistics prune whole groups when possible for Int32/Int64,
+Float32/Float64, Utf8, and Boolean equality; `:ne` is never pruned from
+min/max alone (keeping the group is always safe). Remaining rows are
 filtered during decode via parquet-rs `RowFilter`.
 
 ### Multi-file / directory
@@ -94,8 +96,8 @@ No row data is decoded — useful for interop debugging and planning scans.
   ExArrow.Parquet.Writer.to_binary(schema, batches, compression: {:zstd, 3})
 ```
 
-Supported `:compression` values: `:none`, `:snappy`, `:zstd`, `{:zstd, level}`,
-`:lz4`, `:gzip`.
+Supported `:compression` values: `:none` (alias `:uncompressed`), `:snappy`,
+`:zstd`, `{:zstd, level}` with `level` in `1..22`, `:lz4`, `:gzip`.
 
 ---
 

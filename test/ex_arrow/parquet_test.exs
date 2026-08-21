@@ -152,11 +152,16 @@ defmodule ExArrow.ParquetTest do
   end
 
   describe "write options" do
-    test "zstd compression round-trips" do
+    test "zstd compression round-trips and records ZSTD codec in metadata" do
       {schema, batch} = source_batch()
 
       assert {:ok, bin} =
                Parquet.Writer.to_binary(schema, [batch], compression: :zstd)
+
+      assert {:ok, meta} = Parquet.Metadata.from_binary(bin)
+      cols = hd(meta.row_groups).columns
+      assert cols != []
+      assert Enum.all?(cols, &(&1.compression =~ ~r/ZSTD/i))
 
       assert {:ok, stream} = Parquet.Reader.from_binary(bin)
 
@@ -174,8 +179,10 @@ defmodule ExArrow.ParquetTest do
                  row_group_size: 1
                )
 
-      assert byte_size(bin) > 0
-      assert {:ok, _meta} = Parquet.Metadata.from_binary(bin)
+      assert {:ok, meta} = Parquet.Metadata.from_binary(bin)
+      assert meta.num_row_groups == ExArrow.RecordBatch.num_rows(batch)
+      cols = hd(meta.row_groups).columns
+      assert Enum.all?(cols, &(&1.compression =~ ~r/SNAPPY/i))
     end
 
     test "rejects invalid compression" do
@@ -185,6 +192,20 @@ defmodule ExArrow.ParquetTest do
                Parquet.Writer.to_binary(schema, [batch], compression: :brotli)
 
       assert msg =~ "compression"
+    end
+
+    test "empty batch list write path is defined" do
+      {schema, _batch} = source_batch()
+
+      case Parquet.Writer.to_binary(schema, []) do
+        {:ok, bin} ->
+          assert is_binary(bin)
+          assert {:ok, meta} = Parquet.Metadata.from_binary(bin)
+          assert meta.num_rows == 0
+
+        {:error, msg} ->
+          assert is_binary(msg)
+      end
     end
   end
 
@@ -201,27 +222,96 @@ defmodule ExArrow.ParquetTest do
       assert Schema.field_names(projected) == [col]
     end
 
-    test "filters predicate reduces rows" do
-      # Fixture has id column as int64 with values 1 and 2 typically.
-      {schema, batch} = source_batch()
+    test "filters predicate reduces rows to exact expected count" do
+      n = 4
+      ids = for i <- 1..n, into: <<>>, do: <<i::little-signed-64>>
+      assert {:ok, batch} = ExArrow.RecordBatch.from_columns(["id"], [ids], ["s64"], n)
+      schema = ExArrow.RecordBatch.schema(batch)
+
       assert {:ok, bin} = Parquet.Writer.to_binary(schema, [batch])
 
       assert {:ok, stream} =
-               Parquet.Reader.from_binary(bin, filters: {:gt, "id", 1})
+               Parquet.Reader.from_binary(bin, filters: {:gt, "id", 2})
 
       filtered = Stream.to_list(stream)
       total = Enum.sum(Enum.map(filtered, &ExArrow.RecordBatch.num_rows/1))
-      assert total < ExArrow.RecordBatch.num_rows(batch) or total == 1
+      assert total == 2
+    end
+
+    test "filters prune row groups via statistics when ranges are disjoint" do
+      n = 4
+      ids = for i <- [1, 2, 100, 101], into: <<>>, do: <<i::little-signed-64>>
+      assert {:ok, batch} = ExArrow.RecordBatch.from_columns(["id"], [ids], ["s64"], n)
+      schema = ExArrow.RecordBatch.schema(batch)
+
+      assert {:ok, bin} =
+               Parquet.Writer.to_binary(schema, [batch], row_group_size: 2)
+
+      assert {:ok, meta} = Parquet.Metadata.from_binary(bin)
+      assert meta.num_row_groups == 2
+
+      assert {:ok, stream} =
+               Parquet.Reader.from_binary(bin, filters: {:gt, "id", 50})
+
+      stats = Parquet.Reader.read_stats(stream)
+      assert stats.row_groups_total == 2
+      assert stats.row_groups_skipped >= 1
+      assert stats.row_groups_selected == 2 - stats.row_groups_skipped
+
+      total =
+        stream
+        |> Stream.to_list()
+        |> Enum.map(&ExArrow.RecordBatch.num_rows/1)
+        |> Enum.sum()
+
+      assert total == 2
+    end
+
+    test "filters prune correctly when a struct column precedes the filtered column" do
+      # PyArrow fixture: Arrow fields [meta(struct{a,b}), score]; Parquet leaves
+      # [meta.a, meta.b, score]. Using Arrow field index for score would read
+      # meta.b stats and wrongly skip the high-score row group.
+      path = Path.expand("../fixtures/parquet_nested_struct_score.parquet", __DIR__)
+
+      assert {:ok, stream} =
+               Parquet.Reader.from_file(path, filters: {:gt, "score", 50})
+
+      stats = Parquet.Reader.read_stats(stream)
+      assert stats.row_groups_total == 2
+      assert stats.row_groups_skipped == 1
+      assert stats.row_groups_selected == 1
+
+      total =
+        stream
+        |> Stream.to_list()
+        |> Enum.map(&ExArrow.RecordBatch.num_rows/1)
+        |> Enum.sum()
+
+      assert total == 2
+    end
+
+    test "filter with out-of-range int value against Int32 column errors" do
+      n = 2
+      ids = for i <- 1..n, into: <<>>, do: <<i::little-signed-32>>
+      assert {:ok, batch} = ExArrow.RecordBatch.from_columns(["id"], [ids], ["s32"], n)
+      schema = ExArrow.RecordBatch.schema(batch)
+      assert {:ok, bin} = Parquet.Writer.to_binary(schema, [batch])
+
+      assert {:error, msg} =
+               Parquet.Reader.from_binary(bin, filters: {:eq, "id", 5_000_000_000})
+
+      assert msg =~ ~r/out of range|Int32/i
     end
 
     test "row_groups selects subset" do
       {schema, batch} = source_batch()
+      rows = ExArrow.RecordBatch.num_rows(batch)
 
       assert {:ok, bin} =
                Parquet.Writer.to_binary(schema, [batch], row_group_size: 1)
 
       assert {:ok, meta} = Parquet.Metadata.from_binary(bin)
-      assert meta.num_row_groups >= 1
+      assert meta.num_row_groups == rows
 
       assert {:ok, stream} = Parquet.Reader.from_binary(bin, row_groups: [0])
       stats = Parquet.Reader.read_stats(stream)
@@ -236,13 +326,23 @@ defmodule ExArrow.ParquetTest do
   end
 
   describe "Metadata" do
-    test "from_binary returns row group info" do
-      {schema, batch} = source_batch()
-      assert {:ok, bin} = Parquet.Writer.to_binary(schema, [batch])
+    test "from_binary returns row group info and column stats" do
+      n = 3
+      ids = for i <- [10, 20, 30], into: <<>>, do: <<i::little-signed-64>>
+      assert {:ok, batch} = ExArrow.RecordBatch.from_columns(["id"], [ids], ["s64"], n)
+      schema = ExArrow.RecordBatch.schema(batch)
+
+      assert {:ok, bin} = Parquet.Writer.to_binary(schema, [batch], compression: :snappy)
       assert {:ok, meta} = Parquet.Metadata.from_binary(bin)
-      assert meta.num_rows == ExArrow.RecordBatch.num_rows(batch)
+      assert meta.num_rows == n
       assert meta.num_row_groups >= 1
       assert is_list(meta.row_groups)
+
+      col = hd(hd(meta.row_groups).columns)
+      assert col.path == "id"
+      assert col.compression =~ ~r/SNAPPY/i
+      assert col.min == "10"
+      assert col.max == "30"
     end
 
     @tag :tmp_dir
@@ -252,6 +352,14 @@ defmodule ExArrow.ParquetTest do
       assert :ok = Parquet.Writer.to_file(path, schema, [batch])
       assert {:ok, meta} = Parquet.Metadata.from_file(path)
       assert meta.num_row_groups >= 1
+    end
+
+    test "from_file returns an error for a missing path" do
+      assert {:error, _} = Parquet.Metadata.from_file("/tmp/does_not_exist_xyz.parquet")
+    end
+
+    test "from_binary returns an error for a non-Parquet binary" do
+      assert {:error, _} = Parquet.Metadata.from_binary("not parquet")
     end
   end
 
@@ -267,6 +375,8 @@ defmodule ExArrow.ParquetTest do
       assert {:ok, stream} = Stream.from_parquet_files([p1, p2])
       batches = Stream.to_list(stream)
       assert length(batches) == 2
+      assert Stream.next(stream) == nil
+      assert Stream.next(stream) == nil
     end
 
     @tag :tmp_dir
@@ -280,6 +390,35 @@ defmodule ExArrow.ParquetTest do
       assert {:ok, stream} = Stream.from_parquet_files([p1, p2])
       _ = Enum.take(stream, 1)
       assert Stream.multi_opened_paths(stream) == [p1]
+      assert :ok = Stream.close(stream)
+      refute Process.alive?(stream.resource)
+    end
+
+    @tag :tmp_dir
+    test "schema mismatch across files surfaces from next/1", %{tmp_dir: dir} do
+      {schema_a, batch_a} = source_batch()
+      p1 = Path.join(dir, "a.parquet")
+      assert :ok = Parquet.Writer.to_file(p1, schema_a, [batch_a])
+
+      n = 1
+      ids = <<1::little-signed-64>>
+      assert {:ok, batch_b} = ExArrow.RecordBatch.from_columns(["other"], [ids], ["s64"], n)
+      schema_b = ExArrow.RecordBatch.schema(batch_b)
+      p2 = Path.join(dir, "b.parquet")
+      assert :ok = Parquet.Writer.to_file(p2, schema_b, [batch_b])
+
+      assert {:ok, stream} = Stream.from_parquet_files([p1, p2])
+      assert %ExArrow.RecordBatch{} = Stream.next(stream)
+      assert {:error, msg} = Stream.next(stream)
+      assert msg =~ "schema mismatch"
+    end
+
+    test "from_parquet_files/2 rejects non-string paths without raising" do
+      assert {:error, msg} = Stream.from_parquet_files([:not_a_path])
+      assert msg =~ "must be strings"
+
+      assert {:error, msg} = Stream.from_parquet_files([%{}])
+      assert msg =~ "must be strings"
     end
 
     @tag :tmp_dir

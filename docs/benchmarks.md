@@ -121,7 +121,8 @@ the cost of going through row maps versus staying in native Arrow memory.
 
 A standalone rough-timing helper (uses `:timer.tc/1`, not Benchee) that
 compares reading a 100K-row Parquet file with a pushdown filter against a
-full read plus post-read projection.  Run it directly:
+full read plus post-read projection (no scalar-predicate kernel exists yet
+for an equivalent post-filter).  Run it directly:
 
 ```bash
 MIX_ENV=dev mix run bench/parquet_pushdown_bench.exs
