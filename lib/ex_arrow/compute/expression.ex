@@ -184,6 +184,10 @@ defmodule ExArrow.Compute.Expression do
     {pushed, residual}
   end
 
+  @doc false
+  @spec encode_for_nif(t()) :: term()
+  def encode_for_nif(%__MODULE__{node: node}), do: encode_node(node)
+
   @doc """
   Render `expr` as a diagnostic string.
   """
@@ -470,4 +474,34 @@ defmodule ExArrow.Compute.Expression do
   end
 
   defp render(other), do: inspect(other)
+
+  # --- NIF encoding ---------------------------------------------------------
+
+  defp encode_node({:field, name}), do: {:field, name}
+  defp encode_node({:scalar, v}), do: {:scalar, encode_scalar(v)}
+  defp encode_node({:call, op, args}), do: {:call, op, Enum.map(args, &encode_node/1)}
+
+  defp encode_scalar(v) when is_integer(v) or is_float(v) or is_boolean(v), do: v
+
+  defp encode_scalar(v) when is_binary(v) do
+    if String.valid?(v) do
+      v
+    else
+      raise ArgumentError, "invalid UTF-8 scalar"
+    end
+  end
+
+  defp encode_scalar(%Date{} = d), do: {:date32, Date.diff(d, ~D[1970-01-01])}
+
+  defp encode_scalar(%NaiveDateTime{} = ndt) do
+    {:timestamp_micros, NaiveDateTime.diff(ndt, ~N[1970-01-01 00:00:00], :microsecond)}
+  end
+
+  defp encode_scalar(%DateTime{} = dt) do
+    {:timestamp_micros, DateTime.to_unix(dt, :microsecond)}
+  end
+
+  defp encode_scalar(other) do
+    raise ArgumentError, "unsupported scalar for NIF encode: #{inspect(other)}"
+  end
 end
