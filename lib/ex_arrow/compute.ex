@@ -34,6 +34,10 @@ defmodule ExArrow.Compute do
 
   You can also write a Parquet/IPC file that contains a pre-computed boolean
   column and read it back as the predicate.
+
+  For analyzable predicates (Dataset / Parquet pushdown), see
+  `ExArrow.Compute.Expression`. Residual expression evaluation on batches
+  lands in a later milestone.
   """
 
   alias ExArrow.Native

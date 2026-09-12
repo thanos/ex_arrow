@@ -135,7 +135,7 @@ defmodule ExArrow.MixProject do
         "Data interchange": [ExArrow.DataFrame, ExArrow.Schema.Mapper],
         IPC: [ExArrow.IPC.Reader, ExArrow.IPC.Writer, ExArrow.IPC.File],
         Parquet: [ExArrow.Parquet.Reader, ExArrow.Parquet.Writer, ExArrow.Parquet.Metadata],
-        "Compute kernels": [ExArrow.Compute],
+        "Compute kernels": [ExArrow.Compute, ExArrow.Compute.Expression],
         "Batch operations": [ExArrow.Batch],
         Pipeline: [
           ExArrow.Pipeline,
